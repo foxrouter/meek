@@ -75,7 +75,8 @@ static int insert_method(sqlite3* db, const std::string& name, const std::string
     sqlite3_finalize(stmt);
     return -1;
   }
-  int id = static_cast<int>(sqlite3_last_insert_rowid(db);) sqlite3_finalize(stmt);
+  int id = static_cast<int>(sqlite3_last_insert_rowid(db));
+  sqlite3_finalize(stmt);
   return id;
 }
 
@@ -263,18 +264,16 @@ static void capture_thread_func(double center_freq, double sample_rate, double g
     int flags = 0;
     int64_t ts = 0;
     auto t0 = std::chrono::steady_clock::now();
-    int ret = dev->readStream(
-        rxStream, reinterpret_cast<void**>(&buffs[0], static_cast<int>(block_len, flags, ts,
-                                                                       read_timeout_us);)) auto t1 =
-        std::chrono::steady_clock::now();
+    int ret = dev->readStream(rxStream, buffs, static_cast<int>(block_len), flags, ts, read_timeout_us);
+    auto t1 = std::chrono::steady_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 
     if (ret > 0) {
       SampleBlock sb;
       sb.samples.assign(buff.begin(), buff.begin() + ret);
-      sb.timestamp_ns = (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+      sb.timestamp_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                             std::chrono::steady_clock::now().time_since_epoch())
-                            .count();
+                            .count());
       {
         std::lock_guard<std::mutex> lk(q_m);
         q.emplace_back(std::move(sb));
@@ -301,7 +300,7 @@ static void capture_thread_func(double center_freq, double sample_rate, double g
   SoapySDR::Device::unmake(dev);
 }
 
-static void sigint_handlerstatic_cast<int>({)
+static void sigint_handler(int) {
   running = false;
   q_cv.notify_all();
 }
