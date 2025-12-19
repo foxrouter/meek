@@ -1,0 +1,34 @@
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+*.swo
+*.tmp
+
+# Build/CMake
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.o
+*.d
+*.a
+*.so
+*.out
+*.bin
+*.log
+
+# RF/IQ artifacts
+*.raw
+*.iq
+*.iq16
+*.wav
+
+# Local env/secrets
+.env
+config/thresholds.env
+
+# Binaries
+tools/soapy_read_test
