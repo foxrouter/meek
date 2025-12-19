@@ -1,0 +1,17 @@
+# rf-adapt-intel (minimal)
+
+Quick build steps (run from your user shell):
+
+1) Ensure you are in the project directory:
+   cd ~/rf-adapt-intel
+
+2) Create the build directory and run CMake:
+   mkdir -p build
+   cd build
+   cmake ..
+   make -j$(nproc)
+
+3) Run the program:
+   ./rf_adapt_intel
+
+This minimal version depends only on sqlite3 dev files. Once this builds, you can replace src/main.cpp with the full SoapySDR + liquid-dsp implementation and update CMakeLists.txt to link Soapy/liquid (the TODOs are included in CMakeLists.txt).

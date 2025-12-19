@@ -1,0 +1,8 @@
+{
+    "editor.foldingStrategy": "auto",
+    "github.copilot.chat.newWorkspace.useContext7": true,
+    "github.copilot.chat.languageContext.typescript.enabled": true,
+    "github.copilot.chat.notebook.followCellExecution.enabled": false,
+    "github.copilot.nextEditSuggestions.enabled": true,
+    "chatgpt.gpt3.provider": "GitHubCopilot"
+}
