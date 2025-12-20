@@ -1,141 +1,117 @@
-Process-Worker Hardening & Modulation-Detection Plan (Aligned/Upgraded)
-=======================================================================
-Generated: 2025-12-17 (updated)
-Author: foxrouter (via assistant)
-Status: Active — classification prototype working; ops/deploy and demod pending
+# RF Adaptation & Intelligence Plan (Aligned/Upgraded, AI-Readable)
 
-Purpose
--------
-Replace naive amplitude thresholding with robust modulation detection/demodulation using liquid-dsp. Deploy hardened systemd drop-ins for process-worker.service and run a two-stage pipeline (presence → classification → modulation-specific demodulation). Use Ray (edge/RPi) for SDR/build/test; Brian (Ubuntu server) as central processing/canary host.
+**Generated:** 2025-12-19 (updated)  
+**Author:** foxrouter (via assistant)  
+**Status:** Active — classifier prototype working; ops/deploy and demod pending; cpplint re-enabled with fixes committed
 
-High-level sequence
--------------------
-1. Prepare Ray (build liquid-dsp, create/generate IQ test vectors).
-2. Prepare Brian (deploy hardened drop-ins, run process-worker.service in passive/canary mode).
-3. Functional tests: send IQ vectors from Ray → Brian, collect telemetry.
-4. Iterate and tune classifier/demod pipelines.
-5. Canary active decoding, then full rollout when metrics meet acceptance criteria.
-6. Keep rollback paths and backups.
+---
 
-Current status (delta)
-----------------------
-- Presence/classifier: ✅ heuristic prototype (peak/median presence, spectral entropy + peak_frac + PAPR heuristics). Synthetic fixtures classify tone→cw_like; OOK→am/ook_like; FSK2→fsk_like; BPSK/QPSK→psk/qam_like.
-- Test fixtures: ✅ RRC-shaped generator in `gen_test_signals.py`.
-- Service hardening/deploy: ⏳ pending in this session.
+## Purpose
+- Replace naive amplitude thresholding with robust modulation detection/demodulation using **liquid-dsp**.
+- Harden `process-worker.service` with systemd drop-ins.
+- Run a two-stage pipeline: presence → classification → modulation-specific demodulation.
+
+## Systems
+- **Ray (Raspberry Pi)**: Edge/SDR build + test, generate RRC-shaped IQ vectors, liquid-dsp build with NEON if supported.
+- **Brian (Ubuntu server)**: Central processing/canary, systemd deployment, telemetry, metrics.
+
+## Current status (delta)
+- Classifier: ✅ heuristic prototype (spectral entropy/flatness, peak_frac, PAPR, presence). Fixtures: tone→cw_like; OOK→am/ook_like; FSK2→fsk_like; BPSK/QPSK→psk/qam_like.
+- Test fixtures: ✅ `gen_test_signals.py` with RRC-shaped generators.
+- Code hygiene: ✅ cpplint re-enabled; latest lint fixes committed.
+- Service hardening/deploy: ⏳ pending this session on Brian.
 - liquid-dsp build (Ray): ⏳ pending.
 - Demod pipelines (FSK/PSK/QAM): ⏳ not started.
 - Telemetry/verify.sh/systemd drop-ins: ⏳ pending deployment.
 
-Classifier / feature pipeline (upgraded)
-----------------------------------------
-- AGC sanity with watchdog; reject failed convergence.
-- SNR gate >0 dB unless canary/benchmark.
-- PAPR + spectral flatness sliding windows with p50/p90; burst-length hysteresis; time-occupancy for CW vs OOK.
-- RRC consistency check; resample via `msresamp`.
-- Confidence scoring/logistic per class; emit `confidence` + `decision_trace`.
-- Band guardrails: reject demod if BW deviates >25% from expected per band.
+## High-level sequence
+1) Prepare Ray (build liquid-dsp, generate IQ test vectors).  
+2) Prepare Brian (deploy hardened drop-ins, run process-worker in passive/canary mode).  
+3) Functional tests: send IQ vectors Ray → Brian; capture telemetry.  
+4) Iterate classifier/demod pipelines.  
+5) Canary active decoding; promote when metrics hit acceptance.  
+6) Keep rollback paths and backups.
 
-Demod paths (liquid-dsp)
-------------------------
-- FSK: `fskdem` with explicit `k`/`sps`/`BT`; DC offset removal; coarse FFT peak + fine PLL for CFO.
-- PSK/QAM: default `qpsk`, fallback `bpsk/8psk` on phase error; symsync timing; Costas loop; carrier recovery watchdog with re-init.
-- OOK/AM: envelope detect with MAD-based adaptive threshold; duty-cycle consistency to avoid CW confusion.
+## Classifier / feature pipeline
+- AGC sanity + watchdog; SNR gate >0 dB (unless canary).  
+- PAPR + spectral flatness (p50/p90), burst-length hysteresis, time-occupancy for CW vs OOK.  
+- RRC consistency check; resample via `msresamp`.  
+- Confidence/logit per class; emit `confidence` + `decision_trace`.  
+- Band guardrails: reject demod if BW deviates >25% from expected.
 
-Bands and defaults
-------------------
-Core narrowband ISM targets:
-- 433 MHz ISM: RSYM=128k, FDEV=50 kHz
-- 868/915 MHz ISM: RSYM=250k, FDEV=62.5 kHz
-- Guardrails (all bands): reject demod if observed BW deviates >25% from expected; require SNR >0 dB unless canary mode.
+## Demod paths (liquid-dsp)
+- FSK: `fskdem` with explicit `k/sps/BT`; DC removal; coarse FFT peak + fine PLL for CFO.  
+- PSK/QAM: default `qpsk`, fallback `bpsk/8psk` on phase error; symsync timing; Costas; carrier recovery watchdog + re-init.  
+- OOK/AM: envelope detect + MAD threshold; duty-cycle consistency to avoid CW confusion.
 
-Additional RTL-SDR v3 coverage profiles (for Skyscan 25–2000 MHz):
-- 315 MHz ISM/TPMS/keyfobs (OOK/FSK): RSYM=20–50 ksym/s (start 32k); FDEV=12.5–25 kHz (start 16 kHz); OOK 2–8 ksym/s with envelope+MAD
-- 137 MHz WX (NOAA/Meteor): FM wide; RSYM ~30–40 ksym/s; guardrail ~34–36 kHz BW
-- 118–137 MHz Airband (AM): AM; classifier bypass; guardrail ~6–12 kHz BW
-- 131.55 MHz ACARS: RSYM=2.4 ksym/s; FDEV≈1.2 kHz; BW ~5–8 kHz
-- 150–174 MHz VHF (LMR/pager): RSYM=4.8–6.4 ksym/s; FDEV=2.4–3.2 kHz; BW ~8–16 kHz
-- 162 MHz NOAA WX voice: NFM; classifier bypass
-- 240–400 MHz UHF mil/air: AM/NFM; classifier bypass except presence
-- 300–512 MHz UHF LMR/telemetry: RSYM=12.5–25 ksym/s; FDEV=6.25–12.5 kHz; BW 20–50 kHz
-- 868 MHz EU ISM alt: RSYM=150k start; FDEV=37.5 kHz; BW 150–250 kHz
-- 902–928 MHz ISM: RSYM=250k; FDEV=62.5 kHz; allow ±20%
-- 960–1215 MHz (ADS-B 1090): PPM (special-case decoder)
-- 1.2–1.3 GHz ham/telemetry: RSYM=200–400 ksym/s FSK; FDEV=50–100 kHz; BW 200–500 kHz
+## Bands and defaults
+- Core ISM: 433 MHz (RSYM=128k, FDEV=50 kHz); 868/915 MHz (RSYM=250k, FDEV=62.5 kHz); guardrails BW ±25%, SNR >0 dB (unless canary).  
+- Additional RTL-SDR v3 profiles (Skyscan 25–2000 MHz): 315 ISM/TPMS; 137 WX (APT/Meteor); Airband AM; ACARS 131.55; VHF LMR/pagers; NOAA WX voice; UHF AM/NFM; UHF LMR/telemetry; 868 EU alt; 902–928 ISM (±20% RSYM sweep); 1090 ADS-B (PPM, ext decoder best); 1.2–1.3 GHz telemetry.  
+- Receiver: 2.048–2.4 MSPS (narrow sweeps); 3.2–3.84 if CPU allows; DC offset removal; bias-T off by default; overlap for wide scans.
 
-Receiver/front-end (RTL-SDR v3)
-- Use 2.048–2.4 MSPS for narrow sweeps; 3.2–3.84 MSPS only if CPU allows.
-- DC removal on; bias-T off unless LNA needed.
-- For wide scans, step center freqs with overlap.
+## Operational guardrails
+- SNR gate >0 dB (unless canary).  
+- BW gate ±25% expected.  
+- Lock watchdog: re-init with coarse CFO on failure.  
+- Downshift PSK/QAM: QPSK→BPSK on high phase error.
 
-Operational guardrails
-- SNR gate >0 dB unless canary.
-- BW gate ±25%.
-- Lock watchdog + CFO re-init; PSK/QAM downshift (QPSK→BPSK) on phase error.
+## Automation / scripts
+- `process_incoming.sh`: filename → band map; set env (`BAND`, `RSYM`, `FDEV`, `MOD_HINT`, `SNR_MIN`, `PAPR_MAX`); JSON logs with `decision_trace`/`confidence`/features to `/var/lib/rf_worker/worker.log`; outputs to `/var/lib/rf_worker/processed/<basename>.raw`.
 
-Automation / scripts
---------------------
-- `process_incoming.sh`: filename→band map; set env (BAND/RSYM/FDEV/MOD_HINT/SNR_MIN/PAPR_MAX/BW_TOL_PCT); log JSON with decision_trace/confidence/features to `/var/lib/rf_worker/worker.log`; outputs to `/var/lib/rf_worker/processed/<basename>.raw`.
+## Hardening (process-worker.service)
+- `ProtectSystem=full`, `ProtectHome=yes`, `NoNewPrivileges=yes`, `PrivateTmp=yes`, `ProtectClock=yes`, `ProtectKernelLogs=yes`
+- `SystemCallFilter=@system-service @chown @file-system`
+- `MemoryDenyWriteExecute=yes`
+- `CapabilityBoundingSet=~CAP_SYS_ADMIN CAP_SYS_MODULE`
+- `RestrictSUIDSGID=yes`, `RestrictNamespaces=yes`
+- `LimitNOFILE=4096`, `TasksMax=2048`
+- Read-only binds except `/var/lib/rf_worker` and private `/tmp`
+- Drop-ins: `hardening.conf` (syscall/caps), `override.conf` (env/thresholds), `processor.conf` (threads/queues)
+- Backups in `/root` with timestamps; hash-check on deploy.
 
-Hardening (process-worker.service)
-----------------------------------
-- ProtectSystem=full, ProtectHome=yes, NoNewPrivileges=yes, PrivateTmp=yes, ProtectClock=yes, ProtectKernelLogs=yes
-- SystemCallFilter=@system-service @chown @file-system
-- MemoryDenyWriteExecute=yes
-- CapabilityBoundingSet=~CAP_SYS_ADMIN CAP_SYS_MODULE
-- RestrictSUIDSGID=yes, RestrictNamespaces=yes
-- LimitNOFILE=4096, TasksMax=2048
-- ReadWritePaths=/var/lib/rf_worker
-- Drop-ins: hardening.conf (syscall/caps), override.conf (env/thresholds), processor.conf (threads/queues)
-- Backups in /root with timestamps; hash-check on deploy.
+## Observability
+- Heartbeat FIFO/file: `ok <timestamp>`.
+- Prometheus textfile: `/var/lib/rf_worker/metrics.prom` (frames, rejects, confidence averages).
+- Logs: include `decision_trace`, `confidence`, feature stats, rejection reasons.
 
-Observability
--------------
-- Heartbeat FIFO/file writing `ok <timestamp>`.
-- Prometheus textfile `/var/lib/rf_worker/metrics.prom` with counters (frames, rejects, confidence averages).
-- Logs: decision_trace, confidence, feature stats, rejection reasons.
+## Validation & benchmarks
+- Matrix: bands 433/915 + added profiles; mods BPSK/QPSK/8PSK, 2/4-FSK, OOK/ASK, CW; SNR +10/+3/0/-3/-6/-10 dB; payload 70–90 B with CRC32; symbol rates default ±20%.  
+- Acceptance: classifier ≥95% @ ≥0 dB; ≥85% @ -6 dB; FP <3% @ ≥0 dB; lock <50 ms PSK, <30 ms FSK; throughput ≥100 frames/min (Brian), ≥20 frames/min (Ray).  
+- Guardrail tests: wrong band/RSYM/BW rejected; BER/CRC checked vs known payloads.
 
-Validation & benchmarks
------------------------
-- Matrix: bands above; mods BPSK/QPSK/8PSK, 2/4-FSK, OOK/ASK, CW; SNR +10/+3/0/-3/-6/-10 dB; payload 70–90 B + CRC32; symbol rates default ±20%.
-- Acceptance: classifier ≥95% @ ≥0 dB; ≥85% @ -6 dB; FP <3% @ ≥0 dB; lock <50 ms PSK, <30 ms FSK; throughput ≥100 frames/min (Brian), ≥20 frames/min (Ray).
-- Guardrail tests: wrong band/RSYM/BW reject; verify BER/CRC vs known payloads.
-
-Rollout & rollback
-------------------
-- Rollout: start SNR_MIN=0; canary subset; promote when FP within target; relax SNR gate only if acceptable.
+## Rollout & rollback
+- Rollout: canary subset, `SNR_MIN=0` initial; promote when FP within targets; relax later if acceptable.  
 - Rollback: remove drop-ins, restore backups, daemon-reload/restart.
 
-Tasks (execution-ready)
-----------------------
+## Execution-ready tasks (updated)
 Brian (ops/central)
-- [ ] Deploy systemd unit + drop-ins; daemon-reload/restart.
-- [ ] Run verify.sh; capture ProtectSystem/ProtectHome/ReadWritePaths/LimitNOFILE/TasksMax; status + journal tail.
-- [ ] Ensure JSON logging with decision_trace/confidence/features/rejections.
-- [ ] Add heartbeat + Prometheus textfile.
-- [ ] Enforce SNR/BW guardrails; lock watchdog with CFO re-init.
+- [ ] Deploy systemd unit + drop-ins (`process-worker.service.d/{hardening.conf,override.conf,processor.conf}`); daemon-reload and restart.
+- [ ] Run `verify.sh`; capture `systemctl show` key props (ProtectSystem, ProtectHome, ReadWritePaths, LimitNOFILE, TasksMax); `systemctl status`; `journalctl -u process-worker.service -n 200`.
+- [ ] Enable JSON logging: ensure `decision_trace`, `confidence`, feature stats, rejection reasons in `/var/lib/rf_worker/worker.log`.
+- [ ] Add heartbeat writer and Prometheus textfile at `/var/lib/rf_worker/metrics.prom`.
+- [ ] Wire guardrails: SNR gate >0 dB (except canary), BW gate ±25%, lock watchdog with CFO re-init.
 
 Ray (edge)
-- [ ] Build/install liquid-dsp (NEON if supported); verify pkg-config.
-- [ ] Generate RRC-shaped vectors across mods/SNRs/bands; include 315/433/868/915 and a VHF sample set.
-- [ ] Transfer IQs to Brian (scp/stream).
+- [ ] Build/install liquid-dsp (NEON if supported); confirm `pkg-config --cflags --libs liquid-dsp`.
+- [ ] Generate RRC-shaped vectors across mods/SNRs with `gen_test_signals.py`; include 315, 433, 868/915 + one telemetry band (e.g., 150–174 MHz).
+- [ ] Transfer IQs to Brian (`scp` to `/var/lib/rf_worker/incoming/`) or stream.
 
 Pipeline bring-up
-- [ ] Integrate upgraded presence/classifier into worker; enforce guardrails.
-- [ ] Implement FSK demod (DC removal; FFT peak + PLL CFO; explicit k/sps/BT).
-- [ ] Implement PSK/QAM (symsync, Costas, watchdog+reinit; QPSK→BPSK fallback).
-- [ ] Implement OOK/AM (envelope + MAD threshold; duty-cycle consistency).
+- [ ] Integrate upgraded presence/classifier into worker; enforce SNR/BW guardrails.
+- [ ] Implement FSK demod chain: DC removal, coarse FFT peak + PLL CFO, explicit `k/sps/BT`.
+- [ ] Implement PSK/QAM chain: symsync, Costas, carrier watchdog + re-init; fallback QPSK→BPSK on high phase error.
+- [ ] Implement OOK/AM envelope: MAD threshold; duty-cycle consistency to reject CW.
 
 Tuning & validation
-- [ ] Run SNR sweep (+10…-10 dB); confusion matrix; BER/CRC stats.
-- [ ] Guardrail tests: wrong band/RSYM/BW reject with reason.
-- [ ] Throughput ≥100 fpm (Brian); ≥20 fpm (Ray).
+- [ ] Run full SNR sweep (+10…-10 dB) on synthetic IQs; produce confusion matrix and BER/CRC stats.
+- [ ] Guardrail tests: wrong band/RSYM/BW rejected; log reason.
+- [ ] Throughput check: ≥100 frames/min (Brian), ≥20 frames/min (Ray).
 
 Canary & promotion
-- [ ] Canary with SNR_MIN=0; monitor FP/FN, CPU/mem, lock-fail.
+- [ ] Canary with `SNR_MIN=0`, subset captures; monitor FP/FN, CPU/mem, lock-fail counters.
 - [ ] Promote when targets met; optionally relax SNR gate.
 
-Appendices (quick refs)
------------------------
+## Appendices (quick refs)
 Build liquid-dsp (Ray):
   sudo apt install -y build-essential pkg-config libfftw3-dev autoconf automake libtool git
   git clone https://github.com/jgaeddert/liquid-dsp.git
@@ -160,6 +136,7 @@ Atomic install (Brian — from ~/pw_package):
   sudo systemctl restart process-worker.service
 
 Contact / escalation
---------------------
-- Build errors on Ray (liquid-dsp): collect ./configure output, make -j4 tail.
-- Service fails on Brian: systemctl status -l and journalctl -u process-worker.service -n 200.
+- If liquid-dsp build errors on Ray: capture `./configure` output and tail of `make -j4`.
+- If service fails on Brian: `systemctl status -l` and `journalctl -u process-worker.service -n 200`.
+
+With the commit message: merge of expanded system plan
