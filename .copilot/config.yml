@@ -1,0 +1,12 @@
+exclude:
+  - "build/"
+  - "dist/"
+  - "*.min.js"
+  - "*.o"
+  - "*.so"
+  - "*.a"
+include:
+  - "src/"
+  - "scripts/"
+global_prompts:
+  - "Follow repository code style and conventions"
