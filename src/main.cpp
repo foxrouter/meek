@@ -4,7 +4,8 @@
   - Always stores candidate rows to DB when conf > RF_CONF_THRESHOLD
   - Only logs to console when conf >= RF_CONSOLE_CONF
   - Saves raw CF32 IQ snapshot files when conf >= RF_SNAPSHOT_CONF
-  Runtime config comes from environment variables (see README / /etc/default/rf-adapt-intel)
+  Runtime config comes from environment variables (see README /
+  /etc/default/rf-adapt-intel)
 */
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Errors.hpp>
@@ -42,21 +43,25 @@ static std::deque<SampleBlock> q;
 static std::mutex q_m;
 static std::condition_variable q_cv;
 
-static sqlite3* open_db(const std::string& path) {
-  sqlite3* db = nullptr;
+static sqlite3 *open_db(const std::string &path) {
+  sqlite3 *db = nullptr;
   if (sqlite3_open(path.c_str(), &db) != SQLITE_OK) {
     std::cerr << "Cannot open DB: " << sqlite3_errmsg(db) << std::endl;
     return nullptr;
   }
-  const char* schema =
-      "CREATE TABLE IF NOT EXISTS signals (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT "
+  const char *schema =
+      "CREATE TABLE IF NOT EXISTS signals (id INTEGER PRIMARY KEY "
+      "AUTOINCREMENT, timestamp TEXT "
       "DEFAULT (datetime('now')), source TEXT, note TEXT);"
-      "CREATE TABLE IF NOT EXISTS methods (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT "
+      "CREATE TABLE IF NOT EXISTS methods (id INTEGER PRIMARY KEY "
+      "AUTOINCREMENT, name TEXT NOT "
       "NULL, params_json TEXT, created_at TEXT DEFAULT (datetime('now')));"
-      "CREATE TABLE IF NOT EXISTS examples (id INTEGER PRIMARY KEY AUTOINCREMENT, signal_id "
-      "INTEGER, method_id INTEGER, result TEXT, confidence REAL, notes TEXT, created_at TEXT "
+      "CREATE TABLE IF NOT EXISTS examples (id INTEGER PRIMARY KEY "
+      "AUTOINCREMENT, signal_id "
+      "INTEGER, method_id INTEGER, result TEXT, confidence REAL, notes TEXT, "
+      "created_at TEXT "
       "DEFAULT (datetime('now')));";
-  char* err = nullptr;
+  char *err = nullptr;
   if (sqlite3_exec(db, schema, nullptr, nullptr, &err) != SQLITE_OK) {
     std::cerr << "Failed to create schema: " << err << std::endl;
     sqlite3_free(err);
@@ -64,9 +69,10 @@ static sqlite3* open_db(const std::string& path) {
   return db;
 }
 
-static int insert_method(sqlite3* db, const std::string& name, const std::string& params_json) {
-  sqlite3_stmt* stmt = nullptr;
-  const char* sql = "INSERT INTO methods (name, params_json) VALUES (?, ?);";
+static int insert_method(sqlite3 *db, const std::string &name,
+                         const std::string &params_json) {
+  sqlite3_stmt *stmt = nullptr;
+  const char *sql = "INSERT INTO methods (name, params_json) VALUES (?, ?);";
   if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
     return -1;
   sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
@@ -80,11 +86,11 @@ static int insert_method(sqlite3* db, const std::string& name, const std::string
   return id;
 }
 
-static void insert_example(sqlite3* db, int method_id, double confidence,
-                           const std::string& notes) {
-  sqlite3_stmt* stmt = nullptr;
-  const char* sql =
-      "INSERT INTO examples (method_id, result, confidence, notes) VALUES (?, ?, ?, ?);";
+static void insert_example(sqlite3 *db, int method_id, double confidence,
+                           const std::string &notes) {
+  sqlite3_stmt *stmt = nullptr;
+  const char *sql = "INSERT INTO examples (method_id, result, confidence, "
+                    "notes) VALUES (?, ?, ?, ?);";
   if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
     return;
   sqlite3_bind_int(stmt, 1, method_id);
@@ -96,11 +102,12 @@ static void insert_example(sqlite3* db, int method_id, double confidence,
 }
 
 // Simple heuristic detector: returns confidence [0,1]
-static double attempt_gmsk_simple(const std::vector<std::complex<float>>& s, double min_power) {
+static double attempt_gmsk_simple(const std::vector<std::complex<float>> &s,
+                                  double min_power) {
   if (s.size() < 32)
     return 0.0;
   double sum_pow = 0.0;
-  for (auto& c : s)
+  for (auto &c : s)
     sum_pow += std::norm(c);
   double avg_pow = sum_pow / s.size();
 
@@ -134,9 +141,10 @@ static double attempt_gmsk_simple(const std::vector<std::complex<float>>& s, dou
   return conf;
 }
 
-static void async_write_snapshot(const std::string& dir,
-                                 const std::vector<std::complex<float>>& samples, double conf,
-                                 uint64_t ts_ns) {
+static void
+async_write_snapshot(const std::string &dir,
+                     const std::vector<std::complex<float>> &samples,
+                     double conf, uint64_t ts_ns) {
   try {
     std::filesystem::create_directories(dir);
     std::ostringstream fname;
@@ -155,27 +163,31 @@ static void async_write_snapshot(const std::string& dir,
     // write raw CF32 interleaved complex<float> samples
 
     if (!samples.empty()) {
-      ofs.write(reinterpret_cast<const char*>(samples.data()),
+      ofs.write(reinterpret_cast<const char *>(samples.data()),
                 samples.size() * sizeof(std::complex<float>));
     }
     ofs.close();
     // optional small log that a snapshot was written (this is helpful)
 
-    std::cout << "[SNAPSHOT] wrote " << path << " samples=" << samples.size() << "\n";
-  } catch (const std::exception& ex) {
+    std::cout << "[SNAPSHOT] wrote " << path << " samples=" << samples.size()
+              << "\n";
+  } catch (const std::exception &ex) {
     std::cerr << "Snapshot write exception: " << ex.what() << std::endl;
   }
 }
 
-static void processing_thread_func(sqlite3* db, double min_power, double conf_threshold,
-                                   double console_conf, double snapshot_conf,
-                                   const std::string& snapshot_dir) {
-  int method_id = insert_method(db, "gmsk_simple", R"({"type":"heuristic","version":1})");
+static void processing_thread_func(sqlite3 *db, double min_power,
+                                   double conf_threshold, double console_conf,
+                                   double snapshot_conf,
+                                   const std::string &snapshot_dir) {
+  int method_id =
+      insert_method(db, "gmsk_simple", R"({"type":"heuristic","version":1})");
   while (running) {
     SampleBlock block;
     {
       std::unique_lock<std::mutex> lk(q_m);
-      q_cv.wait_for(lk, 200ms, [] { return !q.empty() || !running.load(); });
+      q_cv.wait_for(lk, std::chrono::milliseconds(200),
+                    [] { return !q.empty() || !running.load(); });
       if (!q.empty()) {
         block = std::move(q.front());
         q.pop_front();
@@ -187,9 +199,10 @@ static void processing_thread_func(sqlite3* db, double min_power, double conf_th
     // compute actual average power for logging and tuning
 
     double sum_pow = 0.0;
-    for (auto& c : block.samples)
+    for (auto &c : block.samples)
       sum_pow += std::norm(c);
-    double avg_pow = block.samples.empty() ? 0.0 : (sum_pow / block.samples.size());
+    double avg_pow =
+        block.samples.empty() ? 0.0 : (sum_pow / block.samples.size());
 
     double conf = attempt_gmsk_simple(block.samples, min_power);
 
@@ -204,7 +217,8 @@ static void processing_thread_func(sqlite3* db, double min_power, double conf_th
       // Console logging controlled by console_conf
 
       if (conf >= console_conf) {
-        std::cout << "[DETECT] confidence=" << conf << " notes=" << note.str() << std::endl;
+        std::cout << "[DETECT] confidence=" << conf << " notes=" << note.str()
+                  << std::endl;
       }
 
       // Snapshot controlled by snapshot_conf
@@ -216,20 +230,21 @@ static void processing_thread_func(sqlite3* db, double min_power, double conf_th
         uint64_t ts_copy = block.timestamp_ns;
         double conf_copy = conf;
         std::string dir_copy = snapshot_dir;
-        std::thread t(
-            [dir_copy, samples_copy = std::move(samples_copy), conf_copy, ts_copy]() mutable {
-              async_write_snapshot(dir_copy, samples_copy, conf_copy, ts_copy);
-            });
+        std::thread t([dir_copy, samples_copy = std::move(samples_copy),
+                       conf_copy, ts_copy]() mutable {
+          async_write_snapshot(dir_copy, samples_copy, conf_copy, ts_copy);
+        });
         t.detach();
       }
     }
   }
 }
 
-static void capture_thread_func(double center_freq, double sample_rate, double gain,
-                                size_t block_len, int64_t read_timeout_us) {
+static void capture_thread_func(double center_freq, double sample_rate,
+                                double gain, size_t block_len,
+                                int64_t read_timeout_us) {
   SoapySDR::Kwargs kw;
-  SoapySDR::Device* dev = nullptr;
+  SoapySDR::Device *dev = nullptr;
   try {
     dev = SoapySDR::Device::make(kw);
     if (!dev) {
@@ -237,7 +252,7 @@ static void capture_thread_func(double center_freq, double sample_rate, double g
       running = false;
       return;
     }
-  } catch (const std::exception& ex) {
+  } catch (const std::exception &ex) {
     std::cerr << "SoapySDR::Device::make() threw: " << ex.what() << std::endl;
     running = false;
     return;
@@ -247,7 +262,7 @@ static void capture_thread_func(double center_freq, double sample_rate, double g
   dev->setFrequency(SOAPY_SDR_RX, 0, center_freq);
   dev->setGain(SOAPY_SDR_RX, 0, gain);
 
-  SoapySDR::Stream* rxStream = dev->setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32);
+  SoapySDR::Stream *rxStream = dev->setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32);
   if (!rxStream) {
     std::cerr << "Failed to setup SoapyRX stream\n";
     SoapySDR::Device::unmake(dev);
@@ -257,23 +272,26 @@ static void capture_thread_func(double center_freq, double sample_rate, double g
   dev->activateStream(rxStream, 0, 0, 0);
 
   std::vector<std::complex<float>> buff(block_len);
-  void* buffs[1];
+  void *buffs[1];
   buffs[0] = buff.data();
 
   while (running) {
     int flags = 0;
     int64_t ts = 0;
     auto t0 = std::chrono::steady_clock::now();
-    int ret = dev->readStream(rxStream, buffs, static_cast<int>(block_len), flags, ts, read_timeout_us);
+    int ret = dev->readStream(rxStream, buffs, static_cast<int>(block_len),
+                              flags, ts, read_timeout_us);
     auto t1 = std::chrono::steady_clock::now();
-    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    auto elapsed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 
     if (ret > 0) {
       SampleBlock sb;
       sb.samples.assign(buff.begin(), buff.begin() + ret);
-      sb.timestamp_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                            std::chrono::steady_clock::now().time_since_epoch())
-                            .count());
+      sb.timestamp_ns = static_cast<uint64_t>(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now().time_since_epoch())
+              .count());
       {
         std::lock_guard<std::mutex> lk(q_m);
         q.emplace_back(std::move(sb));
@@ -282,11 +300,13 @@ static void capture_thread_func(double center_freq, double sample_rate, double g
       }
       q_cv.notify_one();
     } else if (ret == 0) {
-      std::cerr << "[readStream] ret=0 elapsed_ms=" << elapsed_ms << " ts=" << ts << std::endl;
+      std::cerr << "[readStream] ret=0 elapsed_ms=" << elapsed_ms
+                << " ts=" << ts << std::endl;
       continue;
     } else {
-      std::cerr << "[readStream error] code=" << ret << " str=\"" << SoapySDR::errToStr(ret)
-                << "\" elapsed_ms=" << elapsed_ms << std::endl;
+      std::cerr << "[readStream error] code=" << ret << " str=\""
+                << SoapySDR::errToStr(ret) << "\" elapsed_ms=" << elapsed_ms
+                << std::endl;
       if (SoapySDR::errToStr(ret) == std::string("TIMEOUT")) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
       } else {
@@ -305,8 +325,8 @@ static void sigint_handler(int) {
   q_cv.notify_all();
 }
 
-static int64_t env_to_ll(const char* name, int64_t def) {
-  const char* v = std::getenv(name);
+static int64_t env_to_ll(const char *name, int64_t def) {
+  const char *v = std::getenv(name);
   if (!v)
     return def;
   try {
@@ -315,8 +335,8 @@ static int64_t env_to_ll(const char* name, int64_t def) {
     return def;
   }
 }
-static size_t env_to_sz(const char* name, size_t def) {
-  const char* v = std::getenv(name);
+static size_t env_to_sz(const char *name, size_t def) {
+  const char *v = std::getenv(name);
   if (!v)
     return def;
   try {
@@ -325,8 +345,8 @@ static size_t env_to_sz(const char* name, size_t def) {
     return def;
   }
 }
-static double env_to_d(const char* name, double def) {
-  const char* v = std::getenv(name);
+static double env_to_d(const char *name, double def) {
+  const char *v = std::getenv(name);
   if (!v)
     return def;
   try {
@@ -335,16 +355,17 @@ static double env_to_d(const char* name, double def) {
     return def;
   }
 }
-static std::string env_to_str(const char* name, const char* def) {
-  const char* v = std::getenv(name);
+static std::string env_to_str(const char *name, const char *def) {
+  const char *v = std::getenv(name);
   if (!v)
     return std::string(def);
   return std::string(v);
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   if (argc < 4) {
-    std::cerr << "Usage: " << argv[0] << " <center_freq_Hz> <sample_rate_Sps> <gain>\n";
+    std::cerr << "Usage: " << argv[0]
+              << " <center_freq_Hz> <sample_rate_Sps> <gain>\n";
     std::cerr << "Example: " << argv[0] << " 433.92e6 1000000 20\n";
     return 1;
   }
@@ -356,36 +377,43 @@ int main(int argc, char** argv) {
   // runtime configurable via environment (defaults chosen for Pi)
 
   size_t block_len = env_to_sz("RF_BLOCK_LEN", env_to_sz("BLOCK_LEN", 4096));
-  int64_t read_timeout_us = env_to_ll("RF_READ_TIMEOUT_US", env_to_ll("READ_TIMEOUT_US", 500000));
+  int64_t read_timeout_us =
+      env_to_ll("RF_READ_TIMEOUT_US", env_to_ll("READ_TIMEOUT_US", 500000));
   double min_power = env_to_d("RF_MIN_POWER", 5e-6);
   double conf_threshold = env_to_d("RF_CONF_THRESHOLD", 0.6);
 
-  double console_conf = env_to_d("RF_CONSOLE_CONF", 0.8); // when to print DETECT to journal
+  double console_conf =
+      env_to_d("RF_CONSOLE_CONF", 0.8); // when to print DETECT to journal
 
-  double snapshot_conf = env_to_d("RF_SNAPSHOT_CONF", 0.6); // when to save IQ snapshot
+  double snapshot_conf =
+      env_to_d("RF_SNAPSHOT_CONF", 0.6); // when to save IQ snapshot
 
-  std::string snapshot_dir = env_to_str("RF_SNAPSHOT_DIR", "/var/lib/rf-adapt-intel/snapshots");
+  std::string snapshot_dir =
+      env_to_str("RF_SNAPSHOT_DIR", "/var/lib/rf-adapt-intel/snapshots");
 
-  std::cout << "Starting rf_adapt_intel: center=" << center_freq << " sps=" << sample_rate
-            << " gain=" << gain << " block_len=" << block_len
-            << " read_timeout_us=" << read_timeout_us << " conf_threshold=" << conf_threshold
-            << " console_conf=" << console_conf << " snapshot_conf=" << snapshot_conf
+  std::cout << "Starting rf_adapt_intel: center=" << center_freq
+            << " sps=" << sample_rate << " gain=" << gain
+            << " block_len=" << block_len
+            << " read_timeout_us=" << read_timeout_us
+            << " conf_threshold=" << conf_threshold
+            << " console_conf=" << console_conf
+            << " snapshot_conf=" << snapshot_conf
             << " snapshot_dir=" << snapshot_dir << "\n";
 
-  sqlite3* db = open_db("rf_adapt_intel.db");
+  sqlite3 *db = open_db("rf_adapt_intel.db");
   if (!db)
     return 1;
 
   std::signal(SIGINT, sigint_handler);
   std::signal(SIGTERM, sigint_handler);
 
-  std::thread proc_th(processing_thread_func, db, min_power, conf_threshold, console_conf,
-                      snapshot_conf, snapshot_dir);
-  std::thread cap_th(capture_thread_func, center_freq, sample_rate, gain, block_len,
-                     read_timeout_us);
+  std::thread proc_th(processing_thread_func, db, min_power, conf_threshold,
+                      console_conf, snapshot_conf, snapshot_dir);
+  std::thread cap_th(capture_thread_func, center_freq, sample_rate, gain,
+                     block_len, read_timeout_us);
 
   while (running) {
-    std::this_thread::sleep_for(2s);
+    std::this_thread::sleep_for(std::chrono::seconds(2));
     std::lock_guard<std::mutex> lk(q_m);
     std::cout << "[STATUS] queue=" << q.size() << std::endl;
   }
