@@ -1,11 +1,16 @@
 # Existing pre-commit config with cpplint added after clang-format
-- repo: https://github.com/pre-commit/mirrors-clang-format
-  rev: v14.0.0
-  hooks:
-    - id: clang-format
-- repo: https://github.com/cpplint/cpplint
-  rev: 1.6.1
-  hooks:
-    - id: cpplint
-      args:
-        - "--filter=-build/include_order,-build/c++11,-whitespace/line_length"
+repos:
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v14.0.0
+    hooks:
+      - id: clang-format
+  - repo: https://github.com/cpplint/cpplint
+    rev: 1.6.1
+    hooks:
+      - id: cpplint
+        args:
+          # Enable quality improvements, only disable checks that don't apply
+          # Allow C++17 features (project uses <filesystem> and other C++17)
+          # Use 100 char line length for modern code readability
+          - "--filter=-build/c++11,-build/c++17"
+          - "--linelength=100"
