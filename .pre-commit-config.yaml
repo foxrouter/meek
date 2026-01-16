@@ -1,9 +1,11 @@
-# Existing pre-commit config with cpplint added after clang-format
+# Pre-commit config with clang-format and cpplint
+
 repos:
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v14.0.0
     hooks:
       - id: clang-format
+
   - repo: https://github.com/cpplint/cpplint
     rev: 1.6.1
     hooks:
