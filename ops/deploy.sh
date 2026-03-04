@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # ops/deploy.sh — Atomic install of process-worker systemd unit + drop-ins
-# Usage: sudo bash ops/deploy.sh [--dry-run]
+# Usage: sudo bash ops/deploy.sh [--dry-run] [--setup]
+#
+# Options:
+#   --dry-run   Print actions without executing them.
+#   --setup     Run ops/setup.sh first to install optional decoders (interactive).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,8 +15,18 @@ UNIT_DST="/etc/systemd/system/${SERVICE}.service"
 DROPIN_DST="/etc/systemd/system/${SERVICE}.service.d"
 
 DRY_RUN=false
-if [[ "${1:-}" == "--dry-run" ]]; then
-  DRY_RUN=true
+RUN_SETUP=false
+for _arg in "$@"; do
+  case "$_arg" in
+    --dry-run) DRY_RUN=true ;;
+    --setup)   RUN_SETUP=true ;;
+    *)
+      echo "[ERROR] Unknown option: ${_arg}" >&2
+      exit 1
+      ;;
+  esac
+done
+if $DRY_RUN; then
   echo "[dry-run] No changes will be written."
 fi
 
@@ -27,6 +41,19 @@ run() {
 echo "=== rf_adapt_intel deploy ==="
 echo "Unit src : ${UNIT_SRC}"
 echo "Drop-in  : ${DROPIN_SRC}"
+
+# Optional: run interactive decoder setup before deploying the service
+if $RUN_SETUP; then
+  echo ""
+  echo "--- Running optional decoder setup (ops/setup.sh) ---"
+  SETUP_ARGS=()
+  $DRY_RUN && SETUP_ARGS+=(--dry-run)
+  # Pass --non-interactive when stdin is not a TTY (e.g. CI, scripted deploy)
+  [[ ! -t 0 ]] && SETUP_ARGS+=(--non-interactive)
+  bash "${REPO_ROOT}/ops/setup.sh" "${SETUP_ARGS[@]}"
+  echo "--- Decoder setup done ---"
+  echo ""
+fi
 
 # Backup existing unit if present
 if [[ -f "${UNIT_DST}" ]]; then
