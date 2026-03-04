@@ -2,7 +2,7 @@
 set -euo pipefail
 PROJECT_DIR="${HOME}/rf-adapt-intel"
 BUILD_DIR="${PROJECT_DIR}/build"
-SERVICE="rf-adapt-intel"
+SERVICE="process-worker"
 
 export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
 echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"

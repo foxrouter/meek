@@ -56,3 +56,9 @@ endif()
 
 # Helpful compile flags
 target_compile_options(rf_adapt_intel PRIVATE -Wall -Wextra -Wno-unused-parameter)
+
+# soapy_read_test — simple SoapySDR readStream diagnostic tool
+add_executable(soapy_read_test tools/soapy_read_test.cpp)
+target_include_directories(soapy_read_test PRIVATE ${SOAPY_PKG_INCLUDE_DIRS})
+target_link_libraries(soapy_read_test PRIVATE ${SOAPY_PKG_LIBRARIES} pthread)
+target_compile_options(soapy_read_test PRIVATE -Wall -Wextra -Wno-unused-parameter)

@@ -56,7 +56,7 @@
 - Downshift PSK/QAM: QPSK→BPSK on high phase error.
 
 ## Automation / scripts
-- `process_incoming.sh`: filename → band map; set env (`BAND`, `RSYM`, `FDEV`, `MOD_HINT`, `SNR_MIN`, `PAPR_MAX`); JSON logs with `decision_trace`/`confidence`/features to `/var/lib/rf_worker/worker.log`; outputs to `/var/lib/rf_worker/processed/<basename>.raw`.
+- `process_incoming.sh`: filename → band map; set env (`BAND`, `RSYM`, `FDEV`, `MOD_HINT`, `SNR_MIN`, `PAPR_MAX`); JSON logs with `decision_trace`/`confidence`/features to `/var/lib/rf-adapt-intel/worker.log`; outputs to `/var/lib/rf-adapt-intel/processed/<basename>.raw`.
 
 ## Hardening (process-worker.service)
 - `ProtectSystem=full`, `ProtectHome=yes`, `NoNewPrivileges=yes`, `PrivateTmp=yes`, `ProtectClock=yes`, `ProtectKernelLogs=yes`
@@ -65,13 +65,13 @@
 - `CapabilityBoundingSet=~CAP_SYS_ADMIN CAP_SYS_MODULE`
 - `RestrictSUIDSGID=yes`, `RestrictNamespaces=yes`
 - `LimitNOFILE=4096`, `TasksMax=2048`
-- Read-only binds except `/var/lib/rf_worker` and private `/tmp`
+- Read-only binds except `/var/lib/rf-adapt-intel` and private `/tmp`
 - Drop-ins: `hardening.conf` (syscall/caps), `override.conf` (env/thresholds), `processor.conf` (threads/queues)
 - Backups in `/root` with timestamps; hash-check on deploy.
 
 ## Observability
 - Heartbeat FIFO/file: `ok <timestamp>`.
-- Prometheus textfile: `/var/lib/rf_worker/metrics.prom` (frames, rejects, confidence averages).
+- Prometheus textfile: `/var/lib/rf-adapt-intel/metrics.prom` (frames, rejects, confidence averages).
 - Logs: include `decision_trace`, `confidence`, feature stats, rejection reasons.
 
 ## Validation & benchmarks
@@ -87,14 +87,14 @@
 Brian (ops/central)
 - [ ] Deploy systemd unit + drop-ins (`process-worker.service.d/{hardening.conf,override.conf,processor.conf}`); daemon-reload and restart.
 - [ ] Run `verify.sh`; capture `systemctl show` key props (ProtectSystem, ProtectHome, ReadWritePaths, LimitNOFILE, TasksMax); `systemctl status`; `journalctl -u process-worker.service -n 200`.
-- [ ] Enable JSON logging: ensure `decision_trace`, `confidence`, feature stats, rejection reasons in `/var/lib/rf_worker/worker.log`.
-- [ ] Add heartbeat writer and Prometheus textfile at `/var/lib/rf_worker/metrics.prom`.
+- [ ] Enable JSON logging: ensure `decision_trace`, `confidence`, feature stats, rejection reasons in `/var/lib/rf-adapt-intel/worker.log`.
+- [ ] Add heartbeat writer and Prometheus textfile at `/var/lib/rf-adapt-intel/metrics.prom`.
 - [ ] Wire guardrails: SNR gate >0 dB (except canary), BW gate ±25%, lock watchdog with CFO re-init.
 
 Ray (edge)
 - [ ] Build/install liquid-dsp (NEON if supported); confirm `pkg-config --cflags --libs liquid-dsp`.
 - [ ] Generate RRC-shaped vectors across mods/SNRs with `gen_test_signals.py`; include 315, 433, 868/915 + one telemetry band (e.g., 150–174 MHz).
-- [ ] Transfer IQs to Brian (`scp` to `/var/lib/rf_worker/incoming/`) or stream.
+- [ ] Transfer IQs to Brian (`scp` to `/var/lib/rf-adapt-intel/incoming/`) or stream.
 
 Pipeline bring-up
 - [ ] Integrate upgraded presence/classifier into worker; enforce SNR/BW guardrails.
