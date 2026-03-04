@@ -309,10 +309,126 @@ compute_time_occupancy(const std::vector<std::complex<float>> &s) {
 }
 
 // ---------------------------------------------------------------------------
-// Multi-class modulation classifier result
+// UK RTL-SDR v3 band profile table
 // ---------------------------------------------------------------------------
 
 enum class ModClass { UNKNOWN, CW_LIKE, FSK_LIKE, PSK_QAM_LIKE, OOK_AM_LIKE };
+
+struct BandProfile {
+  const char *name;        // short ID e.g. "ADS-B"
+  const char *description; // human-readable label
+  double center_hz;        // nominal centre frequency in Hz
+  double tolerance_hz;     // ±match window when auto-detecting band
+  double expected_bw_hz;   // expected occupied bandwidth (for BW guardrail)
+  ModClass expected_mod;   // classifier prior hint
+  double snr_min_db; // band-specific SNR gate (kBandSnrUseDefault = use global)
+  double prior_boost; // score boost added to expected_mod class [0,1]
+  const char *notes;  // extra info shown in decision trace / logs
+};
+
+// clang-format off
+static const BandProfile UK_BANDS[] = {
+  {"ADS-B",       "ADS-B 1090 MHz transponders",
+   1090e6, 2e6, 1e6, ModClass::OOK_AM_LIKE, 3.0, 0.20,
+   "Mode-S/ADS-B squitters at 1090 MHz. Decode with dump1090 or readsb. "
+   "RTL-SDR v3 direct-sampling not needed. Very active over UK airspace."},
+  {"VDL2",        "VHF Data Link Mode 2 (136.9 MHz)",
+   136.9e6, 0.5e6, 25e3, ModClass::PSK_QAM_LIKE, 2.0, 0.15,
+   "ACARS replacement using D8PSK at 10500 bps. Decode with acarsdec or vdlm2dec. "
+   "Active on 136.900/136.925/136.950 MHz in UK."},
+  {"ACARS",       "Aircraft Communications Addressing and Reporting System",
+   131.725e6, 0.3e6, 8e3, ModClass::OOK_AM_LIKE, 1.0, 0.15,
+   "AM-modulated VHF data link at 2400 bps. Decode with acarsdec. "
+   "Primary UK frequency 131.725 MHz; also 130.025/131.550."},
+  {"AIS-A",       "AIS channel A (161.975 MHz)",
+   161.975e6, 0.05e6, 16e3, ModClass::FSK_LIKE, 1.0, 0.20,
+   "Automatic Identification System for maritime vessels. GMSK 9600 bps. "
+   "Decode with rtl-ais or AISdispatcher. Very active in coastal UK areas."},
+  {"AIS-B",       "AIS channel B (162.025 MHz)",
+   162.025e6, 0.05e6, 16e3, ModClass::FSK_LIKE, 1.0, 0.20,
+   "AIS channel B. Same as AIS-A but on alternate channel. "
+   "Both channels must be monitored for full AIS coverage."},
+  {"POCSAG-153",  "POCSAG paging (153 MHz band)",
+   153.35e6, 2.0e6, 12.5e3, ModClass::FSK_LIKE, 0.0, 0.18,
+   "Legacy numeric/alphanumeric paging. FSK 512/1200/2400 bps. "
+   "Decode with multimon-ng. Still active in UK for NHS and emergency services."},
+  {"FLEX-931",    "FLEX high-speed paging (931 MHz)",
+   931.9375e6, 2.0e6, 15e3, ModClass::FSK_LIKE, 1.0, 0.15,
+   "FLEX 4-FSK paging at 1600/3200/6400 bps. Decode with multimon-ng. "
+   "Used by NHS and commercial paging in UK."},
+  {"RADIOSONDE",  "Meteorological radiosonde (400-406 MHz)",
+   402.5e6, 5.0e6, 100e3, ModClass::FSK_LIKE, 2.0, 0.18,
+   "Weather balloon telemetry. FSK or GFSK. Decode with radiosonde_auto_rx. "
+   "UK Met Office launches from Camborne, Watnall, Lerwick, Herstmonceux."},
+  {"NOAA-APT",    "NOAA weather satellite APT (137.5 MHz)",
+   137.5e6, 0.2e6, 34e3, ModClass::FSK_LIKE, 1.0, 0.15,
+   "Analog weather image downlink at 137.500/137.620 MHz. FM subcarrier. "
+   "Decode with WXtoImg or noaa-apt. Visible passes over UK several times daily."},
+  {"ISM-433",     "ISM 433 MHz band (OOK/ASK devices)",
+   433.92e6, 2.0e6, 250e3, ModClass::OOK_AM_LIKE, 0.0, 0.10,
+   "License-free ISM band. OOK/ASK remote controls, keyfobs, weather stations. "
+   "Very busy in UK. Decode with rtl_433 for hundreds of device types."},
+  {"LORA-868",    "LoRa IoT (868 MHz EU band)",
+   868.1e6, 2.0e6, 500e3, ModClass::FSK_LIKE, 1.0, 0.15,
+   "LoRaWAN uplink/downlink on EU868 band (863-870 MHz). CSS modulation. "
+   "Decode with gr-lora or chirpstack. TTN gateways common across UK."},
+  {"SMETS2",      "Smart meter SMETS2 (868.3 MHz)",
+   868.3e6, 0.5e6, 200e3, ModClass::FSK_LIKE, 1.0, 0.12,
+   "UK smart electricity/gas meter SMETS2 mesh network. GFSK in 868 MHz band. "
+   "Mandatory in all new UK smart meter installations since 2019."},
+  {"ZWAVE-868",   "Z-Wave home automation (868.42 MHz)",
+   868.42e6, 0.1e6, 100e3, ModClass::FSK_LIKE, 1.0, 0.12,
+   "Z-Wave home automation protocol. GFSK 100 kbps. EU frequency 868.42 MHz. "
+   "Common in UK smart home devices. Decode with Z-Wave protocol analyser."},
+  {"TPMS-433",    "Tyre Pressure Monitoring System (433 MHz)",
+   433.92e6, 2.0e6, 100e3, ModClass::FSK_LIKE, 0.0, 0.12,
+   "OBD/TPMS sensors from vehicles at 433.92 MHz. FSK or OOK. "
+   "Decode with rtl_433. Active near roads and car parks."},
+  {"DAB",         "DAB/DAB+ digital radio (174-240 MHz)",
+   218.64e6, 36e6, 1.5e6, ModClass::PSK_QAM_LIKE, 3.0, 0.18,
+   "Digital Audio Broadcasting. OFDM/DQPSK in 1.536 MHz channels (Bands III/L). "
+   "UK multiplex blocks at 174-240 MHz. Decode with welle.io or dablin."},
+  {"TETRA",       "TETRA public safety radio (380-430 MHz)",
+   392.0e6, 20.0e6, 25e3, ModClass::PSK_QAM_LIKE, 2.0, 0.20,
+   "Terrestrial Trunked Radio. PI/4-DQPSK 25 kHz channels. "
+   "UK emergency services (Airwave). Decode with telive + tetra-listener."},
+  {"DMR",         "DMR digital voice (446 MHz PMR446)",
+   446.0e6, 10.0e6, 12.5e3, ModClass::FSK_LIKE, 1.0, 0.15,
+   "Digital Mobile Radio. 4FSK (CQPSK) in 12.5 kHz channels. "
+   "UK commercial/amateur use. Decode with DSDPlus or OP25."},
+  {"GPS-L1",      "GPS L1 C/A (1575.42 MHz)",
+   1575.42e6, 5e6, 2e6, ModClass::PSK_QAM_LIKE, -5.0, 0.10,
+   "GPS civil signal at 1575.42 MHz. BPSK spread-spectrum (-130 dBm typical). "
+   "RTL-SDR v3 has marginal sensitivity at L1; use LNA + active antenna for "
+   "any chance of signal. Useful as frequency reference check."},
+};
+// clang-format on
+
+static constexpr size_t kNumUkBands = sizeof(UK_BANDS) / sizeof(UK_BANDS[0]);
+// Sentinel value for BandProfile::snr_min_db meaning "use the global default".
+static constexpr double kBandSnrUseDefault = -999.0;
+
+// Returns a pointer to the closest BandProfile whose centre is within
+// tolerance_hz of center_hz, or nullptr if no profile matches.
+// Pure function with no side effects.
+static const BandProfile *find_band(double center_hz) {
+  const BandProfile *best = nullptr;
+  double best_dist = -1.0;
+  for (size_t i = 0; i < kNumUkBands; ++i) {
+    double dist = std::abs(center_hz - UK_BANDS[i].center_hz);
+    if (dist <= UK_BANDS[i].tolerance_hz) {
+      if (best == nullptr || dist < best_dist) {
+        best = &UK_BANDS[i];
+        best_dist = dist;
+      }
+    }
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-class modulation classifier result
+// ---------------------------------------------------------------------------
 
 static const char *mod_class_name(ModClass m) {
   switch (m) {
@@ -345,17 +461,33 @@ struct ClassifierResult {
   double p90{0.0};
   bool snr_gate_pass{false};
   bool bw_gate_pass{true};
+  // band profile fields (empty if no profile matched)
+  std::string band_name{};
+  std::string band_notes{};
 };
 
 // Multi-class heuristic classifier.
 // snr_min_db: SNR gate threshold (default >0 dB).
 // expected_bw_hz / sample_rate: used for BW guardrail check (0 = skip check).
+// band: optional UK band profile; when non-null applies SNR/BW overrides and
+//       adds a prior_boost to the expected modulation class score.
 static ClassifierResult
 classify_block(const std::vector<std::complex<float>> &s, double min_power,
-               double snr_min_db, double expected_bw_hz, double sample_rate) {
+               double snr_min_db, double expected_bw_hz, double sample_rate,
+               const BandProfile *band = nullptr) {
   ClassifierResult r;
   if (s.size() < 32)
     return r;
+
+  // Apply band-profile overrides before feature extraction gates
+  if (band != nullptr) {
+    if (band->snr_min_db > kBandSnrUseDefault)
+      snr_min_db = band->snr_min_db;
+    if (expected_bw_hz <= 0.0)
+      expected_bw_hz = band->expected_bw_hz;
+    r.band_name = band->name;
+    r.band_notes = band->notes;
+  }
 
   // --- feature extraction ---
   r.avg_pow = compute_avg_power(s);
@@ -451,6 +583,29 @@ classify_block(const std::vector<std::complex<float>> &s, double min_power,
     double occ_s = std::clamp(1.0 - r.time_occupancy / 0.6, 0.0, 1.0);
     double flat_s = std::clamp(1.0 - r.spectral_flatness, 0.0, 1.0);
     ook_score = 0.45 * papr_s + 0.35 * occ_s + 0.20 * flat_s;
+  }
+
+  // Apply band prior boost (additive, after raw scoring, before selection)
+  if (band != nullptr) {
+    double boost = band->prior_boost;
+    switch (band->expected_mod) {
+    case ModClass::CW_LIKE:
+      cw_score = std::min(1.0, cw_score + boost);
+      break;
+    case ModClass::FSK_LIKE:
+      fsk_score = std::min(1.0, fsk_score + boost);
+      break;
+    case ModClass::PSK_QAM_LIKE:
+      psk_score = std::min(1.0, psk_score + boost);
+      break;
+    case ModClass::OOK_AM_LIKE:
+      ook_score = std::min(1.0, ook_score + boost);
+      break;
+    default:
+      break;
+    }
+    dt << " band=" << band->name << "(boost+" << std::fixed
+       << std::setprecision(2) << boost << ")";
   }
 
   // Winner-takes-all
@@ -601,7 +756,9 @@ static void write_json_log(const std::string &log_file,
         << ",\"trans_ratio\":" << cr.trans_ratio
         << ",\"snr_gate_pass\":" << (cr.snr_gate_pass ? "true" : "false")
         << ",\"bw_gate_pass\":" << (cr.bw_gate_pass ? "true" : "false")
-        << ",\"decision_trace\":\"" << cr.decision_trace << "\"" << "}\n";
+        << ",\"band\":\"" << cr.band_name << "\"" << ",\"band_notes\":\""
+        << cr.band_notes << "\"" << ",\"decision_trace\":\""
+        << cr.decision_trace << "\"" << "}\n";
   } catch (...) {
   }
 }
@@ -611,10 +768,23 @@ static void write_json_log(const std::string &log_file,
 // ---------------------------------------------------------------------------
 
 static void processing_thread_func(
-    sqlite3 *db, double min_power, double conf_threshold, double console_conf,
-    double snapshot_conf, const std::string &snapshot_dir, double snr_min_db,
-    double expected_bw_hz, double sample_rate, const std::string &metrics_file,
-    const std::string &heartbeat_file, const std::string &worker_log) {
+    sqlite3 *db, double center_freq, double min_power, double conf_threshold,
+    double console_conf, double snapshot_conf, const std::string &snapshot_dir,
+    double snr_min_db, double expected_bw_hz, double sample_rate,
+    const std::string &metrics_file, const std::string &heartbeat_file,
+    const std::string &worker_log) {
+  // Resolve band profile once at startup
+  const BandProfile *band = find_band(center_freq);
+  if (band != nullptr) {
+    std::cout << "[BAND] Matched: " << band->name << " | " << band->description
+              << " | center=" << (band->center_hz / 1e6) << " MHz"
+              << " | expected_mod=" << mod_class_name(band->expected_mod)
+              << " | prior_boost=" << band->prior_boost
+              << " | notes: " << band->notes << "\n";
+  } else {
+    std::cout << "[BAND] No profile matched for center_freq=" << center_freq
+              << " Hz\n";
+  }
   int method_id = insert_method(
       db, "modulation_classifier",
       R"({"type":"heuristic","version":2,"classes":["cw_like","fsk_like","psk_qam_like","ook_am_like"]})");
@@ -640,7 +810,7 @@ static void processing_thread_func(
     }
 
     ClassifierResult cr = classify_block(block.samples, min_power, snr_min_db,
-                                         expected_bw_hz, sample_rate);
+                                         expected_bw_hz, sample_rate, band);
     ++metrics.frames_total;
 
     if (!cr.snr_gate_pass || !cr.bw_gate_pass ||
@@ -685,7 +855,9 @@ static void processing_thread_func(
 
       // Console logging
       if (cr.confidence >= console_conf) {
-        std::cout << "[DETECT] mod=" << mod_class_name(cr.mod_class)
+        std::cout << "[DETECT] band="
+                  << (cr.band_name.empty() ? "<none>" : cr.band_name)
+                  << " mod=" << mod_class_name(cr.mod_class)
                   << " confidence=" << cr.confidence
                   << " trace=" << cr.decision_trace << std::endl;
       }
@@ -907,6 +1079,23 @@ int main(int argc, char **argv) {
             << " metrics_file=" << metrics_file << " worker_log=" << worker_log
             << "\n";
 
+  // Print UK_BANDS table at startup
+  std::cout << "\n[BANDS] UK RTL-SDR v3 band profile table (" << kNumUkBands
+            << " entries):\n";
+  std::cout << std::left << std::setw(4) << "#" << std::setw(14) << "name"
+            << std::setw(12) << "freq_MHz" << std::setw(12) << "tol_kHz"
+            << std::setw(16) << "expected_mod" << "description\n";
+  for (size_t i = 0; i < kNumUkBands; ++i) {
+    const BandProfile &bp = UK_BANDS[i];
+    std::cout << std::left << std::setw(4) << (i + 1) << std::setw(14)
+              << bp.name << std::setw(12) << std::fixed << std::setprecision(3)
+              << (bp.center_hz / 1e6) << std::setw(12) << std::fixed
+              << std::setprecision(1) << (bp.tolerance_hz / 1e3)
+              << std::setw(16) << mod_class_name(bp.expected_mod)
+              << bp.description << "\n";
+  }
+  std::cout << "\n";
+
   sqlite3 *db = open_db("rf_adapt_intel.db");
   if (!db)
     return 1;
@@ -914,10 +1103,10 @@ int main(int argc, char **argv) {
   std::signal(SIGINT, sigint_handler);
   std::signal(SIGTERM, sigint_handler);
 
-  std::thread proc_th(processing_thread_func, db, min_power, conf_threshold,
-                      console_conf, snapshot_conf, snapshot_dir, snr_min_db,
-                      expected_bw_hz, sample_rate, metrics_file, heartbeat_file,
-                      worker_log);
+  std::thread proc_th(processing_thread_func, db, center_freq, min_power,
+                      conf_threshold, console_conf, snapshot_conf, snapshot_dir,
+                      snr_min_db, expected_bw_hz, sample_rate, metrics_file,
+                      heartbeat_file, worker_log);
   std::thread snap_th(snapshot_worker);
   std::thread cap_th(capture_thread_func, center_freq, sample_rate, gain,
                      block_len, read_timeout_us);
