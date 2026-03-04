@@ -1,0 +1,142 @@
+rf_adapt_intel — Items Still Missing from Repository
+=====================================================
+Generated: 2026-03-04
+Author: foxrouter (via assistant)
+
+This document lists features, files, and tasks that are described in
+docs/rf-adapt-intel-plan.md but are NOT yet present in the repository.
+Each entry notes where in the codebase it belongs and what is needed.
+
+----------------------------------------------------------------------
+1. DEMOD PIPELINES (src/main.cpp — requires liquid-dsp / HAVE_LIQUID)
+----------------------------------------------------------------------
+
+1a. FSK / GMSK demod chain
+  - DC removal before demod.
+  - Coarse FFT peak detection for initial CFO estimate.
+  - Fine PLL for carrier-frequency-offset (CFO) tracking.
+  - liquid-dsp fskdem object configured with explicit k/sps/BT.
+  - Bit-stream output piped to CRC32 checker.
+  - Integration point: after classify_block() returns FSK_LIKE.
+
+1b. PSK / QAM demod chain
+  - Symbol timing synchronisation: liquid-dsp symsync object.
+  - Costas-loop carrier recovery.
+  - Carrier-lock watchdog: detect unlock condition; re-init with
+    coarse CFO estimate on failure.
+  - Downshift fallback: QPSK -> BPSK on persistent high phase error.
+  - Support for BPSK, QPSK, 8PSK at minimum.
+  - Integration point: after classify_block() returns PSK_QAM_LIKE.
+
+1c. OOK / AM envelope demod
+  - Envelope detection (|z|) + Median Absolute Deviation threshold.
+  - Duty-cycle consistency check to avoid CW mis-classification.
+  - OOK bit recovery at expected symbol rate (RSYM).
+  - Integration point: after classify_block() returns OOK_AM_LIKE.
+
+1d. HAVE_LIQUID CMake / build wiring
+  - CMakeLists.txt: add find_package / pkg_check_modules for liquid-dsp.
+  - Set -DHAVE_LIQUID=1 when found.
+  - Wrap all demod-chain code in #ifdef HAVE_LIQUID.
+  - CMakeLists.txt currently has no liquid-dsp detection.
+
+----------------------------------------------------------------------
+2. IQ TRANSFER SCRIPT (scripts/ or ops/)
+----------------------------------------------------------------------
+
+  - Automated scp / rsync script to push IQ files from Ray to Brian at
+    /var/lib/rf-adapt-intel/incoming/.
+  - Should handle retries, bandwidth limiting, and logging.
+  - Optional: inotifywait-based watcher to trigger process_incoming.sh
+    automatically when a new file arrives in incoming/.
+
+----------------------------------------------------------------------
+3. FULL VALIDATION / BENCHMARK HARNESS (tests/)
+----------------------------------------------------------------------
+
+3a. SNR sweep test
+  - Drive gen_test_signals.py for all bands x mods x SNRs.
+  - Feed each .cf32 file through the classifier (via decode_candidates.py
+    or a dedicated test runner).
+  - Capture per-(mod, SNR) decision and produce a confusion matrix.
+  - Assert acceptance criteria:
+      classifier >= 95% accuracy at >= 0 dB SNR
+      classifier >= 85% accuracy at -6 dB SNR
+      false positive rate < 3% at >= 0 dB SNR
+  - Target file: tests/test_snr_sweep.py (or shell harness).
+
+3b. Guardrail rejection tests
+  - Verify that blocks with wrong band / RSYM / BW are rejected by
+    classify_block() with REJECT:snr_gate or REJECT:bw_gate in trace.
+  - Verify rejection reason is present in worker.log JSON.
+  - Target file: tests/test_guardrails.py or extension of
+    tests/test_decode_candidates.py.
+
+3c. Throughput benchmark
+  - Time how many frames/min the processing thread handles on Brian and
+    Ray with a replay of pre-generated IQ data.
+  - Assert >= 100 frames/min (Brian), >= 20 frames/min (Ray).
+  - Target file: tests/bench_throughput.py or shell script.
+
+3d. BER / CRC check
+  - For demod pipelines (once implemented): feed known bit pattern IQ
+    vectors; verify CRC32 passes at target SNR.
+  - Target file: tests/test_demod_ber.py.
+
+----------------------------------------------------------------------
+4. CANARY PROCEDURE (ops/ or docs/)
+----------------------------------------------------------------------
+
+  - ops/canary.sh (or documented steps) for:
+      * Setting RF_SNR_MIN_DB=0 for passive canary capture.
+      * Monitoring FP/FN rates, CPU/memory usage, lock-fail counters
+        via the Prometheus textfile.
+      * Criteria checklist for promoting canary to production.
+      * Rollback procedure (remove drop-ins, restore backup, reload).
+  - Currently rollback steps are documented in the plan but not scripted.
+
+----------------------------------------------------------------------
+5. MISSING CMakeLists.txt WIRING
+----------------------------------------------------------------------
+
+  - liquid-dsp detection (see item 1d above).
+  - Optional: add CTest targets for tests/test_decode_candidates.py and
+    tests/test_setup.sh so 'cmake --build . --target test' runs them.
+  - Optional: install target for rf_adapt_intel binary to
+    /usr/local/bin/ with correct permissions.
+
+----------------------------------------------------------------------
+6. MINOR GAPS
+----------------------------------------------------------------------
+
+  - process_incoming.sh does not yet write to the processed output file
+    (OUT_FILE is computed but rf_adapt_intel currently reads from SDR,
+    not from a file). A file-replay mode or named-pipe relay is needed
+    for offline testing.
+  - PAPR_MAX env var is documented in config/thresholds.env.example but
+    not read or enforced in src/main.cpp.
+  - MOD_HINT env var is documented and exported by process_incoming.sh
+    but not consumed by classify_block() in main.cpp as a prior bias
+    (only BandProfile::prior_boost applies).
+  - No README section for tools/decode_candidates.py usage.
+
+----------------------------------------------------------------------
+SUMMARY TABLE
+----------------------------------------------------------------------
+
+Item                                   | File(s) to add/modify
+---------------------------------------+--------------------------------
+FSK demod chain (liquid-dsp)           | src/main.cpp
+PSK/QAM demod chain (liquid-dsp)       | src/main.cpp
+OOK/AM demod chain (liquid-dsp)        | src/main.cpp
+HAVE_LIQUID build detection            | CMakeLists.txt
+IQ transfer / incoming watcher script  | scripts/transfer_iq.sh (new)
+SNR sweep test harness                 | tests/test_snr_sweep.py (new)
+Guardrail rejection tests              | tests/test_guardrails.py (new)
+Throughput benchmark                   | tests/bench_throughput.py (new)
+BER/CRC demod tests                    | tests/test_demod_ber.py (new)
+Canary procedure / rollback script     | ops/canary.sh (new)
+File-replay mode for process_incoming  | scripts/process_incoming.sh
+PAPR_MAX enforcement                   | src/main.cpp
+MOD_HINT prior bias in classifier      | src/main.cpp
+tools/decode_candidates.py README docs | README.md

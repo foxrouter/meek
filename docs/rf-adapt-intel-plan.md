@@ -1,8 +1,8 @@
 # RF Adaptation & Intelligence Plan (Aligned/Upgraded, AI-Readable)
 
-**Generated:** 2025-12-19 (updated)  
+**Generated:** 2025-12-19 (updated 2026-03-04)  
 **Author:** foxrouter (via assistant)  
-**Status:** Active — classifier prototype working; ops/deploy and demod pending; cpplint re-enabled with fixes committed
+**Status:** Active — classifier, service hardening, observability, test infrastructure, band profiles, and ops scripts all committed; demod pipelines and full validation matrix pending
 
 ---
 
@@ -17,12 +17,18 @@
 
 ## Current status (delta)
 - Classifier: ✅ heuristic prototype (spectral entropy/flatness, peak_frac, PAPR, presence). Fixtures: tone→cw_like; OOK→am/ook_like; FSK2→fsk_like; BPSK/QPSK→psk/qam_like.
-- Test fixtures: ✅ `gen_test_signals.py` with RRC-shaped generators.
-- Code hygiene: ✅ cpplint re-enabled; latest lint fixes committed.
-- Service hardening/deploy: ⏳ pending this session on Brian.
-- liquid-dsp build (Ray): ⏳ pending.
-- Demod pipelines (FSK/PSK/QAM): ⏳ not started.
-- Telemetry/verify.sh/systemd drop-ins: ⏳ pending deployment.
+- Test fixtures: ✅ `gen_test_signals.py` with RRC-shaped generators; `tests/test_decode_candidates.py` + `tools/decode_candidates.py` committed.
+- Code hygiene: ✅ cpplint re-enabled; latest lint fixes committed; `tests/test_setup.sh` shell test suite committed.
+- Service hardening/deploy: ✅ `systemd/process-worker.service` + drop-ins (`hardening.conf`, `override.conf`, `processor.conf`) committed; `ops/deploy.sh`, `ops/verify.sh`, `ops/setup.sh` all committed.
+- liquid-dsp build (Ray): ✅ `ops/setup.sh --install-liquid-dsp` builds from source (NEON auto-detected by configure); HAVE_LIQUID conditional integration in `main.cpp` is ⏳ pending.
+- UK band profile table: ✅ 18 profiles in `UK_BANDS[]` with `find_band()`, per-band SNR overrides, BW hints, and prior_boost committed to `src/main.cpp`.
+- Heartbeat + Prometheus textfile: ✅ written by processing thread every 10 s in `main.cpp`; also `scripts/heartbeat_and_metrics.sh` for standalone use.
+- JSON logging: ✅ `write_json_log()` emits `decision_trace`, `confidence`, all features, band name/notes to `worker.log`.
+- SNR / BW guardrails: ✅ `classify_block()` enforces SNR gate and ±25% BW guardrail; per-band overrides via `BandProfile`.
+- Snapshot worker: ✅ single background thread with task queue; clean shutdown (no detached threads).
+- process_incoming.sh: ✅ filename-based band detection, env var export, offline IQ file processing.
+- Demod pipelines (FSK/PSK/QAM): ⏳ not started — liquid-dsp demod chains absent from `main.cpp`.
+- Full validation matrix / canary / IQ transfer: ⏳ not started.
 
 ## High-level sequence
 1) Prepare Ray (build liquid-dsp, generate IQ test vectors).  
@@ -85,22 +91,22 @@
 
 ## Execution-ready tasks (updated)
 Brian (ops/central)
-- [ ] Deploy systemd unit + drop-ins (`process-worker.service.d/{hardening.conf,override.conf,processor.conf}`); daemon-reload and restart.
-- [ ] Run `verify.sh`; capture `systemctl show` key props (ProtectSystem, ProtectHome, ReadWritePaths, LimitNOFILE, TasksMax); `systemctl status`; `journalctl -u process-worker.service -n 200`.
-- [ ] Enable JSON logging: ensure `decision_trace`, `confidence`, feature stats, rejection reasons in `/var/lib/rf-adapt-intel/worker.log`.
-- [ ] Add heartbeat writer and Prometheus textfile at `/var/lib/rf-adapt-intel/metrics.prom`.
-- [ ] Wire guardrails: SNR gate >0 dB (except canary), BW gate ±25%, lock watchdog with CFO re-init.
+- [x] Deploy systemd unit + drop-ins (`process-worker.service.d/{hardening.conf,override.conf,processor.conf}`); `ops/deploy.sh` committed and tested with `--dry-run`.
+- [x] Run `verify.sh`; `ops/verify.sh` checks ProtectSystem, ProtectHome, ReadWritePaths, LimitNOFILE, TasksMax, and service status.
+- [x] Enable JSON logging: `write_json_log()` in `main.cpp` emits `decision_trace`, `confidence`, feature stats, rejection reasons to `worker.log`.
+- [x] Add heartbeat writer and Prometheus textfile: `write_heartbeat()` + `write_prometheus_metrics()` in `main.cpp`; standalone `scripts/heartbeat_and_metrics.sh`.
+- [x] Wire guardrails: SNR gate >0 dB (except canary via `RF_SNR_MIN_DB`), BW gate ±25%, per-band overrides via `UK_BANDS[]`.
 
 Ray (edge)
-- [ ] Build/install liquid-dsp (NEON if supported); confirm `pkg-config --cflags --libs liquid-dsp`.
-- [ ] Generate RRC-shaped vectors across mods/SNRs with `gen_test_signals.py`; include 315, 433, 868/915 + one telemetry band (e.g., 150–174 MHz).
-- [ ] Transfer IQs to Brian (`scp` to `/var/lib/rf-adapt-intel/incoming/`) or stream.
+- [x] Build/install liquid-dsp: `ops/setup.sh --install-liquid-dsp` builds from source (NEON via `./configure`); smoke-tested via pkg-config.
+- [x] Generate RRC-shaped vectors across mods/SNRs with `gen_test_signals.py`; bands 315, 433, 868/915, 137, 150 MHz all supported.
+- [ ] Transfer IQs to Brian (`scp` to `/var/lib/rf-adapt-intel/incoming/`) or stream — `process_incoming.sh` handles local file processing; automated transfer not yet scripted.
 
 Pipeline bring-up
-- [ ] Integrate upgraded presence/classifier into worker; enforce SNR/BW guardrails.
-- [ ] Implement FSK demod chain: DC removal, coarse FFT peak + PLL CFO, explicit `k/sps/BT`.
-- [ ] Implement PSK/QAM chain: symsync, Costas, carrier watchdog + re-init; fallback QPSK→BPSK on high phase error.
-- [ ] Implement OOK/AM envelope: MAD threshold; duty-cycle consistency to reject CW.
+- [x] Integrate upgraded presence/classifier into worker: `classify_block()` in `main.cpp` with SNR/BW guardrails, per-band prior_boost, full feature pipeline.
+- [ ] Implement FSK demod chain: DC removal, coarse FFT peak + PLL CFO, explicit `k/sps/BT` (requires HAVE_LIQUID).
+- [ ] Implement PSK/QAM chain: symsync, Costas, carrier watchdog + re-init; fallback QPSK→BPSK on high phase error (requires HAVE_LIQUID).
+- [ ] Implement OOK/AM envelope: MAD threshold; duty-cycle consistency to reject CW (requires HAVE_LIQUID).
 
 Tuning & validation
 - [ ] Run full SNR sweep (+10…-10 dB) on synthetic IQs; produce confusion matrix and BER/CRC stats.
