@@ -13,6 +13,9 @@ UNIT_SRC="${REPO_ROOT}/systemd/${SERVICE}.service"
 DROPIN_SRC="${REPO_ROOT}/systemd/${SERVICE}.service.d"
 UNIT_DST="/etc/systemd/system/${SERVICE}.service"
 DROPIN_DST="/etc/systemd/system/${SERVICE}.service.d"
+MONITOR_SVC_SRC="${REPO_ROOT}/systemd/rf-adapt-intel-monitor.service"
+MONITOR_TMR_SRC="${REPO_ROOT}/systemd/rf-adapt-intel-monitor.timer"
+MONITOR_SHARE="/usr/local/share/rf-adapt-intel"
 
 DRY_RUN=false
 RUN_SETUP=false
@@ -87,6 +90,19 @@ if id rf_worker &>/dev/null; then
 else
   echo "[WARN] User rf_worker does not exist — skipping chown. Create with: useradd -r -s /sbin/nologin rf_worker"
 fi
+
+# Install canary monitor service + 30-minute timer
+echo ""
+echo "=== Installing canary monitor timer ==="
+run sudo install -m 644 -o root -g root "${MONITOR_SVC_SRC}" \
+    "/etc/systemd/system/rf-adapt-intel-monitor.service"
+run sudo install -m 644 -o root -g root "${MONITOR_TMR_SRC}" \
+    "/etc/systemd/system/rf-adapt-intel-monitor.timer"
+# Install ops scripts into /usr/local/share for the monitor service to call
+run sudo mkdir -p "${MONITOR_SHARE}/ops"
+run sudo install -m 755 -o root -g root "${REPO_ROOT}/ops/canary.sh" \
+    "${MONITOR_SHARE}/ops/canary.sh"
+run sudo systemctl enable --now rf-adapt-intel-monitor.timer
 
 # Reload and restart
 run sudo systemctl daemon-reload

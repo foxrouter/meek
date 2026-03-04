@@ -99,7 +99,7 @@ if [[ -f "${DECODE_TOOL}" ]] && command -v python3 &>/dev/null; then
     2>&1; then
     echo "[process_incoming] offline report: ${REPORT_FILE}"
   else
-    local rc=$?
+    rc=$?
     echo "[process_incoming] WARN: decode_candidates.py exited with status ${rc}" >&2
     echo "[process_incoming] Check python3 dependencies (numpy) and file permissions."
   fi

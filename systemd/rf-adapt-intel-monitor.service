@@ -1,0 +1,18 @@
+[Unit]
+Description=rf_adapt_intel canary status monitor (oneshot)
+Documentation=https://github.com/foxrouter/meek
+# Require the main service to be present but do not hard-depend on it being
+# active so the monitor still runs even when process-worker is stopped.
+Wants=process-worker.service
+
+[Service]
+Type=oneshot
+# Run canary.sh --status and append output to the worker log directory.
+ExecStart=/usr/bin/env bash /usr/local/share/rf-adapt-intel/ops/canary.sh --status
+StandardOutput=append:/var/lib/rf-adapt-intel/monitor.log
+StandardError=append:/var/lib/rf-adapt-intel/monitor.log
+# Drop all privileges — monitor only reads metrics/proc files.
+User=rf_worker
+Group=rf_worker
+# Keep the working directory consistent with the main service.
+WorkingDirectory=/var/lib/rf-adapt-intel
