@@ -1,25 +1,38 @@
-# 🦾 GitHub Copilot Pro Setup and Usage Guide
+# GitHub Copilot in this repository
 
-This repository is Copilot-optimized! If you have Copilot Pro, follow these steps for maximum productivity:
+This repository is configured for GitHub Copilot.  The notes below describe
+how to get the best results when using Copilot with this codebase.
 
-## 1. Enable GitHub Copilot Pro
-- Purchase or activate Copilot Pro: https://github.com/features/copilot
-- Install Copilot extension in your IDE (VS Code, JetBrains, etc.)
+## Language and style
 
-## 2. Using Copilot Pro features
-- Open this repo in your IDE.
-- Use inline code suggestions.
-- Use Copilot Chat (if your IDE supports it) to ask for tests, refactoring, documentation, or code explanations.
-- Example prompts:
-  - "Write unit tests using pytest for main functions."
-  - "Refactor this loop using C++ STL idioms."
-  - "Explain the data flow in `src/main.cpp`."
+- **C++17** — structured bindings, `std::filesystem`, `if constexpr`, etc.
+- `snake_case` for variables and functions throughout `src/main.cpp`.
+- Prefer `[[nodiscard]]` on functions returning error codes or resources.
+- Lines formatted to ≤ 100 characters; `clang-format -i src/*.cpp` before committing.
+- cpplint pre-commit hook enforced — see `.cpplint-rationale.md`.
 
-## 3. Tips for best results
-- Copilot works best when your code and comments are clear.
-- Add docstrings/comments in Python and Doxygen comments in C++; Copilot uses these for smarter completions.
-- Use your IDE's Copilot Chat window to experiment with Copilot's powers!
+## Useful Copilot Chat prompts
 
-## 4. Documentation
-- [Getting Started with Copilot Pro](https://docs.github.com/en/copilot/getting-started-with-github-copilot)
-- [Copilot FAQ](https://docs.github.com/en/copilot/getting-started-with-github-copilot/about-github-copilot)
+```
+Explain the capture-to-classifier data flow in src/main.cpp.
+Write a liquid-dsp FSK demod chain that follows the pattern used by classify_block().
+Generate a pytest-style test for tools/decode_candidates.py that covers the --external flag.
+Refactor the env_to_* helpers in src/main.cpp to reduce repetition.
+Add a Doxygen comment block to the classify_block() function.
+```
+
+## Key architecture notes Copilot should know
+
+- **Thread model:** one capture thread → bounded `std::deque` (max 64 items) → one processing thread.
+- **Snapshot worker:** single joinable `snapshot_worker` thread with a task queue — no detached threads.
+- **SQLite writes:** processing thread only; never from the capture thread.
+- **Signal handling:** `SIGINT`/`SIGTERM` set the `running` atomic flag; all thread loops check it.
+- **Env vars:** all runtime configuration comes from environment variables; use the `env_to_*` helpers for new parameters.
+- **liquid-dsp:** guarded by `#ifdef HAVE_LIQUID`; CMake auto-detects via pkg-config or CMake config.
+- **Band profiles:** `UK_BANDS[]` in `src/main.cpp` — 18 entries with per-band SNR, BW, and prior_boost.
+
+## Resources
+
+- [SoapySDR API docs](https://pothosware.github.io/SoapySDR/doxygen/html/)
+- [liquid-dsp manual](https://liquidsdr.org/doc/)
+- [SQLite C API](https://www.sqlite.org/c3ref/intro.html)
