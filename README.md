@@ -7,8 +7,9 @@ This repo hosts the RF worker hardening and modulation-detection pipeline.
 - `systemd/` — unit + drop-ins
 - `scripts/` — ingest/metrics helpers
 - `config/thresholds.env.example` — overridable knobs
-- `ops/` — deploy/verify/setup helpers
-- `tests/` — (to add) SNR sweep, confusion/BER harness
+- `ops/` — deploy/verify/setup/canary helpers
+- `tests/` — SNR sweep, guardrail, BER, and throughput test harnesses
+- `tools/` — offline decode/audit utilities
 
 ## Quickstart (local)
 1) Copy `config/thresholds.env.example` to `/etc/rf_worker/thresholds.env` (or keep in `config/` but **git-ignored**).
@@ -58,6 +59,124 @@ sudo bash ops/deploy.sh --setup
 
 After setup, decoder binary paths are written to `/etc/rf_worker/thresholds.env`
 so the `process-worker` systemd service picks them up automatically.
+
+## Offline IQ analysis (`tools/decode_candidates.py`)
+
+`decode_candidates.py` retrieves candidate signal records from the SQLite
+database, locates matching IQ snapshot files, and attempts modulation decoding
+using built-in Python decoders (and optional external tools).  It produces a
+verifiable JSON audit report.
+
+### Basic usage
+
+```bash
+# Analyse candidates in the default database with default snapshot directory
+python3 tools/decode_candidates.py
+
+# Specify a custom database, snapshot dir, and output file
+python3 tools/decode_candidates.py \
+    --db rf_adapt_intel.db \
+    --snapshot-dir /var/lib/rf-adapt-intel/snapshots \
+    --out /tmp/audit_report.json \
+    --sample-rate 2048000 \
+    --min-confidence 0.6
+
+# Also invoke external decoders (multimon-ng, rtl_433) where installed
+python3 tools/decode_candidates.py --external
+
+# Process only the 20 most recent candidates
+python3 tools/decode_candidates.py --limit 20
+```
+
+### Output format
+
+The tool writes a JSON file with an array of `candidate` objects.  Each entry
+includes: `signal_id`, `timestamp`, `mod_class`, `confidence`, `snapshot_file`,
+`decoder_used`, `result`, and `notes`.
+
+### Offline file-replay via `process_incoming.sh`
+
+`scripts/process_incoming.sh` runs offline analysis automatically when
+`tools/decode_candidates.py` and `python3` are available:
+
+```bash
+# Analyse an existing IQ snapshot file offline
+OUTPUT_DIR=/tmp/processed bash scripts/process_incoming.sh /path/to/433_signal.raw
+
+# Point at an existing database for candidate lookup
+REPLAY_DB=/var/lib/rf-adapt-intel/rf_adapt_intel.db \
+  bash scripts/process_incoming.sh /path/to/433_signal.raw
+```
+
+## Canary procedure (`ops/canary.sh`)
+
+`ops/canary.sh` manages the canary deployment lifecycle — enabling passive
+capture mode, monitoring FP/FN rates, promoting to production, and rolling back.
+
+```bash
+# Enable canary mode (sets RF_SNR_MIN_DB=0, restarts service)
+sudo bash ops/canary.sh
+
+# Check current FP/FN counters, CPU/memory usage, and lock-fail metrics
+sudo bash ops/canary.sh --status
+
+# Promote canary config to production (removes the canary drop-in)
+sudo bash ops/canary.sh --promote
+
+# Roll back to the last backed-up production config
+sudo bash ops/canary.sh --rollback
+```
+
+Promotion criteria (all must be met before `--promote`):
+- Classifier >= 95 % accuracy at >= 0 dB SNR.
+- False-positive / rejection rate < 3 % over the monitoring window.
+- CPU usage < 80 % on target host.
+- No lock-fail counter increases in the last 30 minutes.
+
+## IQ file transfer (`scripts/transfer_iq.sh`)
+
+Transfer IQ snapshot files from Ray (edge SDR) to Brian (central server) via
+rsync with retries, bandwidth limiting, and logging.
+
+```bash
+# One-shot transfer of all files in the snapshot directory
+IQ_DEST=brian@192.168.1.10:/var/lib/rf-adapt-intel/incoming/ \
+  bash scripts/transfer_iq.sh
+
+# Continuous watcher: transfer new files as they arrive (requires inotify-tools)
+IQ_DEST=brian@192.168.1.10:/var/lib/rf-adapt-intel/incoming/ \
+  bash scripts/transfer_iq.sh --watch
+
+# Limit bandwidth to 512 kbps and use 5 retries
+bash scripts/transfer_iq.sh --dest user@host:path --bwlimit 512 --retries 5
+
+# Dry-run (prints rsync commands without executing)
+bash scripts/transfer_iq.sh --dest user@host:path --dry-run
+```
+
+## Test harnesses
+
+All Python tests use the standard `unittest` module and require only `numpy`.
+
+```bash
+# SNR sweep: accuracy and FP rate across all modulations and SNR levels
+python3 tests/test_snr_sweep.py -v
+
+# Guardrail rejection tests (SNR gate, BW gate, PAPR_MAX)
+python3 tests/test_guardrails.py -v
+
+# BER and CRC-32 validation for each demod chain
+python3 tests/test_demod_ber.py -v
+
+# Throughput benchmark (frames per minute)
+python3 tests/bench_throughput.py -v
+
+# Shell tests for ops/setup.sh
+bash tests/test_setup.sh -v
+
+# Run all tests via CTest (after cmake build)
+cmake --build build --target test
+```
 
 ## Sensitive-data guidance
 - Keep secrets out of git. Use `config/thresholds.env` (ignored) for local overrides.

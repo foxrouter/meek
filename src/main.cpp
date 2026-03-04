@@ -38,6 +38,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+#ifdef HAVE_LIQUID
+#include <liquid/liquid.h>
+#endif
 
 static std::atomic<bool> running{true};
 
@@ -309,6 +312,374 @@ compute_time_occupancy(const std::vector<std::complex<float>> &s) {
 }
 
 // ---------------------------------------------------------------------------
+// liquid-dsp demod helper utilities (compiled only when HAVE_LIQUID is set)
+// ---------------------------------------------------------------------------
+#ifdef HAVE_LIQUID
+
+// CRC-32 (IEEE 802.3 polynomial 0xEDB88320).
+// Packs bits MSB-first into bytes; checks last 32 bits as expected CRC.
+// Returns true when the computed CRC matches the appended 32 CRC bits,
+// which is useful for validating demodulated test vectors.
+static bool check_crc32_bits(const std::vector<unsigned int> &bits) {
+  if (bits.size() < 64)
+    return false;
+  static const auto build_table = []() {
+    std::array<uint32_t, 256> t{};
+    for (uint32_t i = 0; i < 256; ++i) {
+      uint32_t c = i;
+      for (int k = 0; k < 8; ++k)
+        c = (c & 1u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+      t[i] = c;
+    }
+    return t;
+  };
+  static const auto table = build_table();
+
+  size_t payload = bits.size() - 32;
+  uint32_t crc = 0xFFFFFFFFu;
+  for (size_t i = 0; i < payload; i += 8) {
+    uint8_t byte = 0;
+    for (int b = 0; b < 8 && (i + static_cast<size_t>(b)) < payload; ++b)
+      byte = static_cast<uint8_t>((byte << 1) | (bits[i + b] & 1u));
+    crc = table[(crc ^ byte) & 0xFFu] ^ (crc >> 8);
+  }
+  crc ^= 0xFFFFFFFFu;
+  uint32_t expected = 0;
+  for (size_t i = payload; i < bits.size(); ++i)
+    expected = (expected << 1) | (bits[i] & 1u);
+  return (crc == expected);
+}
+
+// IIR DC blocker (first-order high-pass, pole radius = 0.995).
+static void apply_dc_block(std::vector<std::complex<float>> &s) {
+  if (s.empty())
+    return;
+  std::complex<float> prev_x{0.0f, 0.0f};
+  std::complex<float> prev_y{0.0f, 0.0f};
+  const float alpha = 0.995f;
+  for (auto &x : s) {
+    std::complex<float> y = x - prev_x + alpha * prev_y;
+    prev_x = x;
+    prev_y = y;
+    x = y;
+  }
+}
+
+// Coarse CFO estimate via mean phase increment (returns Hz).
+static float estimate_cfo_hz(const std::vector<std::complex<float>> &s,
+                              double fs) {
+  if (s.size() < 2)
+    return 0.0f;
+  double phase_sum = 0.0;
+  for (size_t i = 1; i < s.size(); ++i)
+    phase_sum +=
+        static_cast<double>(std::arg(std::conj(s[i - 1]) * s[i]));
+  float rad_per_samp = static_cast<float>(phase_sum /
+                                          static_cast<double>(s.size() - 1));
+  return rad_per_samp * static_cast<float>(fs) /
+         (2.0f * static_cast<float>(M_PI));
+}
+
+// Copy std::complex<float> array into liquid_float_complex array safely.
+static void to_lfc(const std::vector<std::complex<float>> &src,
+                   std::vector<liquid_float_complex> &dst) {
+  dst.resize(src.size());
+  for (size_t i = 0; i < src.size(); ++i)
+    std::memcpy(&dst[i], &src[i], sizeof(liquid_float_complex));
+}
+
+// ---------------------------------------------------------------------------
+// FSK/GMSK demod chain (liquid-dsp fskdem + NCO PLL)
+// ---------------------------------------------------------------------------
+
+struct FskDemodResult {
+  std::vector<unsigned int> bits;
+  float cfo_hz{0.0f};
+  bool crc_pass{false};
+  unsigned int n_syms{0};
+};
+
+// Demodulate a block of FSK/GMSK IQ samples:
+//   1. DC removal (IIR high-pass).
+//   2. Coarse CFO estimate (mean phase increment).
+//   3. Fine CFO correction via nco_crcf PLL.
+//   4. fskdem binary FSK demodulation (k = fs/rsym, BT = fdev/fs).
+//   5. CRC-32 check on recovered bits (useful for test vectors).
+static FskDemodResult
+demod_fsk_block(const std::vector<std::complex<float>> &s, double fs,
+                double rsym, double fdev) {
+  FskDemodResult res;
+  if (s.empty() || rsym <= 0.0 || fs <= 0.0)
+    return res;
+
+  std::vector<std::complex<float>> sc = s;
+
+  // 1. DC removal
+  apply_dc_block(sc);
+
+  // 2. Coarse CFO estimate
+  res.cfo_hz = estimate_cfo_hz(sc, fs);
+  float cfo_rad =
+      res.cfo_hz * 2.0f * static_cast<float>(M_PI) / static_cast<float>(fs);
+
+  // 3. Fine PLL: mix down by coarse CFO estimate
+  nco_crcf pll = nco_crcf_create(LIQUID_NCO);
+  nco_crcf_set_frequency(pll, -cfo_rad);
+  nco_crcf_pll_set_bandwidth(pll, 0.01f);
+  for (auto &sample : sc) {
+    liquid_float_complex y;
+    liquid_float_complex x;
+    std::memcpy(&x, &sample, sizeof(x));
+    nco_crcf_mix_down(pll, x, &y);
+    std::memcpy(&sample, &y, sizeof(sample));
+    nco_crcf_step(pll);
+  }
+  nco_crcf_destroy(pll);
+
+  // 4. fskdem binary FSK demodulation (M=1 bit/symbol)
+  unsigned int k =
+      std::max(1u, static_cast<unsigned int>(std::round(fs / rsym)));
+  float bw = static_cast<float>(std::clamp(fdev / fs, 1e-4, 0.45));
+  fskdem dem = fskdem_create(1, k, bw);
+
+  std::vector<liquid_float_complex> sc_lfc;
+  to_lfc(sc, sc_lfc);
+
+  res.n_syms = static_cast<unsigned int>(sc_lfc.size() / k);
+  res.bits.reserve(res.n_syms);
+  for (unsigned int i = 0; i < res.n_syms; ++i) {
+    unsigned int sym = fskdem_demodulate(dem, &sc_lfc[i * k]);
+    res.bits.push_back(sym);
+  }
+  fskdem_destroy(dem);
+
+  // 5. CRC-32 check
+  res.crc_pass = check_crc32_bits(res.bits);
+  return res;
+}
+
+// ---------------------------------------------------------------------------
+// PSK/QAM demod chain (symsync + Costas-style NCO PLL + modemcf)
+// ---------------------------------------------------------------------------
+
+struct PskDemodResult {
+  std::vector<unsigned int> symbols;
+  float phase_err_rms{0.0f};
+  bool crc_pass{false};
+  bool carrier_lock{false};
+  modulation_scheme scheme{LIQUID_MODEM_QPSK};
+};
+
+// Demodulate PSK/QAM IQ samples:
+//   1. Symbol timing recovery via symsync_crcf (RRC matched filter).
+//   2. Carrier recovery: try QPSK/BPSK/8PSK with decision-directed NCO PLL
+//      (Costas-loop equivalent); select scheme with lowest RMS phase error.
+//   3. Carrier-lock watchdog: re-init PLL with wider BW on persistent error.
+//   4. Downshift: QPSK → BPSK when QPSK phase error remains high.
+//   5. CRC-32 check on recovered bit sequence.
+static PskDemodResult
+demod_psk_block(const std::vector<std::complex<float>> &s, double fs,
+                double rsym) {
+  PskDemodResult res;
+  if (s.empty() || rsym <= 0.0 || fs <= 0.0)
+    return res;
+
+  unsigned int k =
+      std::max(2u, static_cast<unsigned int>(std::round(fs / rsym)));
+
+  // 1. Symbol timing sync
+  symsync_crcf sync =
+      symsync_crcf_create_rnyquist(LIQUID_FIRFILT_RRC, k, 3, 0.35f, 32);
+
+  std::vector<liquid_float_complex> in_lfc;
+  to_lfc(s, in_lfc);
+
+  // Over-allocate output (symsync produces slightly fewer than n/k symbols)
+  std::vector<liquid_float_complex> synced(s.size() / k + k * 4);
+  unsigned int n_out = 0;
+  symsync_crcf_execute(sync, in_lfc.data(),
+                       static_cast<unsigned int>(in_lfc.size()), synced.data(),
+                       &n_out);
+  symsync_crcf_destroy(sync);
+  if (n_out == 0)
+    return res;
+  synced.resize(n_out);
+
+  // Coarse CFO from synced symbols (symbol-rate domain)
+  std::vector<std::complex<float>> synced_cpp(n_out);
+  for (size_t i = 0; i < n_out; ++i)
+    std::memcpy(&synced_cpp[i], &synced[i], sizeof(std::complex<float>));
+  float cfo_sym_hz = estimate_cfo_hz(synced_cpp, rsym);
+  float cfo_rad_sym =
+      cfo_sym_hz * 2.0f * static_cast<float>(M_PI) / static_cast<float>(rsym);
+
+  // 2. Try QPSK, BPSK, 8PSK — select scheme with lowest RMS phase error
+  //    (Downshift: QPSK → BPSK on persistent high phase error)
+  const modulation_scheme try_schemes[] = {LIQUID_MODEM_QPSK, LIQUID_MODEM_BPSK,
+                                           LIQUID_MODEM_8PSK};
+  float best_err = 1e9f;
+  modulation_scheme best_scheme = LIQUID_MODEM_QPSK;
+
+  for (auto scheme : try_schemes) {
+    modemcf dem = modemcf_create(scheme);
+    nco_crcf nco = nco_crcf_create(LIQUID_NCO);
+    nco_crcf_set_frequency(nco, -cfo_rad_sym);
+    nco_crcf_pll_set_bandwidth(nco, 0.02f);
+
+    float err_sum = 0.0f;
+    for (unsigned int i = 0; i < n_out; ++i) {
+      liquid_float_complex y;
+      nco_crcf_mix_down(nco, synced[i], &y);
+      unsigned int sym;
+      modemcf_demodulate(dem, y, &sym);
+      float pe = modemcf_get_demodulator_phase_error(dem);
+      nco_crcf_pll_step(nco, pe);
+      nco_crcf_step(nco);
+      err_sum += pe * pe;
+    }
+    float rms = (n_out > 0) ? std::sqrt(err_sum / static_cast<float>(n_out))
+                             : 1e9f;
+    if (rms < best_err) {
+      best_err = rms;
+      best_scheme = scheme;
+    }
+    modemcf_destroy(dem);
+    nco_crcf_destroy(nco);
+  }
+
+  // 3. Carrier-lock watchdog: if RMS phase error is high, re-init PLL with
+  //    wider bandwidth (coarse acquisition mode) and retry once.
+  if (best_err > 0.8f) {
+    modemcf dem = modemcf_create(best_scheme);
+    nco_crcf nco = nco_crcf_create(LIQUID_NCO);
+    nco_crcf_set_frequency(nco, -cfo_rad_sym);
+    nco_crcf_pll_set_bandwidth(nco, 0.08f); // wider BW for coarse re-acquisition
+    float err_sum = 0.0f;
+    for (unsigned int i = 0; i < n_out; ++i) {
+      liquid_float_complex y;
+      nco_crcf_mix_down(nco, synced[i], &y);
+      unsigned int sym;
+      modemcf_demodulate(dem, y, &sym);
+      float pe = modemcf_get_demodulator_phase_error(dem);
+      nco_crcf_pll_step(nco, pe);
+      nco_crcf_step(nco);
+      err_sum += pe * pe;
+    }
+    float rms = (n_out > 0) ? std::sqrt(err_sum / static_cast<float>(n_out))
+                             : 1e9f;
+    if (rms < best_err)
+      best_err = rms;
+    modemcf_destroy(dem);
+    nco_crcf_destroy(nco);
+  }
+
+  res.scheme = best_scheme;
+  res.phase_err_rms = best_err;
+  res.carrier_lock = (best_err < 0.5f);
+
+  // 4. Final demod pass with chosen scheme
+  modemcf dem = modemcf_create(best_scheme);
+  nco_crcf nco = nco_crcf_create(LIQUID_NCO);
+  nco_crcf_set_frequency(nco, -cfo_rad_sym);
+  nco_crcf_pll_set_bandwidth(nco, 0.02f);
+  res.symbols.reserve(n_out);
+  for (unsigned int i = 0; i < n_out; ++i) {
+    liquid_float_complex y;
+    nco_crcf_mix_down(nco, synced[i], &y);
+    unsigned int sym;
+    modemcf_demodulate(dem, y, &sym);
+    float pe = modemcf_get_demodulator_phase_error(dem);
+    nco_crcf_pll_step(nco, pe);
+    nco_crcf_step(nco);
+    res.symbols.push_back(sym);
+  }
+  modemcf_destroy(dem);
+  nco_crcf_destroy(nco);
+
+  // 5. Expand symbols to bits for CRC-32
+  int bps = (best_scheme == LIQUID_MODEM_BPSK)   ? 1
+            : (best_scheme == LIQUID_MODEM_QPSK) ? 2
+                                                 : 3;
+  std::vector<unsigned int> bits;
+  bits.reserve(res.symbols.size() * static_cast<size_t>(bps));
+  for (unsigned int sym : res.symbols)
+    for (int b = bps - 1; b >= 0; --b)
+      bits.push_back((sym >> b) & 1u);
+  res.crc_pass = check_crc32_bits(bits);
+  return res;
+}
+
+// ---------------------------------------------------------------------------
+// OOK/AM envelope demod chain
+// ---------------------------------------------------------------------------
+
+struct OokDemodResult {
+  std::vector<unsigned int> bits;
+  float threshold{0.0f};
+  float duty_cycle{0.0f};
+  bool valid{false};
+};
+
+// Demodulate OOK/AM IQ samples:
+//   1. Envelope detection: |z|.
+//   2. MAD-based adaptive threshold (median + 1.4826 * MAD).
+//   3. Duty-cycle consistency: reject if > 0.85 (likely CW, not OOK).
+//   4. Bit recovery: integrate each symbol period and threshold.
+static OokDemodResult
+demod_ook_block(const std::vector<std::complex<float>> &s, double fs,
+                double rsym) {
+  OokDemodResult res;
+  if (s.empty() || rsym <= 0.0 || fs <= 0.0)
+    return res;
+
+  unsigned int k =
+      std::max(1u, static_cast<unsigned int>(std::round(fs / rsym)));
+
+  // 1. Envelope
+  std::vector<float> env;
+  env.reserve(s.size());
+  for (const auto &c : s)
+    env.push_back(std::abs(c));
+
+  // 2. MAD threshold
+  std::vector<float> sorted_env = env;
+  std::sort(sorted_env.begin(), sorted_env.end());
+  float med = sorted_env[sorted_env.size() / 2];
+  std::vector<float> abs_dev;
+  abs_dev.reserve(env.size());
+  for (float e : env)
+    abs_dev.push_back(std::abs(e - med));
+  std::sort(abs_dev.begin(), abs_dev.end());
+  float mad = abs_dev[abs_dev.size() / 2];
+  res.threshold = med + 1.4826f * mad;
+
+  // 3. Duty-cycle consistency check (> 0.85 → CW-like; reject)
+  size_t above = 0;
+  for (float e : env)
+    if (e > res.threshold)
+      ++above;
+  res.duty_cycle =
+      static_cast<float>(above) / static_cast<float>(env.size());
+  if (res.duty_cycle > 0.85f)
+    return res; // valid stays false
+
+  // 4. Bit recovery at expected symbol rate
+  size_t n_syms = env.size() / k;
+  res.bits.reserve(n_syms);
+  for (size_t i = 0; i < n_syms; ++i) {
+    float avg = 0.0f;
+    for (size_t j = 0; j < k; ++j)
+      avg += env[i * k + j];
+    avg /= static_cast<float>(k);
+    res.bits.push_back(avg > res.threshold ? 1u : 0u);
+  }
+  res.valid = true;
+  return res;
+}
+
+#endif // HAVE_LIQUID
+
+// ---------------------------------------------------------------------------
 // UK RTL-SDR v3 band profile table
 // ---------------------------------------------------------------------------
 
@@ -469,11 +840,15 @@ struct ClassifierResult {
 // Multi-class heuristic classifier.
 // snr_min_db: SNR gate threshold (default >0 dB).
 // expected_bw_hz / sample_rate: used for BW guardrail check (0 = skip check).
+// papr_max_db: maximum allowable PAPR in dB (0 = disabled).
+// mod_hint_class: optional prior hint boosting one class score (+0.10).
 // band: optional UK band profile; when non-null applies SNR/BW overrides and
 //       adds a prior_boost to the expected modulation class score.
 static ClassifierResult
 classify_block(const std::vector<std::complex<float>> &s, double min_power,
                double snr_min_db, double expected_bw_hz, double sample_rate,
+               double papr_max_db = 0.0,
+               ModClass mod_hint_class = ModClass::UNKNOWN,
                const BandProfile *band = nullptr) {
   ClassifierResult r;
   if (s.size() < 32)
@@ -538,6 +913,13 @@ classify_block(const std::vector<std::complex<float>> &s, double min_power,
   }
   if (r.avg_pow < min_power || r.avg_pow > 1e3) {
     dt << " [REJECT:power_range]";
+    r.decision_trace = dt.str();
+    return r;
+  }
+  // --- PAPR_MAX gate (disabled when papr_max_db <= 0) ---
+  if (papr_max_db > 0.0 && r.papr_db > papr_max_db) {
+    dt << " [REJECT:papr_max papr=" << std::fixed << r.papr_db << ">"
+       << papr_max_db << "]";
     r.decision_trace = dt.str();
     return r;
   }
@@ -606,6 +988,29 @@ classify_block(const std::vector<std::complex<float>> &s, double min_power,
     }
     dt << " band=" << band->name << "(boost+" << std::fixed
        << std::setprecision(2) << boost << ")";
+  }
+
+  // Apply MOD_HINT prior bias (additive +0.10, independent of band profile)
+  if (mod_hint_class != ModClass::UNKNOWN) {
+    constexpr double kHintBoost = 0.10;
+    switch (mod_hint_class) {
+    case ModClass::CW_LIKE:
+      cw_score = std::min(1.0, cw_score + kHintBoost);
+      break;
+    case ModClass::FSK_LIKE:
+      fsk_score = std::min(1.0, fsk_score + kHintBoost);
+      break;
+    case ModClass::PSK_QAM_LIKE:
+      psk_score = std::min(1.0, psk_score + kHintBoost);
+      break;
+    case ModClass::OOK_AM_LIKE:
+      ook_score = std::min(1.0, ook_score + kHintBoost);
+      break;
+    default:
+      break;
+    }
+    dt << " hint=" << mod_class_name(mod_hint_class) << "(+"
+       << std::fixed << std::setprecision(2) << kHintBoost << ")";
   }
 
   // Winner-takes-all
@@ -771,6 +1176,7 @@ static void processing_thread_func(
     sqlite3 *db, double center_freq, double min_power, double conf_threshold,
     double console_conf, double snapshot_conf, const std::string &snapshot_dir,
     double snr_min_db, double expected_bw_hz, double sample_rate,
+    double papr_max_db, ModClass mod_hint_class, double rsym, double fdev,
     const std::string &metrics_file, const std::string &heartbeat_file,
     const std::string &worker_log) {
   // Resolve band profile once at startup
@@ -809,8 +1215,9 @@ static void processing_thread_func(
       }
     }
 
-    ClassifierResult cr = classify_block(block.samples, min_power, snr_min_db,
-                                         expected_bw_hz, sample_rate, band);
+    ClassifierResult cr =
+        classify_block(block.samples, min_power, snr_min_db, expected_bw_hz,
+                       sample_rate, papr_max_db, mod_hint_class, band);
     ++metrics.frames_total;
 
     if (!cr.snr_gate_pass || !cr.bw_gate_pass ||
@@ -877,6 +1284,36 @@ static void processing_thread_func(
         }
         snap_cv.notify_one();
       }
+
+#ifdef HAVE_LIQUID
+      // Demod pipelines: invoked after classification when confidence passes.
+      // Results are logged to console; extend worker_log as needed.
+      if (cr.mod_class == ModClass::FSK_LIKE) {
+        // FSK/GMSK: DC removal + CFO PLL + fskdem + CRC32
+        auto fsk = demod_fsk_block(block.samples, sample_rate, rsym, fdev);
+        std::cout << "[DEMOD/FSK] n_syms=" << fsk.n_syms
+                  << " cfo_hz=" << fsk.cfo_hz
+                  << " crc=" << (fsk.crc_pass ? "PASS" : "FAIL") << "\n";
+      } else if (cr.mod_class == ModClass::PSK_QAM_LIKE) {
+        // PSK/QAM: symsync + Costas NCO PLL + modemcf + CRC32
+        auto psk = demod_psk_block(block.samples, sample_rate, rsym);
+        const char *scheme_str =
+            (psk.scheme == LIQUID_MODEM_BPSK)   ? "BPSK"
+            : (psk.scheme == LIQUID_MODEM_QPSK) ? "QPSK"
+                                                 : "8PSK";
+        std::cout << "[DEMOD/PSK] scheme=" << scheme_str
+                  << " lock=" << (psk.carrier_lock ? "yes" : "no")
+                  << " phase_err_rms=" << psk.phase_err_rms
+                  << " crc=" << (psk.crc_pass ? "PASS" : "FAIL") << "\n";
+      } else if (cr.mod_class == ModClass::OOK_AM_LIKE) {
+        // OOK/AM: envelope detection + MAD threshold + duty-cycle check
+        auto ook = demod_ook_block(block.samples, sample_rate, rsym);
+        std::cout << "[DEMOD/OOK] n_bits=" << ook.bits.size()
+                  << " duty=" << ook.duty_cycle
+                  << " thresh=" << ook.threshold
+                  << " valid=" << (ook.valid ? "yes" : "no") << "\n";
+      }
+#endif // HAVE_LIQUID
     }
 
     // Write Prometheus metrics and heartbeat every ~10 s
@@ -1059,6 +1496,28 @@ int main(int argc, char **argv) {
   // Expected bandwidth in Hz for BW guardrail (0 = disabled)
   double expected_bw_hz = env_to_d("RF_EXPECTED_BW_HZ", 0.0);
 
+  // PAPR_MAX gate: reject blocks whose PAPR exceeds this (dB); 0 = disabled
+  double papr_max_db = env_to_d("PAPR_MAX", 0.0);
+
+  // MOD_HINT: optional prior hint to bias the classifier (gmsk|fsk|psk|qam|ook|cw)
+  ModClass mod_hint_class = ModClass::UNKNOWN;
+  {
+    std::string hint = env_to_str("MOD_HINT", "");
+    if (hint == "fsk" || hint == "gmsk")
+      mod_hint_class = ModClass::FSK_LIKE;
+    else if (hint == "psk" || hint == "qam")
+      mod_hint_class = ModClass::PSK_QAM_LIKE;
+    else if (hint == "ook" || hint == "am")
+      mod_hint_class = ModClass::OOK_AM_LIKE;
+    else if (hint == "cw")
+      mod_hint_class = ModClass::CW_LIKE;
+  }
+
+  // RSYM / FDEV: symbol rate (sps) and frequency deviation (Hz) used by demod
+  // chains; defaults match ISM-433 band preset.
+  double rsym = env_to_d("RSYM", 128000.0);
+  double fdev = env_to_d("FDEV", 50000.0);
+
   // Observability paths
   std::string metrics_file =
       env_to_str("RF_METRICS_FILE", "/var/lib/rf-adapt-intel/metrics.prom");
@@ -1076,6 +1535,8 @@ int main(int argc, char **argv) {
             << " snapshot_conf=" << snapshot_conf
             << " snapshot_dir=" << snapshot_dir << " snr_min_db=" << snr_min_db
             << " expected_bw_hz=" << expected_bw_hz
+            << " papr_max_db=" << papr_max_db
+            << " rsym=" << rsym << " fdev=" << fdev
             << " metrics_file=" << metrics_file << " worker_log=" << worker_log
             << "\n";
 
@@ -1105,8 +1566,9 @@ int main(int argc, char **argv) {
 
   std::thread proc_th(processing_thread_func, db, center_freq, min_power,
                       conf_threshold, console_conf, snapshot_conf, snapshot_dir,
-                      snr_min_db, expected_bw_hz, sample_rate, metrics_file,
-                      heartbeat_file, worker_log);
+                      snr_min_db, expected_bw_hz, sample_rate, papr_max_db,
+                      mod_hint_class, rsym, fdev, metrics_file, heartbeat_file,
+                      worker_log);
   std::thread snap_th(snapshot_worker);
   std::thread cap_th(capture_thread_func, center_freq, sample_rate, gain,
                      block_len, read_timeout_us);
