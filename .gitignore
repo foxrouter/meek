@@ -21,6 +21,10 @@ Makefile
 *.bin
 *.log
 
+# Python
+__pycache__/
+*.py[cod]
+
 # RF/IQ artifacts
 *.raw
 *.iq
