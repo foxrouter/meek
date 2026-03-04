@@ -44,7 +44,7 @@ There are no automated unit tests yet. When adding tests, place them under `test
 
 ## Deployment
 
-Use `scripts/deploy_and_restart.sh` for build and systemd service restart. The service is named `rf-adapt-intel`. See `docs/rf-adapt-intel-plan.md` for full deployment and hardening details.
+Use `scripts/deploy_and_restart.sh` for build and systemd service restart. The service is named `process-worker`. See `docs/rf-adapt-intel-plan.md` for full deployment and hardening details.
 
 ## Security / Secrets
 

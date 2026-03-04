@@ -1,8 +1,8 @@
-# RF Process Worker (staging)
+# RF Process Worker (`rf_adapt_intel`)
 
-This repo will host the RF worker hardening and modulation-detection pipeline.
+This repo hosts the RF worker hardening and modulation-detection pipeline.
 
-## Layout (proposed)
+## Layout
 - `docs/rf-adapt-intel-plan.md` — main plan (aligned/upgraded)
 - `systemd/` — unit + drop-ins
 - `scripts/` — ingest/metrics helpers
