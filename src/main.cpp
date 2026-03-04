@@ -549,6 +549,8 @@ demod_psk_block(const std::vector<std::complex<float>> &s, double fs,
 
   // 3. Carrier-lock watchdog: if RMS phase error is high, re-init PLL with
   //    wider bandwidth (coarse acquisition mode) and retry once.
+  //    PLL BW 0.08 = 4× the tracking BW (0.02) to handle initial offsets
+  //    while maintaining loop stability.
   if (best_err > 0.8f) {
     modemcf dem = modemcf_create(best_scheme);
     nco_crcf nco = nco_crcf_create(LIQUID_NCO);
@@ -651,6 +653,8 @@ demod_ook_block(const std::vector<std::complex<float>> &s, double fs,
     abs_dev.push_back(std::abs(e - med));
   std::sort(abs_dev.begin(), abs_dev.end());
   float mad = abs_dev[abs_dev.size() / 2];
+  // MAD threshold: 1.4826 ≈ 1/Φ⁻¹(0.75), the scale factor that makes MAD
+  // a consistent estimator of the standard deviation under normality.
   res.threshold = med + 1.4826f * mad;
 
   // 3. Duty-cycle consistency check (> 0.85 → CW-like; reject)

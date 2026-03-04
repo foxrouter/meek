@@ -255,10 +255,14 @@ class TestSnrSweep(unittest.TestCase):
     def test_accuracy_at_0db(self):
         """Classifier must reach >= 95 % accuracy at >= 0 dB SNR.
 
-        NOTE: The current heuristic prototype achieves ~25 % accuracy because
-        the simple spectral-flatness/phase features overlap between classes.
-        This test is marked expectedFailure until the full liquid-dsp demod
-        pipeline is integrated and the feature set is improved.
+        NOTE: The current heuristic classifier achieves ~25 % accuracy because
+        the spectral-flatness/phase features overlap between FSK, CW, OOK, and
+        PSK classes at moderate SNR.  The liquid-dsp demod chains (fskdem,
+        symsync+modemcf, OOK envelope) are implemented in src/main.cpp but the
+        *heuristic feature set* for classification still needs improvement (e.g.
+        adding spectral correlation, kurtosis, and matched-filter metrics) to
+        meet this aspirational target.  Remove @expectedFailure when the
+        classifier accuracy is demonstrated to meet the 95 % threshold.
         """
         results = self._run_sweep()
         trials = [ok for (_, snr), oks in results.items()

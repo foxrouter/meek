@@ -91,13 +91,18 @@ if [[ -f "${DECODE_TOOL}" ]] && command -v python3 &>/dev/null; then
 
   REPORT_FILE="${OUTPUT_DIR}/${BASENAME%.raw}.audit.json"
   echo "[process_incoming] running offline analysis via decode_candidates.py"
-  python3 "${DECODE_TOOL}" \
+  if python3 "${DECODE_TOOL}" \
     ${DB_ARG} \
     --snapshot-dir "${SNAPSHOT_DIR}" \
     --sample-rate "${SAMPLE_RATE}" \
     --out "${REPORT_FILE}" \
-    2>&1 || true
-  echo "[process_incoming] offline report: ${REPORT_FILE}"
+    2>&1; then
+    echo "[process_incoming] offline report: ${REPORT_FILE}"
+  else
+    local rc=$?
+    echo "[process_incoming] WARN: decode_candidates.py exited with status ${rc}" >&2
+    echo "[process_incoming] Check python3 dependencies (numpy) and file permissions."
+  fi
   echo "[process_incoming] output file (replay): ${OUT_FILE}"
   # Copy/symlink the original IQ file to the expected output path
   cp "${IQ_FILE}" "${OUT_FILE}" 2>/dev/null || true

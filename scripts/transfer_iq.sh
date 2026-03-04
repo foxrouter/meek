@@ -76,6 +76,9 @@ run_rsync() {
       log "[dry-run] rsync --bwlimit=${BW_KBPS} '${file}' '${DEST}'"
       return 0
     fi
+    # --partial: resume interrupted transfers; --timeout: abort stalled transfers.
+    # Add --checksum if IQ integrity verification is critical (increases bandwidth
+    # usage since rsync re-reads both sides to compare checksums).
     if rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
         "${file}" "${DEST}" 2>&1 | tee -a "${TRANSFER_LOG}"; then
       log "OK transferred: $(basename "${file}")"

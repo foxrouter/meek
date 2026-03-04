@@ -195,13 +195,17 @@ class TestSnrGateRejection(unittest.TestCase):
         np.random.seed(0)
 
     def test_below_gate_threshold_rejected(self):
-        """Signal at 5 dB SNR rejected when gate is set to 20 dB."""
-        # Use a high gate threshold that a real signal cannot satisfy to
-        # guarantee REJECT:snr_gate regardless of signal type.
-        s = _awgn(_fsk2(), snr_db=15.0)
-        r = classify_with_trace(s, snr_min_db=50.0)
+        """FSK signal (est. ~1-5 dB by median estimator) rejected when gate=7 dB.
+
+        The median-based SNR estimator returns ~1-5 dB for constant-amplitude
+        signals (FSK/CW) because they have low power variance.  A 7 dB gate is
+        therefore a realistic threshold that causes REJECT:snr_gate.
+        """
+        s = _awgn(_fsk2(), snr_db=20.0)
+        r = classify_with_trace(s, snr_min_db=7.0)
         self.assertFalse(r["snr_gate_pass"],
-                         "Signal should fail a 50 dB SNR gate")
+                         "FSK block should fail a 7 dB SNR gate "
+                         "(median estimator yields ~1-5 dB for const-amp signals)")
         self.assertIn("REJECT:snr_gate", r["decision_trace"])
 
     def test_signal_passes_gate(self):
@@ -290,9 +294,9 @@ class TestRejectionInWorkerLog(unittest.TestCase):
 
     def test_snr_rejection_in_log(self):
         np.random.seed(3)
-        # Use a high gate (50 dB) to guarantee REJECT:snr_gate on any real signal
-        s = _awgn(_fsk2(), snr_db=15.0)
-        r = classify_with_trace(s, snr_min_db=50.0)
+        # FSK signal: median-based estimator gives ~1-5 dB; 7 dB gate rejects it
+        s = _awgn(_fsk2(), snr_db=20.0)
+        r = classify_with_trace(s, snr_min_db=7.0)
         log_line = self._make_json_log_entry(r["decision_trace"])
         parsed = json.loads(log_line)
         self.assertIn("REJECT:snr_gate", parsed["decision_trace"])

@@ -146,7 +146,13 @@ def _gen_ook_with_bits(bits: List[int], sps: int) -> np.ndarray:
 
 
 def demod_ook_py(s: np.ndarray, sps: int) -> List[int]:
-    """OOK demod: half-maximum threshold (robust for binary OOK signals)."""
+    """OOK demod: half-maximum threshold.
+
+    Uses half the maximum envelope amplitude as the threshold.  This is
+    optimal for binary OOK with ~50 % duty cycle; for very low duty cycles
+    (< 10 %) the MAD-based threshold used in the C++ implementation may be
+    more robust (fewer false "on" detections from noise bursts).
+    """
     env = np.abs(s)
     max_env = float(np.max(env))
     if max_env < 1e-10:
