@@ -25,6 +25,7 @@ Makefile
 *.raw
 *.iq
 *.iq16
+*.cf32
 *.wav
 
 # Local env/secrets

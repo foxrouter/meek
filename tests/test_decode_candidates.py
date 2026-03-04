@@ -1,0 +1,613 @@
+#!/usr/bin/env python3
+"""
+tests/test_decode_candidates.py — Unit/integration tests for
+tools/decode_candidates.py.
+
+Run with:
+    python3 tests/test_decode_candidates.py [-v]
+
+Requires: numpy (already required by gen_test_signals.py)
+"""
+
+import hashlib
+import json
+import math
+import os
+import shutil
+import sqlite3
+import struct
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+import numpy as np
+
+# Make tools/ importable regardless of working directory
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT / "tools"))
+import decode_candidates as dc  # noqa: E402 (after sys.path manipulation)
+
+
+# ---------------------------------------------------------------------------
+# Synthetic IQ helpers (duplicates gen_test_signals.py logic to keep tests
+# self-contained without depending on the generator script)
+# ---------------------------------------------------------------------------
+
+FS = 2_048_000  # default sample rate
+SPS = 8         # samples per symbol
+
+
+def _awgn(signal: np.ndarray, snr_db: float) -> np.ndarray:
+    sig_pow   = float(np.mean(np.abs(signal) ** 2)) or 1.0
+    noise_pow = sig_pow / 10 ** (snr_db / 10.0)
+    noise     = np.sqrt(noise_pow / 2.0) * (
+        np.random.randn(len(signal)) + 1j * np.random.randn(len(signal))
+    )
+    return (signal + noise).astype(np.complex64)
+
+
+def make_fsk2(n_syms: int = 400, sps: int = SPS,
+              fdev: float = 50_000, fs: float = FS,
+              snr_db: float = 15.0) -> np.ndarray:
+    bits      = np.random.randint(0, 2, n_syms)
+    freqs     = (2 * bits - 1) * fdev
+    phase_inc = 2.0 * math.pi * freqs / fs
+    phase     = np.repeat(phase_inc, sps)
+    s         = np.exp(1j * np.cumsum(phase)).astype(np.complex64)
+    return _awgn(s, snr_db)
+
+
+def make_qpsk(n_syms: int = 400, sps: int = SPS,
+              snr_db: float = 15.0) -> np.ndarray:
+    bits    = np.random.randint(0, 2, (n_syms, 2))
+    symbols = ((2 * bits[:, 0] - 1) + 1j * (2 * bits[:, 1] - 1)) / math.sqrt(2)
+    up      = np.zeros(n_syms * sps, dtype=complex)
+    up[::sps] = symbols
+    return _awgn(up.astype(np.complex64), snr_db)
+
+
+def make_ook(n_syms: int = 400, sps: int = SPS,
+             snr_db: float = 15.0) -> np.ndarray:
+    bits = (np.random.random(n_syms) < 0.5).astype(float)
+    s    = np.repeat(bits, sps).astype(np.complex64)
+    return _awgn(s, snr_db)
+
+
+def make_cw(n_samples: int = 3200, fs: float = FS,
+            freq_offset: float = 1_000.0, snr_db: float = 20.0) -> np.ndarray:
+    t = np.arange(n_samples) / fs
+    s = np.exp(1j * 2.0 * math.pi * freq_offset * t).astype(np.complex64)
+    return _awgn(s, snr_db)
+
+
+def cf32_bytes(samples: np.ndarray) -> bytes:
+    """Interleaved CF32 bytes from a complex64 numpy array."""
+    interleaved = np.empty(len(samples) * 2, dtype=np.float32)
+    interleaved[0::2] = samples.real
+    interleaved[1::2] = samples.imag
+    return interleaved.tobytes()
+
+
+# ---------------------------------------------------------------------------
+# SQLite DB fixture helpers
+# ---------------------------------------------------------------------------
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT DEFAULT (datetime('now')),
+    source TEXT,
+    note TEXT
+);
+CREATE TABLE IF NOT EXISTS methods (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    params_json TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS examples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id INTEGER REFERENCES signals(id),
+    method_id INTEGER,
+    result TEXT,
+    confidence REAL,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+"""
+
+_TRACE_TMPL = (
+    "snr=15.000dB avg_pow=1.000e-02 papr=3.000dB flat=0.500 occ=0.750 "
+    "phase=0.400 trans=0.300 p50=1.000e-02 p90=2.000e-02 "
+    "scores(cw=0.100,fsk=0.750,psk=0.200,ook=0.100) -> {mod}@{conf:.3f} "
+    "band={band}(boost+0.10)"
+)
+
+
+def _populate_db(conn: sqlite3.Connection,
+                 records: List[Tuple[str, float, str]]) -> List[int]:
+    """Insert (mod_class, confidence, band) tuples; return list of signal IDs."""
+    conn.executescript(_SCHEMA)
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO methods (name, params_json) VALUES (?, ?)",
+        ("modulation_classifier",
+         '{"type":"heuristic","version":2,"classes":["cw_like","fsk_like","psk_qam_like","ook_am_like"]}'),
+    )
+    method_id = cur.lastrowid
+    sig_ids: List[int] = []
+    for mod, conf, band in records:
+        trace = _TRACE_TMPL.format(mod=mod, conf=conf, band=band)
+        cur.execute(
+            "INSERT INTO signals (source, note) VALUES (?, ?)",
+            ("test_fixture", trace),
+        )
+        sig_id = cur.lastrowid
+        cur.execute(
+            "INSERT INTO examples (signal_id, method_id, result, confidence, notes) "
+            "VALUES (?, ?, 'candidate', ?, ?)",
+            (sig_id, method_id, conf, trace),
+        )
+        sig_ids.append(sig_id)
+    conn.commit()
+    return sig_ids
+
+
+# ---------------------------------------------------------------------------
+# Tests: parse_decision_trace
+# ---------------------------------------------------------------------------
+
+class TestParseDecisionTrace(unittest.TestCase):
+    def test_fsk_with_band(self):
+        trace = (
+            "snr=12.500dB avg_pow=5.000e-03 papr=2.000dB flat=0.600 "
+            "occ=0.800 phase=0.500 trans=0.350 p50=5.000e-03 p90=1.000e-02 "
+            "scores(cw=0.050,fsk=0.820,psk=0.100,ook=0.030) -> fsk_like@0.820 "
+            "band=ISM-433(boost+0.10)"
+        )
+        mod, conf, band, snr = dc.parse_decision_trace(trace)
+        self.assertEqual(mod, "fsk_like")
+        self.assertAlmostEqual(conf, 0.820, places=3)
+        self.assertEqual(band, "ISM-433")
+        self.assertAlmostEqual(snr, 12.5, places=1)
+
+    def test_ook_no_band(self):
+        trace = "snr=5.000dB occ=0.400 scores(cw=0.0,fsk=0.1,psk=0.0,ook=0.70) -> ook_am_like@0.700"
+        mod, conf, band, snr = dc.parse_decision_trace(trace)
+        self.assertEqual(mod, "ook_am_like")
+        self.assertAlmostEqual(conf, 0.700, places=3)
+        self.assertEqual(band, "")
+        self.assertAlmostEqual(snr, 5.0, places=1)
+
+    def test_empty_trace(self):
+        mod, conf, band, snr = dc.parse_decision_trace("")
+        self.assertEqual(mod, "unknown")
+        self.assertEqual(conf, 0.0)
+
+    def test_none_trace(self):
+        mod, conf, band, snr = dc.parse_decision_trace(None)
+        self.assertEqual(mod, "unknown")
+
+
+# ---------------------------------------------------------------------------
+# Tests: load_cf32 / sha256_file
+# ---------------------------------------------------------------------------
+
+class TestCf32Helpers(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(0)
+        self._tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp)
+
+    def _write_cf32(self, fname: str, samples: np.ndarray) -> str:
+        path = os.path.join(self._tmp, fname)
+        with open(path, "wb") as fh:
+            fh.write(cf32_bytes(samples))
+        return path
+
+    def test_roundtrip(self):
+        orig = (np.random.randn(100) + 1j * np.random.randn(100)).astype(np.complex64)
+        path = self._write_cf32("test.cf32", orig)
+        loaded = dc.load_cf32(path)
+        np.testing.assert_allclose(loaded.real, orig.real, rtol=1e-5)
+        np.testing.assert_allclose(loaded.imag, orig.imag, rtol=1e-5)
+
+    def test_max_samples(self):
+        orig = (np.random.randn(200) + 1j * np.random.randn(200)).astype(np.complex64)
+        path = self._write_cf32("test_trunc.cf32", orig)
+        loaded = dc.load_cf32(path, max_samples=50)
+        self.assertEqual(len(loaded), 50)
+
+    def test_sha256(self):
+        orig = np.ones(16, dtype=np.complex64)
+        path = self._write_cf32("sha.cf32", orig)
+        digest = dc.sha256_file(path)
+        self.assertEqual(len(digest), 64)
+        # Deterministic: same file → same hash
+        self.assertEqual(digest, dc.sha256_file(path))
+
+
+# ---------------------------------------------------------------------------
+# Tests: built-in decoders
+# ---------------------------------------------------------------------------
+
+class TestDecodeFsk(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(42)
+
+    def test_decoded_flag(self):
+        samples = make_fsk2()
+        result  = dc.decode_fsk(samples, fs=FS)
+        self.assertTrue(result["decoded"])
+        self.assertEqual(result["method"], "built_in_fm_demod")
+
+    def test_returns_bit_string(self):
+        samples = make_fsk2()
+        result  = dc.decode_fsk(samples, fs=FS)
+        bits    = result["first_64_bits"]
+        self.assertIsInstance(bits, str)
+        self.assertTrue(all(c in "01" for c in bits))
+        self.assertGreater(len(bits), 0)
+
+    def test_too_few_samples(self):
+        result = dc.decode_fsk(np.zeros(8, dtype=np.complex64))
+        self.assertFalse(result["decoded"])
+
+
+class TestDecodePskQam(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(42)
+
+    def test_decoded_flag_qpsk(self):
+        samples = make_qpsk()
+        result  = dc.decode_psk_qam(samples, fs=FS)
+        self.assertTrue(result["decoded"])
+        self.assertEqual(result["method"], "built_in_phase_histogram")
+
+    def test_constellation_range(self):
+        samples = make_qpsk()
+        result  = dc.decode_psk_qam(samples, fs=FS)
+        self.assertIn(result["est_constellation"], ("2PSK", "4PSK", "8PSK"))
+
+    def test_too_few_samples(self):
+        result = dc.decode_psk_qam(np.zeros(10, dtype=np.complex64))
+        self.assertFalse(result["decoded"])
+
+
+class TestDecodeOokAm(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(42)
+
+    def test_decoded_flag(self):
+        samples = make_ook()
+        result  = dc.decode_ook_am(samples, fs=FS)
+        self.assertTrue(result["decoded"])
+        self.assertEqual(result["method"], "built_in_envelope_detect")
+
+    def test_duty_cycle_in_range(self):
+        samples = make_ook()
+        result  = dc.decode_ook_am(samples, fs=FS)
+        self.assertGreaterEqual(result["duty_cycle"], 0.0)
+        self.assertLessEqual(result["duty_cycle"], 1.0)
+
+    def test_too_few_samples(self):
+        result = dc.decode_ook_am(np.zeros(4, dtype=np.complex64))
+        self.assertFalse(result["decoded"])
+
+
+class TestDecodeCw(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(42)
+
+    def test_decoded_flag(self):
+        samples = make_cw(n_samples=4096)
+        result  = dc.decode_cw(samples, fs=FS)
+        self.assertTrue(result["decoded"])
+        self.assertEqual(result["method"], "built_in_fft_peak")
+
+    def test_carrier_frequency_ballpark(self):
+        """Detected carrier should be within ±5 kHz of the injected 1 kHz tone."""
+        samples = make_cw(n_samples=8192, freq_offset=1_000.0, snr_db=30.0)
+        result  = dc.decode_cw(samples, fs=FS)
+        self.assertAlmostEqual(result["carrier_hz"], 1_000.0, delta=5_000.0)
+
+    def test_snr_positive_for_clean_cw(self):
+        samples = make_cw(n_samples=4096, snr_db=30.0)
+        result  = dc.decode_cw(samples, fs=FS)
+        self.assertGreater(result["snr_db"], 0.0)
+
+    def test_too_few_samples(self):
+        result = dc.decode_cw(np.zeros(10, dtype=np.complex64))
+        self.assertFalse(result["decoded"])
+
+
+# ---------------------------------------------------------------------------
+# Tests: snapshot indexing and matching
+# ---------------------------------------------------------------------------
+
+class TestSnapshotMatching(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp)
+
+    def _make_snap(self, ts_ns: int, conf_pct: int,
+                   samples: np.ndarray) -> str:
+        fname = f"snap_{ts_ns}_c{conf_pct}.cf32"
+        path  = os.path.join(self._tmp, fname)
+        with open(path, "wb") as fh:
+            fh.write(cf32_bytes(samples))
+        return path
+
+    def test_index_finds_files(self):
+        np.random.seed(0)
+        for i in range(3):
+            self._make_snap(1_000_000 + i, 750, np.ones(32, dtype=np.complex64))
+        snaps = dc.index_snapshots(self._tmp)
+        self.assertEqual(len(snaps), 3)
+
+    def test_index_skips_non_matching_files(self):
+        # Create a non-matching file
+        Path(os.path.join(self._tmp, "other_file.txt")).write_text("hello")
+        snaps = dc.index_snapshots(self._tmp)
+        self.assertEqual(len(snaps), 0)
+
+    def test_match_by_conf_pct(self):
+        np.random.seed(0)
+        self._make_snap(999_000_000, 750, np.ones(32, dtype=np.complex64))
+        snaps = dc.index_snapshots(self._tmp)
+        cand  = {
+            "confidence":   0.750,
+            "db_timestamp": "2025-01-01 12:00:00",
+        }
+        snap  = dc.match_snapshot(cand, snaps)
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap["conf_pct"], 750)
+
+    def test_no_match_returns_none(self):
+        snaps = dc.index_snapshots(self._tmp)  # empty dir
+        snap  = dc.match_snapshot({"confidence": 0.750, "db_timestamp": ""}, snaps)
+        self.assertIsNone(snap)
+
+    def test_empty_snapshot_dir(self):
+        snaps = dc.index_snapshots(self._tmp)
+        self.assertEqual(snaps, [])
+
+    def test_missing_snapshot_dir(self):
+        snaps = dc.index_snapshots("/nonexistent/path")
+        self.assertEqual(snaps, [])
+
+
+# ---------------------------------------------------------------------------
+# Tests: query_candidates
+# ---------------------------------------------------------------------------
+
+class TestQueryCandidates(unittest.TestCase):
+    def setUp(self):
+        self._tmp  = tempfile.mkdtemp()
+        self._dbp  = os.path.join(self._tmp, "test.db")
+        self._conn = sqlite3.connect(self._dbp)
+
+    def tearDown(self):
+        self._conn.close()
+        shutil.rmtree(self._tmp)
+
+    def _make_db(self, records):
+        return _populate_db(self._conn, records)
+
+    def test_returns_correct_count(self):
+        self._make_db([
+            ("fsk_like", 0.80, "ISM-433"),
+            ("ook_am_like", 0.65, "TPMS-433"),
+            ("cw_like", 0.50, ""),  # below default 0.6 threshold
+        ])
+        rows = dc.query_candidates(self._dbp, min_confidence=0.6, limit=100)
+        self.assertEqual(len(rows), 2)
+
+    def test_respects_limit(self):
+        self._make_db([
+            ("fsk_like", 0.90, "ISM-433"),
+            ("fsk_like", 0.85, "ISM-433"),
+            ("fsk_like", 0.80, "ISM-433"),
+        ])
+        rows = dc.query_candidates(self._dbp, min_confidence=0.6, limit=2)
+        self.assertEqual(len(rows), 2)
+
+    def test_ordered_by_confidence_desc(self):
+        self._make_db([
+            ("fsk_like", 0.70, ""),
+            ("fsk_like", 0.90, ""),
+            ("fsk_like", 0.80, ""),
+        ])
+        rows = dc.query_candidates(self._dbp, min_confidence=0.6, limit=10)
+        confs = [r["confidence"] for r in rows]
+        self.assertEqual(confs, sorted(confs, reverse=True))
+
+    def test_empty_db_returns_empty_list(self):
+        self._conn.executescript(_SCHEMA)
+        self._conn.commit()
+        rows = dc.query_candidates(self._dbp, min_confidence=0.6, limit=10)
+        self.assertEqual(rows, [])
+
+
+# ---------------------------------------------------------------------------
+# Integration test: end-to-end with synthetic DB + snapshot files
+# ---------------------------------------------------------------------------
+
+class TestEndToEnd(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(7)
+        self._tmp    = tempfile.mkdtemp()
+        self._dbp    = os.path.join(self._tmp, "test.db")
+        self._snapd  = os.path.join(self._tmp, "snapshots")
+        self._report = os.path.join(self._tmp, "report.json")
+        os.makedirs(self._snapd, exist_ok=True)
+
+        # Build DB with 3 candidate records
+        conn   = sqlite3.connect(self._dbp)
+        sig_ids = _populate_db(
+            conn,
+            [
+                ("fsk_like",     0.810, "ISM-433"),
+                ("ook_am_like",  0.720, "TPMS-433"),
+                ("psk_qam_like", 0.650, "VDL2"),
+            ],
+        )
+        conn.close()
+
+        # Create matching snapshot files (conf_pct = int(conf * 1000))
+        self._snap_paths: Dict[int, str] = {}
+        pairs = [
+            (sig_ids[0], 810, make_fsk2()),
+            (sig_ids[1], 720, make_ook()),
+            (sig_ids[2], 650, make_qpsk()),
+        ]
+        for sig_id, conf_pct, samples in pairs:
+            ts_ns = 1_700_000_000_000_000_000 + sig_id * 1_000_000
+            fname = f"snap_{ts_ns}_c{conf_pct}.cf32"
+            path  = os.path.join(self._snapd, fname)
+            with open(path, "wb") as fh:
+                fh.write(cf32_bytes(samples))
+            self._snap_paths[sig_id] = path
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp)
+
+    def test_main_exits_zero(self):
+        rc = dc.main([
+            "--db",           self._dbp,
+            "--snapshot-dir", self._snapd,
+            "--out",          self._report,
+            "--min-confidence", "0.6",
+            "--limit",        "50",
+        ])
+        self.assertEqual(rc, 0)
+
+    def test_report_written(self):
+        dc.main([
+            "--db",           self._dbp,
+            "--snapshot-dir", self._snapd,
+            "--out",          self._report,
+        ])
+        self.assertTrue(os.path.isfile(self._report))
+
+    def test_report_structure(self):
+        dc.main([
+            "--db",           self._dbp,
+            "--snapshot-dir", self._snapd,
+            "--out",          self._report,
+        ])
+        with open(self._report, encoding="utf-8") as fh:
+            report = json.load(fh)
+
+        self.assertIn("report_version", report)
+        self.assertIn("generated_at",   report)
+        self.assertIn("parameters",     report)
+        self.assertIn("summary",        report)
+        self.assertIn("results",        report)
+
+        summ = report["summary"]
+        self.assertEqual(summ["candidates_queried"], 3)
+        self.assertEqual(summ["snapshots_matched"],  3)
+        self.assertGreaterEqual(summ["decoded"], 1)
+
+    def test_each_result_has_required_keys(self):
+        dc.main([
+            "--db",           self._dbp,
+            "--snapshot-dir", self._snapd,
+            "--out",          self._report,
+        ])
+        with open(self._report, encoding="utf-8") as fh:
+            report = json.load(fh)
+
+        required = {
+            "signal_id", "db_timestamp", "mod_class", "confidence",
+            "snapshot_found", "snapshot_file", "snapshot_sha256",
+            "snapshot_samples", "decode_result", "decoded", "decoder_used",
+        }
+        for r in report["results"]:
+            self.assertTrue(required.issubset(set(r.keys())),
+                            msg=f"Missing keys in: {r}")
+
+    def test_snapshot_sha256_is_hex64(self):
+        dc.main([
+            "--db",           self._dbp,
+            "--snapshot-dir", self._snapd,
+            "--out",          self._report,
+        ])
+        with open(self._report, encoding="utf-8") as fh:
+            results = json.load(fh)["results"]
+        for r in results:
+            if r["snapshot_found"]:
+                self.assertIsNotNone(r["snapshot_sha256"])
+                self.assertRegex(r["snapshot_sha256"], r"^[0-9a-f]{64}$")
+
+    def test_missing_db_returns_nonzero(self):
+        rc = dc.main([
+            "--db",           "/nonexistent/db.sqlite",
+            "--snapshot-dir", self._snapd,
+            "--out",          self._report,
+        ])
+        self.assertNotEqual(rc, 0)
+
+    def test_no_snapshot_dir_graceful(self):
+        """Should still produce a report when snapshot dir does not exist."""
+        rc = dc.main([
+            "--db",           self._dbp,
+            "--snapshot-dir", "/nonexistent/snaps",
+            "--out",          self._report,
+        ])
+        self.assertEqual(rc, 0)
+        with open(self._report, encoding="utf-8") as fh:
+            report = json.load(fh)
+        self.assertEqual(report["summary"]["snapshots_matched"], 0)
+
+
+# ---------------------------------------------------------------------------
+# Tests: build_report structure
+# ---------------------------------------------------------------------------
+
+class TestBuildReport(unittest.TestCase):
+    def _dummy_result(self, decoded: bool, decoder: str = "built_in_fm_demod",
+                      snap_found: bool = True) -> Dict[str, Any]:
+        return {
+            "signal_id": 1, "example_id": 1, "db_timestamp": "2025-01-01 00:00:00",
+            "source": "test", "mod_class": "fsk_like", "confidence": 0.8,
+            "snr_db": 12.0, "band": "ISM-433", "snapshot_found": snap_found,
+            "snapshot_file": "snap_123_c800.cf32" if snap_found else None,
+            "snapshot_sha256": "a" * 64 if snap_found else None,
+            "snapshot_samples": 1000 if snap_found else None,
+            "decode_result": {"decoded": decoded, "method": decoder},
+            "decoded": decoded,
+            "decoder_used": decoder if decoded else None,
+        }
+
+    def test_summary_counts(self):
+        results = [
+            self._dummy_result(True),
+            self._dummy_result(True),
+            self._dummy_result(False),
+            self._dummy_result(False, snap_found=False),
+        ]
+        report = dc.build_report("/db.sqlite", "/snaps", results, results,
+                                 {"min_confidence": 0.6, "limit": 100,
+                                  "sample_rate": 2_048_000, "external": False})
+        s = report["summary"]
+        self.assertEqual(s["candidates_queried"], 4)
+        self.assertEqual(s["snapshots_matched"],  3)
+        self.assertEqual(s["decoded"],            2)
+        self.assertEqual(s["not_decoded"],        2)
+        self.assertEqual(s["decoded_by_decoder"]["built_in_fm_demod"], 2)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
