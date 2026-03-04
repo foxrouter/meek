@@ -1,5 +1,11 @@
 /*
-  rf_adapt_intel — SoapySDR capture -> simple GMSK-ish detector (Hybrid mode)
+  rf_adapt_intel — SoapySDR capture -> modulation classifier + demod pipeline
+  - Two-stage pipeline: presence/SNR gate -> multi-class classifier
+  - Classifies: GMSK/FSK, PSK/QAM, OOK/AM, CW-like using spectral features
+  - SNR gate (>0 dB by default, relaxed in canary mode)
+  - BW guardrail: ±25% from band-expected bandwidth
+  - Outputs decision_trace + per-class confidence to JSON worker log
+  - Prometheus textfile at RF_METRICS_FILE; heartbeat at RF_HEARTBEAT_FILE
   - Always stores candidate rows to DB when conf > RF_CONF_THRESHOLD
   - Only logs to console when conf >= RF_CONSOLE_CONF
   - Saves raw CF32 IQ snapshot files when conf >= RF_SNAPSHOT_CONF
@@ -9,7 +15,7 @@
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Errors.hpp>
 #include <SoapySDR/Formats.hpp>
-#include <algorithm> // clamp
+#include <algorithm> // clamp, sort
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -26,6 +32,7 @@
 #include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <numeric> // accumulate
 #include <sqlite3.h>
 #include <sstream>
 #include <string>
@@ -154,35 +161,120 @@ static void insert_example(sqlite3 *db, int signal_id, int method_id,
   sqlite3_finalize(stmt);
 }
 
-// Simple heuristic detector: returns confidence [0,1]
-static double attempt_gmsk_simple(const std::vector<std::complex<float>> &s,
-                                  double min_power) {
-  if (s.size() < 32)
+// ---------------------------------------------------------------------------
+// Spectral / time-domain feature extraction
+// ---------------------------------------------------------------------------
+
+// Minimum amplitude to consider a sample valid (avoids noisy phase estimates).
+static constexpr float kAmplitudeEpsilon = 1e-6f;
+
+// Compute average power of the sample block.
+static double compute_avg_power(const std::vector<std::complex<float>> &s) {
+  if (s.empty())
     return 0.0;
-  double sum_pow = 0.0;
-  for (auto &c : s)
-    sum_pow += std::norm(c);
-  double avg_pow = sum_pow / s.size();
+  double sum = 0.0;
+  for (const auto &c : s)
+    sum += std::norm(c);
+  return sum / s.size();
+}
 
-  // Minimum amplitude to consider a sample valid; below this level the sample
-  // is indistinguishable from ADC noise floor and produces unreliable phase
-  // estimates (~120 dB below full-scale for 24-bit-equivalent float range).
-  static constexpr float kAmplitudeEpsilon = 1e-6f;
+// Compute SNR estimate (dB) using the median as a noise-floor proxy.
+// Returns the ratio signal_power/noise_floor in dB.
+// A copy is used so we can sort without disturbing the original block.
+static double compute_snr_db(const std::vector<std::complex<float>> &s) {
+  if (s.size() < 4)
+    return -999.0;
+  std::vector<float> powers;
+  powers.reserve(s.size());
+  for (const auto &c : s)
+    powers.push_back(std::norm(c));
+  std::sort(powers.begin(), powers.end());
+  // noise floor ≈ median; signal ≈ mean of upper quartile
+  size_t n = powers.size();
+  double noise = static_cast<double>(powers[n / 2]);
+  if (noise < 1e-30)
+    return -999.0;
+  double sig_sum = 0.0;
+  size_t q3 = 3 * n / 4;
+  for (size_t i = q3; i < n; ++i)
+    sig_sum += powers[i];
+  double sig = sig_sum / static_cast<double>(n - q3);
+  return 10.0 * std::log10(sig / noise);
+}
 
+// Compute PAPR (peak-to-average power ratio) in dB.
+static double compute_papr_db(const std::vector<std::complex<float>> &s,
+                              double avg_pow) {
+  if (s.empty() || avg_pow < 1e-30)
+    return 0.0;
+  float peak = 0.0f;
+  for (const auto &c : s) {
+    float p = std::norm(c);
+    if (p > peak)
+      peak = p;
+  }
+  return 10.0 * std::log10(static_cast<double>(peak) / avg_pow);
+}
+
+// Compute spectral flatness of instantaneous power (Wiener entropy proxy).
+// Returns value in [0,1]; 1 = noise-flat, 0 = tonal.
+static double
+compute_spectral_flatness(const std::vector<std::complex<float>> &s) {
+  if (s.size() < 4)
+    return 1.0;
+  // Use instantaneous power samples as a proxy for the spectral envelope.
+  std::vector<double> p;
+  p.reserve(s.size());
+  for (const auto &c : s) {
+    double pw = std::norm(c);
+    if (pw > 0.0)
+      p.push_back(pw);
+  }
+  if (p.empty())
+    return 1.0;
+  double log_sum = 0.0;
+  double lin_sum = 0.0;
+  for (double v : p) {
+    log_sum += std::log(v);
+    lin_sum += v;
+  }
+  double geo_mean = std::exp(log_sum / static_cast<double>(p.size()));
+  double arith_mean = lin_sum / static_cast<double>(p.size());
+  return (arith_mean > 0.0) ? geo_mean / arith_mean : 1.0;
+}
+
+// Compute p50 and p90 of instantaneous power (for burst-length heuristics).
+static void compute_power_percentiles(const std::vector<std::complex<float>> &s,
+                                      double &p50, double &p90) {
+  if (s.empty()) {
+    p50 = p90 = 0.0;
+    return;
+  }
+  std::vector<float> pw;
+  pw.reserve(s.size());
+  for (const auto &c : s)
+    pw.push_back(std::norm(c));
+  std::sort(pw.begin(), pw.end());
+  size_t n = pw.size();
+  p50 = static_cast<double>(pw[n / 2]);
+  p90 = static_cast<double>(pw[9 * n / 10]);
+}
+
+// Compute average absolute phase increment (FM-ness indicator).
+// Also returns phase transition ratio for FSK/GMSK heuristic.
+static void compute_phase_stats(const std::vector<std::complex<float>> &s,
+                                double &avg_abs_phase, double &trans_ratio) {
   size_t transitions = 0;
   double phase_sum = 0.0;
   size_t valid_pairs = 0;
-  std::complex<float> prev = s[0];
+  std::complex<float> prev = s.empty() ? std::complex<float>(0) : s[0];
   for (size_t i = 1; i < s.size(); ++i) {
-    std::complex<float> cur = s[i];
-    // Skip near-zero samples to avoid noisy phase estimates
+    const std::complex<float> cur = s[i];
     if (std::abs(prev) < kAmplitudeEpsilon ||
         std::abs(cur) < kAmplitudeEpsilon) {
       prev = cur;
       continue;
     }
-    // Use conjugate product to get phase difference directly; avoids double
-    // arg() call and the manual wrap-around loop.
     float d = std::arg(std::conj(prev) * cur);
     phase_sum += std::abs(d);
     if (std::abs(d) > 0.5f)
@@ -190,19 +282,199 @@ static double attempt_gmsk_simple(const std::vector<std::complex<float>> &s,
     ++valid_pairs;
     prev = cur;
   }
-  if (valid_pairs == 0)
-    return 0.0;
-  double avg_abs_phase = phase_sum / valid_pairs;
-  double trans_ratio = double(transitions) / double(valid_pairs);
+  avg_abs_phase = valid_pairs ? phase_sum / valid_pairs : 0.0;
+  trans_ratio = valid_pairs ? static_cast<double>(transitions) /
+                                  static_cast<double>(valid_pairs)
+                            : 0.0;
+}
 
-  double conf = 0.0;
-  if (avg_pow > min_power && avg_pow < 1e3) {
-    double pscore = std::clamp((avg_abs_phase - 0.05) / (1.2 - 0.05), 0.0, 1.0);
-    double tscore = std::clamp((trans_ratio - 0.01) / (0.5 - 0.01), 0.0, 1.0);
-    conf = 0.6 * pscore + 0.4 * tscore;
+// Compute time-occupancy: fraction of samples above the block median power.
+// Values near 1.0 suggest CW; lower values suggest OOK/burst.
+static double
+compute_time_occupancy(const std::vector<std::complex<float>> &s) {
+  if (s.size() < 4)
+    return 0.0;
+  std::vector<float> pw;
+  pw.reserve(s.size());
+  for (const auto &c : s)
+    pw.push_back(std::norm(c));
+  std::sort(pw.begin(), pw.end());
+  float median = pw[pw.size() / 2];
+  // Count samples above the median in the original vector
+  size_t above = 0;
+  for (const auto &c : s)
+    if (std::norm(c) > median)
+      ++above;
+  return static_cast<double>(above) / static_cast<double>(s.size());
+}
+
+// ---------------------------------------------------------------------------
+// Multi-class modulation classifier result
+// ---------------------------------------------------------------------------
+
+enum class ModClass { UNKNOWN, CW_LIKE, FSK_LIKE, PSK_QAM_LIKE, OOK_AM_LIKE };
+
+static const char *mod_class_name(ModClass m) {
+  switch (m) {
+  case ModClass::CW_LIKE:
+    return "cw_like";
+  case ModClass::FSK_LIKE:
+    return "fsk_like";
+  case ModClass::PSK_QAM_LIKE:
+    return "psk_qam_like";
+  case ModClass::OOK_AM_LIKE:
+    return "ook_am_like";
+  default:
+    return "unknown";
+  }
+}
+
+struct ClassifierResult {
+  ModClass mod_class{ModClass::UNKNOWN};
+  double confidence{0.0};     // winning class confidence [0,1]
+  std::string decision_trace; // human-readable feature dump
+  // feature values (for logging/Prometheus)
+  double snr_db{0.0};
+  double avg_pow{0.0};
+  double papr_db{0.0};
+  double spectral_flatness{0.0};
+  double time_occupancy{0.0};
+  double avg_abs_phase{0.0};
+  double trans_ratio{0.0};
+  double p50{0.0};
+  double p90{0.0};
+  bool snr_gate_pass{false};
+  bool bw_gate_pass{true};
+};
+
+// Multi-class heuristic classifier.
+// snr_min_db: SNR gate threshold (default >0 dB).
+// expected_bw_hz / sample_rate: used for BW guardrail check (0 = skip check).
+static ClassifierResult
+classify_block(const std::vector<std::complex<float>> &s, double min_power,
+               double snr_min_db, double expected_bw_hz, double sample_rate) {
+  ClassifierResult r;
+  if (s.size() < 32)
+    return r;
+
+  // --- feature extraction ---
+  r.avg_pow = compute_avg_power(s);
+  r.snr_db = compute_snr_db(s);
+  r.papr_db = compute_papr_db(s, r.avg_pow);
+  r.spectral_flatness = compute_spectral_flatness(s);
+  r.time_occupancy = compute_time_occupancy(s);
+  compute_phase_stats(s, r.avg_abs_phase, r.trans_ratio);
+  compute_power_percentiles(s, r.p50, r.p90);
+
+  // --- SNR gate ---
+  r.snr_gate_pass = (r.snr_db >= snr_min_db);
+
+  // --- BW guardrail: ±25% of expected bandwidth ---
+  // Approximate occupied bandwidth from time-domain power variation;
+  // a simple check: if expected BW is set and sample_rate > 0, verify the
+  // block's estimated BW (p90/p50 power ratio as a proxy) is within range.
+  r.bw_gate_pass = true;
+  if (expected_bw_hz > 0.0 && sample_rate > 0.0) {
+    // Spectral flatness near 1.0 means noise-like (wideband), near 0.0 means
+    // tonal (narrowband).  (1.0 - flatness) therefore approximates the fraction
+    // of the sample-rate occupied by the signal.
+    double est_bw_frac = std::clamp(1.0 - r.spectral_flatness, 0.01, 1.0);
+    double est_bw_hz = est_bw_frac * sample_rate;
+    double bw_ratio = est_bw_hz / expected_bw_hz;
+    r.bw_gate_pass = (bw_ratio >= 0.75 && bw_ratio <= 1.25);
   }
 
-  return conf;
+  // Build decision trace header
+  std::ostringstream dt;
+  dt << std::fixed << std::setprecision(3) << "snr=" << r.snr_db << "dB"
+     << " avg_pow=" << std::scientific << r.avg_pow << " papr=" << std::fixed
+     << r.papr_db << "dB" << " flat=" << r.spectral_flatness
+     << " occ=" << r.time_occupancy << " phase=" << r.avg_abs_phase
+     << " trans=" << r.trans_ratio << " p50=" << std::scientific << r.p50
+     << " p90=" << r.p90;
+
+  if (!r.snr_gate_pass) {
+    dt << " [REJECT:snr_gate snr=" << std::fixed << r.snr_db << "<"
+       << snr_min_db << "]";
+    r.decision_trace = dt.str();
+    return r; // gate failed, confidence stays 0
+  }
+  if (!r.bw_gate_pass) {
+    dt << " [REJECT:bw_gate]";
+    r.decision_trace = dt.str();
+    return r;
+  }
+  if (r.avg_pow < min_power || r.avg_pow > 1e3) {
+    dt << " [REJECT:power_range]";
+    r.decision_trace = dt.str();
+    return r;
+  }
+
+  // --- Per-class scoring ---
+  // CW: high time-occupancy, low PAPR, moderate-low phase activity
+  double cw_score = 0.0;
+  {
+    double occ_s =
+        std::clamp((r.time_occupancy - 0.85) / (1.0 - 0.85), 0.0, 1.0);
+    double papr_s = std::clamp(1.0 - r.papr_db / 10.0, 0.0, 1.0);
+    double phase_s = std::clamp(1.0 - r.avg_abs_phase / 1.5, 0.0, 1.0);
+    cw_score = 0.5 * occ_s + 0.3 * papr_s + 0.2 * phase_s;
+  }
+
+  // FSK/GMSK: high phase activity, moderate flatness, moderate PAPR
+  double fsk_score = 0.0;
+  {
+    double phase_s =
+        std::clamp((r.avg_abs_phase - 0.05) / (1.2 - 0.05), 0.0, 1.0);
+    double trans_s =
+        std::clamp((r.trans_ratio - 0.01) / (0.5 - 0.01), 0.0, 1.0);
+    double flat_s =
+        std::clamp((r.spectral_flatness - 0.3) / (0.8 - 0.3), 0.0, 1.0);
+    fsk_score = 0.45 * phase_s + 0.35 * trans_s + 0.20 * flat_s;
+  }
+
+  // PSK/QAM: near-constant envelope (low PAPR), high phase activity,
+  //          moderate-high time occupancy
+  double psk_score = 0.0;
+  {
+    double papr_s = std::clamp(1.0 - r.papr_db / 6.0, 0.0, 1.0);
+    double phase_s =
+        std::clamp((r.avg_abs_phase - 0.3) / (2.5 - 0.3), 0.0, 1.0);
+    double occ_s = std::clamp((r.time_occupancy - 0.5) / (1.0 - 0.5), 0.0, 1.0);
+    psk_score = 0.4 * papr_s + 0.4 * phase_s + 0.2 * occ_s;
+  }
+
+  // OOK/AM: high PAPR, low time-occupancy, low-moderate phase activity
+  double ook_score = 0.0;
+  {
+    double papr_s = std::clamp(r.papr_db / 10.0, 0.0, 1.0);
+    double occ_s = std::clamp(1.0 - r.time_occupancy / 0.6, 0.0, 1.0);
+    double flat_s = std::clamp(1.0 - r.spectral_flatness, 0.0, 1.0);
+    ook_score = 0.45 * papr_s + 0.35 * occ_s + 0.20 * flat_s;
+  }
+
+  // Winner-takes-all
+  double best = cw_score;
+  r.mod_class = ModClass::CW_LIKE;
+  if (fsk_score > best) {
+    best = fsk_score;
+    r.mod_class = ModClass::FSK_LIKE;
+  }
+  if (psk_score > best) {
+    best = psk_score;
+    r.mod_class = ModClass::PSK_QAM_LIKE;
+  }
+  if (ook_score > best) {
+    best = ook_score;
+    r.mod_class = ModClass::OOK_AM_LIKE;
+  }
+  r.confidence = best;
+
+  dt << std::fixed << std::setprecision(3) << " scores(cw=" << cw_score
+     << ",fsk=" << fsk_score << ",psk=" << psk_score << ",ook=" << ook_score
+     << ") -> " << mod_class_name(r.mod_class) << "@" << r.confidence;
+  r.decision_trace = dt.str();
+  return r;
 }
 
 static void
@@ -240,15 +512,119 @@ async_write_snapshot(const std::string &dir,
   }
 }
 
-static void processing_thread_func(sqlite3 *db, double min_power,
-                                   double conf_threshold, double console_conf,
-                                   double snapshot_conf,
-                                   const std::string &snapshot_dir) {
-  int method_id =
-      insert_method(db, "gmsk_simple", R"({"type":"heuristic","version":1})");
+// ---------------------------------------------------------------------------
+// Observability: Prometheus textfile + heartbeat
+// ---------------------------------------------------------------------------
+
+struct ProcMetrics {
+  uint64_t frames_total{0};
+  uint64_t frames_rejected{0};
+  uint64_t frames_candidate{0};
+  double conf_sum{0.0};
+  // per-class counters
+  uint64_t class_cw{0};
+  uint64_t class_fsk{0};
+  uint64_t class_psk{0};
+  uint64_t class_ook{0};
+};
+
+static void write_prometheus_metrics(const std::string &metrics_file,
+                                     const ProcMetrics &m) {
+  if (metrics_file.empty())
+    return;
+  try {
+    std::filesystem::create_directories(
+        std::filesystem::path(metrics_file).parent_path());
+    std::ofstream ofs(metrics_file, std::ios::out | std::ios::trunc);
+    if (!ofs)
+      return;
+    double avg_conf = m.frames_candidate > 0
+                          ? m.conf_sum / static_cast<double>(m.frames_candidate)
+                          : 0.0;
+    ofs << "# HELP rf_frames_total Total frames processed\n"
+        << "# TYPE rf_frames_total counter\n"
+        << "rf_frames_total " << m.frames_total << "\n"
+        << "# HELP rf_frames_rejected Frames rejected by SNR/BW/power gates\n"
+        << "# TYPE rf_frames_rejected counter\n"
+        << "rf_frames_rejected " << m.frames_rejected << "\n"
+        << "# HELP rf_frames_candidate Frames above confidence threshold\n"
+        << "# TYPE rf_frames_candidate counter\n"
+        << "rf_frames_candidate " << m.frames_candidate << "\n"
+        << "# HELP rf_confidence_avg Average confidence of candidate frames\n"
+        << "# TYPE rf_confidence_avg gauge\n"
+        << "rf_confidence_avg " << avg_conf << "\n"
+        << "# HELP rf_class_frames Frames by modulation class\n"
+        << "# TYPE rf_class_frames counter\n"
+        << "rf_class_frames{class=\"cw_like\"} " << m.class_cw << "\n"
+        << "rf_class_frames{class=\"fsk_like\"} " << m.class_fsk << "\n"
+        << "rf_class_frames{class=\"psk_qam_like\"} " << m.class_psk << "\n"
+        << "rf_class_frames{class=\"ook_am_like\"} " << m.class_ook << "\n";
+  } catch (...) {
+  }
+}
+
+static void write_heartbeat(const std::string &hb_file) {
+  if (hb_file.empty())
+    return;
+  try {
+    std::filesystem::create_directories(
+        std::filesystem::path(hb_file).parent_path());
+    std::ofstream ofs(hb_file, std::ios::out | std::ios::trunc);
+    if (!ofs)
+      return;
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    ofs << "ok " << t << "\n";
+  } catch (...) {
+  }
+}
+
+// Emit one JSON log line to the worker log file (appends).
+static void write_json_log(const std::string &log_file,
+                           const ClassifierResult &cr, uint64_t ts_ns) {
+  if (log_file.empty())
+    return;
+  try {
+    std::filesystem::create_directories(
+        std::filesystem::path(log_file).parent_path());
+    std::ofstream ofs(log_file, std::ios::out | std::ios::app);
+    if (!ofs)
+      return;
+    ofs << std::fixed << std::setprecision(6) << "{\"ts_ns\":" << ts_ns
+        << ",\"mod\":\"" << mod_class_name(cr.mod_class) << "\""
+        << ",\"confidence\":" << cr.confidence << ",\"snr_db\":" << cr.snr_db
+        << ",\"avg_pow\":" << std::scientific << cr.avg_pow << std::fixed
+        << ",\"papr_db\":" << cr.papr_db
+        << ",\"spectral_flatness\":" << cr.spectral_flatness
+        << ",\"time_occupancy\":" << cr.time_occupancy
+        << ",\"avg_abs_phase\":" << cr.avg_abs_phase
+        << ",\"trans_ratio\":" << cr.trans_ratio
+        << ",\"snr_gate_pass\":" << (cr.snr_gate_pass ? "true" : "false")
+        << ",\"bw_gate_pass\":" << (cr.bw_gate_pass ? "true" : "false")
+        << ",\"decision_trace\":\"" << cr.decision_trace << "\"" << "}\n";
+  } catch (...) {
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Processing thread
+// ---------------------------------------------------------------------------
+
+static void processing_thread_func(
+    sqlite3 *db, double min_power, double conf_threshold, double console_conf,
+    double snapshot_conf, const std::string &snapshot_dir, double snr_min_db,
+    double expected_bw_hz, double sample_rate, const std::string &metrics_file,
+    const std::string &heartbeat_file, const std::string &worker_log) {
+  int method_id = insert_method(
+      db, "modulation_classifier",
+      R"({"type":"heuristic","version":2,"classes":["cw_like","fsk_like","psk_qam_like","ook_am_like"]})");
   if (method_id < 0) {
     std::cerr << "Failed to register method in DB; DB logging disabled\n";
   }
+
+  ProcMetrics metrics;
+  auto last_metrics_write = std::chrono::steady_clock::now();
+
   while (running) {
     SampleBlock block;
     {
@@ -263,46 +639,62 @@ static void processing_thread_func(sqlite3 *db, double min_power,
       }
     }
 
-    // compute actual average power for logging and tuning
+    ClassifierResult cr = classify_block(block.samples, min_power, snr_min_db,
+                                         expected_bw_hz, sample_rate);
+    ++metrics.frames_total;
 
-    double sum_pow = 0.0;
-    for (auto &c : block.samples)
-      sum_pow += std::norm(c);
-    double avg_pow =
-        block.samples.empty() ? 0.0 : (sum_pow / block.samples.size());
+    if (!cr.snr_gate_pass || !cr.bw_gate_pass ||
+        cr.mod_class == ModClass::UNKNOWN) {
+      ++metrics.frames_rejected;
+    }
 
-    double conf = attempt_gmsk_simple(block.samples, min_power);
+    // Update per-class counters
+    switch (cr.mod_class) {
+    case ModClass::CW_LIKE:
+      ++metrics.class_cw;
+      break;
+    case ModClass::FSK_LIKE:
+      ++metrics.class_fsk;
+      break;
+    case ModClass::PSK_QAM_LIKE:
+      ++metrics.class_psk;
+      break;
+    case ModClass::OOK_AM_LIKE:
+      ++metrics.class_ook;
+      break;
+    default:
+      break;
+    }
 
-    // Always persist candidate when conf > conf_threshold
+    // Persist candidate when conf > conf_threshold
+    if (cr.confidence > conf_threshold) {
+      ++metrics.frames_candidate;
+      metrics.conf_sum += cr.confidence;
 
-    if (conf > conf_threshold) {
-      std::ostringstream note;
-      note << "avg_pow=" << std::setprecision(3) << std::scientific << avg_pow
-           << " ts=" << block.timestamp_ns;
-      const std::string note_str = note.str();
+      const std::string note_str = cr.decision_trace;
 
-      // Persist signal + example rows only when method was registered
       if (method_id >= 0) {
         int signal_id = insert_signal(db, "rf_adapt_intel", note_str);
         if (signal_id >= 0) {
-          insert_example(db, signal_id, method_id, conf, note_str);
+          insert_example(db, signal_id, method_id, cr.confidence, note_str);
         }
       }
 
-      // Console logging controlled by console_conf
+      // JSON worker log
+      write_json_log(worker_log, cr, block.timestamp_ns);
 
-      if (conf >= console_conf) {
-        std::cout << "[DETECT] confidence=" << conf << " notes=" << note_str
-                  << std::endl;
+      // Console logging
+      if (cr.confidence >= console_conf) {
+        std::cout << "[DETECT] mod=" << mod_class_name(cr.mod_class)
+                  << " confidence=" << cr.confidence
+                  << " trace=" << cr.decision_trace << std::endl;
       }
 
-      // Snapshot controlled by snapshot_conf
-
-      if (conf >= snapshot_conf) {
-        // Enqueue snapshot to dedicated worker thread (no detached threads)
+      // Snapshot
+      if (cr.confidence >= snapshot_conf) {
         std::vector<std::complex<float>> samples_copy = block.samples;
         uint64_t ts_copy = block.timestamp_ns;
-        double conf_copy = conf;
+        double conf_copy = cr.confidence;
         std::string dir_copy = snapshot_dir;
         {
           std::lock_guard<std::mutex> lk(snap_m);
@@ -314,7 +706,21 @@ static void processing_thread_func(sqlite3 *db, double min_power,
         snap_cv.notify_one();
       }
     }
+
+    // Write Prometheus metrics and heartbeat every ~10 s
+    auto now = std::chrono::steady_clock::now();
+    if (std::chrono::duration_cast<std::chrono::seconds>(now -
+                                                         last_metrics_write)
+            .count() >= 10) {
+      write_prometheus_metrics(metrics_file, metrics);
+      write_heartbeat(heartbeat_file);
+      last_metrics_write = now;
+    }
   }
+
+  // Final flush of metrics on shutdown
+  write_prometheus_metrics(metrics_file, metrics);
+  write_heartbeat(heartbeat_file);
 }
 
 static void capture_thread_func(double center_freq, double sample_rate,
@@ -475,6 +881,20 @@ int main(int argc, char **argv) {
   std::string snapshot_dir =
       env_to_str("RF_SNAPSHOT_DIR", "/var/lib/rf-adapt-intel/snapshots");
 
+  // SNR gate: >0 dB by default; set RF_SNR_MIN_DB=0 for canary (pass-through)
+  double snr_min_db = env_to_d("RF_SNR_MIN_DB", 0.0);
+
+  // Expected bandwidth in Hz for BW guardrail (0 = disabled)
+  double expected_bw_hz = env_to_d("RF_EXPECTED_BW_HZ", 0.0);
+
+  // Observability paths
+  std::string metrics_file =
+      env_to_str("RF_METRICS_FILE", "/var/lib/rf-adapt-intel/metrics.prom");
+  std::string heartbeat_file =
+      env_to_str("RF_HEARTBEAT_FILE", "/var/lib/rf-adapt-intel/heartbeat");
+  std::string worker_log =
+      env_to_str("RF_WORKER_LOG", "/var/lib/rf-adapt-intel/worker.log");
+
   std::cout << "Starting rf_adapt_intel: center=" << center_freq
             << " sps=" << sample_rate << " gain=" << gain
             << " block_len=" << block_len
@@ -482,7 +902,10 @@ int main(int argc, char **argv) {
             << " conf_threshold=" << conf_threshold
             << " console_conf=" << console_conf
             << " snapshot_conf=" << snapshot_conf
-            << " snapshot_dir=" << snapshot_dir << "\n";
+            << " snapshot_dir=" << snapshot_dir << " snr_min_db=" << snr_min_db
+            << " expected_bw_hz=" << expected_bw_hz
+            << " metrics_file=" << metrics_file << " worker_log=" << worker_log
+            << "\n";
 
   sqlite3 *db = open_db("rf_adapt_intel.db");
   if (!db)
@@ -492,7 +915,9 @@ int main(int argc, char **argv) {
   std::signal(SIGTERM, sigint_handler);
 
   std::thread proc_th(processing_thread_func, db, min_power, conf_threshold,
-                      console_conf, snapshot_conf, snapshot_dir);
+                      console_conf, snapshot_conf, snapshot_dir, snr_min_db,
+                      expected_bw_hz, sample_rate, metrics_file, heartbeat_file,
+                      worker_log);
   std::thread snap_th(snapshot_worker);
   std::thread cap_th(capture_thread_func, center_freq, sample_rate, gain,
                      block_len, read_timeout_us);
