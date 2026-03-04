@@ -1,0 +1,14 @@
+[Unit]
+Description=rf_adapt_intel canary status monitor (30-minute poll)
+Documentation=https://github.com/foxrouter/meek
+
+[Timer]
+# Fire 5 minutes after boot, then every 30 minutes.
+OnBootSec=5min
+OnUnitActiveSec=30min
+# If a run was missed (e.g. host was off), catch up once immediately.
+Persistent=true
+Unit=rf-adapt-intel-monitor.service
+
+[Install]
+WantedBy=timers.target
