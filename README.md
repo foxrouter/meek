@@ -1,23 +1,98 @@
 # RF Process Worker (`rf_adapt_intel`)
 
-This repo hosts the RF worker hardening and modulation-detection pipeline.
+A C++17 RF signal-processing worker that captures IQ samples via SoapySDR,
+classifies modulation (GMSK/FSK/PSK/QAM/OOK), and persists results to SQLite.
+Deployed as a hardened systemd service on embedded Linux (Raspberry Pi and Ubuntu server).
+
+## Table of contents
+
+- [Layout](#layout)
+- [Prerequisites](#prerequisites)
+- [Build](#build)
+- [Quickstart](#quickstart)
+- [Optional decoder setup](#optional-decoder-setup-opssetupsh)
+- [Offline IQ analysis](#offline-iq-analysis-toolsdecode_candidatespy)
+- [Canary procedure](#canary-procedure-opscanarysh)
+- [IQ file transfer](#iq-file-transfer-scriptstransfer_iqsh)
+- [Test harnesses](#test-harnesses)
+- [Sensitive-data guidance](#sensitive-data-guidance)
 
 ## Layout
-- `docs/rf-adapt-intel-plan.md` — main plan (aligned/upgraded)
-- `systemd/` — unit + drop-ins
-- `scripts/` — ingest/metrics helpers
-- `config/thresholds.env.example` — overridable knobs
-- `ops/` — deploy/verify/setup/canary helpers
-- `tests/` — SNR sweep, guardrail, BER, and throughput test harnesses
-- `tools/` — offline decode/audit utilities
 
-## Quickstart (local)
-1) Copy `config/thresholds.env.example` to `/etc/rf_worker/thresholds.env` (or keep in `config/` but **git-ignored**).
-2) *(Optional)* Install optional decoders: `sudo bash ops/setup.sh`
-3) Install systemd unit/drop-ins: `sudo bash ops/deploy.sh`
-4) Run `ops/verify.sh` to confirm hardening.
-5) Ingest a sample IQ: `scripts/process_incoming.sh /path/to/file.raw`
-6) Metrics/heartbeat: `scripts/heartbeat_and_metrics.sh` (optional background service)
+```
+config/                   runtime configuration example
+docs/                     design plan and gap tracking
+ops/                      deploy, verify, setup, and canary helpers
+scripts/                  IQ ingest, metrics, heartbeat, and transfer helpers
+src/                      C++ worker source
+systemd/                  systemd unit and drop-in files
+tests/                    Python and shell test harnesses
+tools/                    offline decode/audit utilities
+```
+
+Key files:
+
+| Path | Purpose |
+|---|---|
+| `src/main.cpp` | Core capture + classification + DB persistence |
+| `docs/rf-adapt-intel-plan.md` | Full design plan and execution status |
+| `docs/missing-features.md` | Gaps and pending implementation items |
+| `config/thresholds.env.example` | Runtime knobs (copy to `/etc/rf_worker/thresholds.env`) |
+| `systemd/process-worker.service` | Hardened systemd unit |
+| `systemd/process-worker.service.d/` | Drop-in overrides (hardening, env, processor) |
+| `ops/deploy.sh` | Atomic service install |
+| `ops/setup.sh` | Optional decoder installer |
+| `ops/verify.sh` | Hardening verification |
+| `ops/canary.sh` | Canary lifecycle (enable/status/promote/rollback) |
+| `scripts/process_incoming.sh` | Band-aware offline IQ file processor |
+| `scripts/heartbeat_and_metrics.sh` | Standalone heartbeat + Prometheus metrics writer |
+| `scripts/transfer_iq.sh` | rsync IQ snapshot files from edge (Ray) to server (Brian) |
+| `scripts/deploy_and_restart.sh` | Build, install binary, and restart service |
+| `tools/decode_candidates.py` | Offline modulation decode + JSON audit report |
+| `tests/gen_test_signals.py` | Synthetic RRC-shaped IQ vector generator |
+
+## Prerequisites
+
+| Component | Minimum version | Notes |
+|---|---|---|
+| GCC or Clang | C++17 capable | GCC 8+, Clang 7+ |
+| CMake | 3.10 | Build system |
+| SoapySDR | any | `libsoapysdr-dev` on Debian/Ubuntu |
+| SQLite 3 | any | `libsqlite3-dev` |
+| Python 3 | 3.8+ | For tests and tools (`numpy` required) |
+| liquid-dsp | optional | Advanced demodulation — see [Optional decoder setup](#optional-decoder-setup-opssetupsh) |
+
+On Debian/Ubuntu:
+
+```bash
+sudo apt install -y build-essential cmake pkg-config \
+    libsoapysdr-dev libsqlite3-dev python3 python3-numpy
+```
+
+## Build
+
+```bash
+mkdir build && cd build
+cmake -S .. -B . -DCMAKE_BUILD_TYPE=Release
+cmake --build . -- -j$(nproc)
+```
+
+If liquid-dsp is installed, CMake will detect it automatically and enable `HAVE_LIQUID`.
+
+Install the binary to `/usr/local/bin/`:
+
+```bash
+sudo cmake --install .
+```
+
+## Quickstart
+
+1. Copy `config/thresholds.env.example` to `/etc/rf_worker/thresholds.env` (or keep in `config/` — **git-ignored**).
+2. *(Optional)* Install optional decoders: `sudo bash ops/setup.sh`
+3. Install systemd unit/drop-ins: `sudo bash ops/deploy.sh`
+4. Run `ops/verify.sh` to confirm hardening.
+5. Ingest a sample IQ: `bash scripts/process_incoming.sh /path/to/file.raw`
+6. Metrics/heartbeat: `bash scripts/heartbeat_and_metrics.sh` (optional background service)
 
 ## Optional decoder setup (`ops/setup.sh`)
 
@@ -178,6 +253,21 @@ bash tests/test_setup.sh -v
 cmake --build build --target test
 ```
 
+Generate synthetic IQ test vectors:
+
+```bash
+# Generate RRC-shaped vectors for all supported bands and modulations
+python3 tests/gen_test_signals.py
+```
+
 ## Sensitive-data guidance
+
 - Keep secrets out of git. Use `config/thresholds.env` (ignored) for local overrides.
-- Run `gitleaks detect --source .` before pushing.
+- Run `gitleaks detect --source .` before pushing sensitive changes.
+
+## Development
+
+- C++ source is formatted with **clang-format v14** (`clang-format -i src/*.cpp`).
+- **cpplint** runs as a pre-commit hook; install hooks with `pre-commit install`.
+- See `.cpplint-rationale.md` for the reasoning behind enabled/disabled checks.
+- See `docs/missing-features.md` for a list of pending implementation items.

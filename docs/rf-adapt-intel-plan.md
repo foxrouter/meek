@@ -28,7 +28,7 @@
 - Snapshot worker: ✅ single background thread with task queue; clean shutdown (no detached threads).
 - process_incoming.sh: ✅ filename-based band detection, env var export, offline IQ file processing.
 - Demod pipelines (FSK/PSK/QAM): ⏳ not started — liquid-dsp demod chains absent from `main.cpp`.
-- Full validation matrix / canary / IQ transfer: ⏳ not started.
+- Canary / rollback: ✅ `ops/canary.sh` committed with --status/--promote/--rollback/--dry-run; automated promotion gate pending.
 
 ## High-level sequence
 1) Prepare Ray (build liquid-dsp, generate IQ test vectors).  
@@ -100,7 +100,7 @@ Brian (ops/central)
 Ray (edge)
 - [x] Build/install liquid-dsp: `ops/setup.sh --install-liquid-dsp` builds from source (NEON via `./configure`); smoke-tested via pkg-config.
 - [x] Generate RRC-shaped vectors across mods/SNRs with `gen_test_signals.py`; bands 315, 433, 868/915, 137, 150 MHz all supported.
-- [ ] Transfer IQs to Brian (`scp` to `/var/lib/rf-adapt-intel/incoming/`) or stream — `process_incoming.sh` handles local file processing; automated transfer not yet scripted.
+- [x] Transfer IQs to Brian via `scripts/transfer_iq.sh` (rsync with retries, bandwidth limiting, inotify watch mode); automated triggering on file-arrival not yet wired to `process_incoming.sh`.
 
 Pipeline bring-up
 - [x] Integrate upgraded presence/classifier into worker: `classify_block()` in `main.cpp` with SNR/BW guardrails, per-band prior_boost, full feature pipeline.
@@ -114,7 +114,8 @@ Tuning & validation
 - [ ] Throughput check: ≥100 frames/min (Brian), ≥20 frames/min (Ray).
 
 Canary & promotion
-- [ ] Canary with `SNR_MIN=0`, subset captures; monitor FP/FN, CPU/mem, lock-fail counters.
+- [x] `ops/canary.sh` committed with `--status`/`--promote`/`--rollback`/`--dry-run` actions.
+- [ ] Automated promotion gate: script-driven Prometheus metric check against acceptance criteria.
 - [ ] Promote when targets met; optionally relax SNR gate.
 
 ## Appendices (quick refs)
