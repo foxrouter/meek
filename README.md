@@ -4,6 +4,37 @@ A C++17 RF signal-processing worker that captures IQ samples via SoapySDR,
 classifies modulation (GMSK/FSK/PSK/QAM/OOK), and persists results to SQLite.
 Deployed as a hardened systemd service on embedded Linux (Raspberry Pi and Ubuntu server).
 
+## Installation
+
+> **New here?** See the step-by-step [Installation Guide](docs/INSTALL.md) for
+> detailed instructions for **Raspberry Pi OS Bookworm 64-bit** and
+> **Ubuntu Server Noble 24.04**.
+
+### Quick install (automated)
+
+```bash
+git clone https://github.com/foxrouter/meek.git
+cd meek
+sudo bash install.sh          # detects OS, installs deps, builds, deploys service
+```
+
+Add `--all-decoders` to also install multimon-ng, rtl_433, and liquid-dsp:
+
+```bash
+sudo bash install.sh --all-decoders
+```
+
+Use `--dry-run` to preview every step without making changes:
+
+```bash
+bash install.sh --dry-run
+```
+
+See `bash install.sh --help` or [docs/INSTALL.md](docs/INSTALL.md) for full options
+and troubleshooting.
+
+---
+
 ## Table of contents
 
 - [Layout](#layout)
@@ -35,8 +66,10 @@ Key files:
 | Path | Purpose |
 |---|---|
 | `src/main.cpp` | Core capture + classification + DB persistence |
+| `docs/INSTALL.md` | **Step-by-step installation guide** (Bookworm & Noble) |
 | `docs/rf-adapt-intel-plan.md` | Full design plan and execution status |
 | `docs/missing-features.md` | Gaps and pending implementation items |
+| `install.sh` | **Automated one-shot installer** (detects OS, builds, deploys) |
 | `config/thresholds.env.example` | Runtime knobs (copy to `/etc/rf_worker/thresholds.env`) |
 | `systemd/process-worker.service` | Hardened systemd unit |
 | `systemd/process-worker.service.d/` | Drop-in overrides (hardening, env, processor) |
@@ -53,6 +86,8 @@ Key files:
 
 ## Prerequisites
 
+> For a guided setup walkthrough see [docs/INSTALL.md](docs/INSTALL.md).
+
 | Component | Minimum version | Notes |
 |---|---|---|
 | GCC or Clang | C++17 capable | GCC 8+, Clang 7+ |
@@ -62,11 +97,13 @@ Key files:
 | Python 3 | 3.8+ | For tests and tools (`numpy` required) |
 | liquid-dsp | optional | Advanced demodulation — see [Optional decoder setup](#optional-decoder-setup-opssetupsh) |
 
-On Debian/Ubuntu:
+On Debian/Ubuntu (Bookworm or Noble):
 
 ```bash
 sudo apt install -y build-essential cmake pkg-config \
-    libsoapysdr-dev libsqlite3-dev python3 python3-numpy
+    libsoapysdr-dev soapysdr-tools soapysdr-module-rtlsdr \
+    libsqlite3-dev python3 python3-numpy \
+    rtl-sdr librtlsdr-dev inotify-tools rsync
 ```
 
 ## Build
