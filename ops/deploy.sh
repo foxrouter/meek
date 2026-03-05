@@ -89,6 +89,12 @@ if ! id rf_worker &>/dev/null; then
   echo "Creating rf_worker system account..."
   run sudo useradd -r -s /sbin/nologin rf_worker
 fi
+# Ensure rf_worker is in plugdev so the udev rule (GROUP="plugdev", MODE="0664")
+# grants it access to the RTL-SDR USB device.
+if ! id -nG rf_worker 2>/dev/null | grep -qw plugdev; then
+  echo "Adding rf_worker to plugdev group (required for RTL-SDR USB access)..."
+  run sudo usermod -aG plugdev rf_worker
+fi
 run sudo chown -R rf_worker:rf_worker /var/lib/rf-adapt-intel
 
 # Install canary monitor service + 30-minute timer
