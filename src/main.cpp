@@ -1393,20 +1393,44 @@ static void processing_thread_func(
   write_heartbeat(heartbeat_file);
 }
 
+static int64_t env_to_ll(const char *name, int64_t def);
+
 static void capture_thread_func(double center_freq, double sample_rate,
                                 double gain, size_t block_len,
                                 int64_t read_timeout_us) {
+  const int max_retries =
+      static_cast<int>(env_to_ll("RF_DEVICE_RETRY_MAX", 10));
+  const int retry_base_ms =
+      static_cast<int>(env_to_ll("RF_DEVICE_RETRY_BASE_MS", 2000));
+  // Granularity of the retry-sleep loop; keeps SIGTERM latency bounded.
+  constexpr int kSignalCheckIntervalMs = 100;
+
   SoapySDR::Kwargs kw;
   SoapySDR::Device *dev = nullptr;
-  try {
-    dev = SoapySDR::Device::make(kw);
-    if (!dev) {
-      std::cerr << "No SoapySDR device found\n";
-      running = false;
-      return;
+  for (int attempt = 0; attempt <= max_retries && running; ++attempt) {
+    try {
+      dev = SoapySDR::Device::make(kw);
+      if (dev)
+        break;
+      std::cerr << "[capture] No SoapySDR device found\n";
+    } catch (const std::exception &ex) {
+      std::cerr << "[capture] SoapySDR::Device::make() threw: " << ex.what()
+                << "\n";
     }
-  } catch (const std::exception &ex) {
-    std::cerr << "SoapySDR::Device::make() threw: " << ex.what() << std::endl;
+    if (attempt < max_retries && running) {
+      int delay_ms = std::min(retry_base_ms * (1 << attempt), 30000);
+      std::cerr << "[capture] Retrying in " << delay_ms << " ms (attempt "
+                << (attempt + 1) << "/" << max_retries << ")\n";
+      // Sleep in small increments so SIGTERM is handled promptly.
+      for (int elapsed = 0; elapsed < delay_ms && running;
+           elapsed += kSignalCheckIntervalMs)
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(kSignalCheckIntervalMs));
+    }
+  }
+  if (!dev) {
+    std::cerr << "[capture] Giving up: no SoapySDR device after " << max_retries
+              << " retries\n";
     running = false;
     return;
   }

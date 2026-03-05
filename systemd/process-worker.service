@@ -8,7 +8,7 @@ Type=simple
 # ExecStart args: <center_freq_Hz> <sample_rate_Sps> <gain_dB>
 # Override via ExecStart= in a drop-in (processor.conf) for different bands.
 ExecStart=/usr/local/bin/rf_adapt_intel 433920000 2048000 30
-Restart=on-failure
+Restart=always
 RestartSec=5s
 User=rf_worker
 Group=rf_worker
