@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
   for (int i = 0; i < 200; ++i) {
     auto t0 = std::chrono::steady_clock::now();
     int flags = 0;
-    int64_t ts = 0;
+    long long ts = 0;
     int ret = dev->readStream(rxStream, buffs, block_len, flags, ts, timeout_us);
     auto t1 = std::chrono::steady_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
