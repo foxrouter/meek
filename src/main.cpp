@@ -40,6 +40,11 @@
 #include <vector>
 #ifdef HAVE_LIQUID
 #include <liquid/liquid.h>
+// LIQUID_MODEM_8PSK was introduced in liquid-dsp 1.6.0; Debian bookworm ships
+// 1.3.2 which only exposes the older LIQUID_MODEM_PSK8 enumerator.
+#ifndef LIQUID_MODEM_8PSK
+#define LIQUID_MODEM_8PSK LIQUID_MODEM_PSK8
+#endif
 #endif
 
 static std::atomic<bool> running{true};
