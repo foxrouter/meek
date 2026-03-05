@@ -302,6 +302,17 @@ python3 tests/gen_test_signals.py
 - Keep secrets out of git. Use `config/thresholds.env` (ignored) for local overrides.
 - Run `gitleaks detect --source .` before pushing sensitive changes.
 
+## Snapshot file retention
+
+IQ snapshot files (`.cf32`) accumulate in `RF_SNAPSHOT_DIR` and can fill disk on
+long-running deployments. Set `RF_SNAPSHOT_RETENTION_DAYS` to automatically prune
+files older than *N* days (checked once per hour by the worker):
+
+```bash
+# /etc/rf_worker/thresholds.env
+RF_SNAPSHOT_RETENTION_DAYS=7   # keep 7 days of snapshots; 0 = keep forever (default)
+```
+
 ## Development
 
 - C++ source is formatted with **clang-format v14** (`clang-format -i src/*.cpp`).

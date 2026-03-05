@@ -85,11 +85,11 @@ done
 
 # Create runtime data directory
 run sudo mkdir -p /var/lib/rf-adapt-intel/{snapshots,incoming,processed}
-if id rf_worker &>/dev/null; then
-  run sudo chown -R rf_worker:rf_worker /var/lib/rf-adapt-intel
-else
-  echo "[WARN] User rf_worker does not exist — skipping chown. Create with: useradd -r -s /sbin/nologin rf_worker"
+if ! id rf_worker &>/dev/null; then
+  echo "Creating rf_worker system account..."
+  run sudo useradd -r -s /sbin/nologin rf_worker
 fi
+run sudo chown -R rf_worker:rf_worker /var/lib/rf-adapt-intel
 
 # Install canary monitor service + 30-minute timer
 echo ""

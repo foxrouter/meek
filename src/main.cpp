@@ -48,6 +48,8 @@
 #endif
 
 static std::atomic<bool> running{true};
+// Snapshot write error counter — incremented by the snapshot worker thread.
+static std::atomic<uint64_t> g_snap_errors{0};
 
 struct SampleBlock {
   std::vector<std::complex<float>> samples;
@@ -153,20 +155,21 @@ static int insert_signal(sqlite3 *db, const std::string &source,
   return id;
 }
 
-static void insert_example(sqlite3 *db, int signal_id, int method_id,
+static int insert_example(sqlite3 *db, int signal_id, int method_id,
                            double confidence, const std::string &notes) {
   sqlite3_stmt *stmt = nullptr;
   const char *sql = "INSERT INTO examples (signal_id, method_id, result, "
                     "confidence, notes) VALUES (?, ?, ?, ?, ?);";
   if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
-    return;
+    return -1;
   sqlite3_bind_int(stmt, 1, signal_id);
   sqlite3_bind_int(stmt, 2, method_id);
   sqlite3_bind_text(stmt, 3, "candidate", -1, SQLITE_TRANSIENT);
   sqlite3_bind_double(stmt, 4, confidence);
   sqlite3_bind_text(stmt, 5, notes.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_step(stmt);
+  int rc = (sqlite3_step(stmt) == SQLITE_DONE) ? 0 : -1;
   sqlite3_finalize(stmt);
+  return rc;
 }
 
 // ---------------------------------------------------------------------------
@@ -1063,6 +1066,7 @@ async_write_snapshot(const std::string &dir,
     std::ofstream ofs(path, std::ios::binary | std::ios::out);
     if (!ofs) {
       std::cerr << "Failed to open snapshot file " << path << " for writing\n";
+      ++g_snap_errors;
       return;
     }
     // write raw CF32 interleaved complex<float> samples
@@ -1078,12 +1082,34 @@ async_write_snapshot(const std::string &dir,
               << "\n";
   } catch (const std::exception &ex) {
     std::cerr << "Snapshot write exception: " << ex.what() << std::endl;
+    ++g_snap_errors;
   }
 }
 
-// ---------------------------------------------------------------------------
-// Observability: Prometheus textfile + heartbeat
-// ---------------------------------------------------------------------------
+// Delete .cf32 snapshot files older than retention_days in dir.
+// Called periodically from the processing thread; no-op if dir is empty or
+// retention_days is 0.
+static void prune_old_snapshots(const std::string &dir, int retention_days) {
+  if (dir.empty() || retention_days <= 0)
+    return;
+  try {
+    auto cutoff = std::filesystem::file_time_type::clock::now() -
+                  std::chrono::hours(static_cast<int64_t>(24) * retention_days);
+    for (const auto &entry :
+         std::filesystem::directory_iterator(dir)) {
+      if (!entry.is_regular_file())
+        continue;
+      if (entry.path().extension() != ".cf32")
+        continue;
+      if (entry.last_write_time() < cutoff) {
+        std::filesystem::remove(entry.path());
+        std::cout << "[SNAPSHOT] pruned old file: " << entry.path() << "\n";
+      }
+    }
+  } catch (const std::exception &ex) {
+    std::cerr << "Snapshot prune error: " << ex.what() << std::endl;
+  }
+}
 
 struct ProcMetrics {
   uint64_t frames_total{0};
@@ -1095,6 +1121,9 @@ struct ProcMetrics {
   uint64_t class_fsk{0};
   uint64_t class_psk{0};
   uint64_t class_ook{0};
+  // error counters
+  uint64_t db_errors{0};
+  uint64_t snap_errors{0};
 };
 
 static void write_prometheus_metrics(const std::string &metrics_file,
@@ -1127,7 +1156,11 @@ static void write_prometheus_metrics(const std::string &metrics_file,
         << "rf_class_frames{class=\"cw_like\"} " << m.class_cw << "\n"
         << "rf_class_frames{class=\"fsk_like\"} " << m.class_fsk << "\n"
         << "rf_class_frames{class=\"psk_qam_like\"} " << m.class_psk << "\n"
-        << "rf_class_frames{class=\"ook_am_like\"} " << m.class_ook << "\n";
+        << "rf_class_frames{class=\"ook_am_like\"} " << m.class_ook << "\n"
+        << "# HELP rf_errors_total Total DB and snapshot write errors\n"
+        << "# TYPE rf_errors_total counter\n"
+        << "rf_errors_total{type=\"db\"} " << m.db_errors << "\n"
+        << "rf_errors_total{type=\"snapshot\"} " << m.snap_errors << "\n";
   } catch (...) {
   }
 }
@@ -1159,7 +1192,8 @@ static void write_json_log(const std::string &log_file,
     std::ofstream ofs(log_file, std::ios::out | std::ios::app);
     if (!ofs)
       return;
-    ofs << std::fixed << std::setprecision(6) << "{\"ts_ns\":" << ts_ns
+    ofs << std::fixed << std::setprecision(6) << "{\"schema_version\":\"1\""
+        << ",\"ts_ns\":" << ts_ns
         << ",\"mod\":\"" << mod_class_name(cr.mod_class) << "\""
         << ",\"confidence\":" << cr.confidence << ",\"snr_db\":" << cr.snr_db
         << ",\"avg_pow\":" << std::scientific << cr.avg_pow << std::fixed
@@ -1187,7 +1221,7 @@ static void processing_thread_func(
     double snr_min_db, double expected_bw_hz, double sample_rate,
     double papr_max_db, ModClass mod_hint_class, double rsym, double fdev,
     const std::string &metrics_file, const std::string &heartbeat_file,
-    const std::string &worker_log) {
+    const std::string &worker_log, int snapshot_retention_days) {
   // Resolve band profile once at startup
   const BandProfile *band = find_band(center_freq);
   if (band != nullptr) {
@@ -1209,6 +1243,7 @@ static void processing_thread_func(
 
   ProcMetrics metrics;
   auto last_metrics_write = std::chrono::steady_clock::now();
+  auto last_prune = std::chrono::steady_clock::now();
 
   while (running) {
     SampleBlock block;
@@ -1262,7 +1297,13 @@ static void processing_thread_func(
       if (method_id >= 0) {
         int signal_id = insert_signal(db, "rf_adapt_intel", note_str);
         if (signal_id >= 0) {
-          insert_example(db, signal_id, method_id, cr.confidence, note_str);
+          if (insert_example(db, signal_id, method_id, cr.confidence,
+                             note_str) < 0) {
+            ++metrics.db_errors;
+          }
+        } else {
+          std::cerr << "[DB] insert_signal failed\n";
+          ++metrics.db_errors;
         }
       }
 
@@ -1330,13 +1371,24 @@ static void processing_thread_func(
     if (std::chrono::duration_cast<std::chrono::seconds>(now -
                                                          last_metrics_write)
             .count() >= 10) {
+      metrics.snap_errors = g_snap_errors.load();
       write_prometheus_metrics(metrics_file, metrics);
       write_heartbeat(heartbeat_file);
       last_metrics_write = now;
     }
+
+    // Prune old snapshots once per hour when retention is configured
+    if (snapshot_retention_days > 0) {
+      if (std::chrono::duration_cast<std::chrono::hours>(now - last_prune)
+              .count() >= 1) {
+        prune_old_snapshots(snapshot_dir, snapshot_retention_days);
+        last_prune = now;
+      }
+    }
   }
 
   // Final flush of metrics on shutdown
+  metrics.snap_errors = g_snap_errors.load();
   write_prometheus_metrics(metrics_file, metrics);
   write_heartbeat(heartbeat_file);
 }
@@ -1535,6 +1587,10 @@ int main(int argc, char **argv) {
   std::string worker_log =
       env_to_str("RF_WORKER_LOG", "/var/lib/rf-adapt-intel/worker.log");
 
+  // Snapshot retention: delete .cf32 files older than this many days (0 = keep forever)
+  int snapshot_retention_days =
+      static_cast<int>(env_to_ll("RF_SNAPSHOT_RETENTION_DAYS", 0));
+
   std::cout << "Starting rf_adapt_intel: center=" << center_freq
             << " sps=" << sample_rate << " gain=" << gain
             << " block_len=" << block_len
@@ -1547,6 +1603,7 @@ int main(int argc, char **argv) {
             << " papr_max_db=" << papr_max_db
             << " rsym=" << rsym << " fdev=" << fdev
             << " metrics_file=" << metrics_file << " worker_log=" << worker_log
+            << " snapshot_retention_days=" << snapshot_retention_days
             << "\n";
 
   // Print UK_BANDS table at startup
@@ -1577,7 +1634,7 @@ int main(int argc, char **argv) {
                       conf_threshold, console_conf, snapshot_conf, snapshot_dir,
                       snr_min_db, expected_bw_hz, sample_rate, papr_max_db,
                       mod_hint_class, rsym, fdev, metrics_file, heartbeat_file,
-                      worker_log);
+                      worker_log, snapshot_retention_days);
   std::thread snap_th(snapshot_worker);
   std::thread cap_th(capture_thread_func, center_freq, sample_rate, gain,
                      block_len, read_timeout_us);
