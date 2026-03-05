@@ -39,6 +39,8 @@ DRY_RUN=false
 VERBOSE=false
 SERVICE="process-worker"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# USB vendor:product IDs for RTL-SDR dongles (must match 99-rtlsdr.rules)
+RTL_SDR_USB_IDS="0bda:(2832|2838)"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -100,6 +102,58 @@ require_python3() {
 }
 
 # ---------------------------------------------------------------------------
+# Pre-flight: check that the RTL-SDR USB device is accessible and warn if the
+# service has been logging device-not-found errors.
+# ---------------------------------------------------------------------------
+check_device_access() {
+  local ok=true
+
+  # 1. Is any RTL-SDR USB device visible on the bus?
+  if command -v lsusb &>/dev/null; then
+    if ! lsusb 2>/dev/null | grep -qiE "${RTL_SDR_USB_IDS}"; then
+      warn "No RTL-SDR USB device detected (lsusb shows no ${RTL_SDR_USB_IDS})."
+      warn "Plug in the RTL-SDR dongle and re-run, or check USB connections."
+      ok=false
+    fi
+  fi
+
+  # 2. Can the current user open the device via rtl_test / SoapySDR?
+  if command -v SoapySDRUtil &>/dev/null; then
+    if ! SoapySDRUtil --find="driver=rtlsdr" 2>/dev/null | grep -q "rtlsdr"; then
+      warn "SoapySDRUtil cannot find an RTL-SDR device."
+      warn "This usually means the current user lacks USB device permission."
+      warn "Verify the udev rule and plugdev group membership:"
+      warn "  sudo bash install.sh   # re-run installer to fix permissions"
+      warn "  id rf_worker           # check rf_worker is in 'plugdev' group"
+      ok=false
+    fi
+  fi
+
+  # 3. Is the service actively failing to open the device?
+  if systemctl is-active --quiet "${SERVICE}" 2>/dev/null; then
+    local recent_errors
+    recent_errors=$(journalctl -u "${SERVICE}" --since "5 minutes ago" \
+        --no-pager -q 2>/dev/null \
+      | grep -c "No RTL-SDR devices found" || true)
+    if [[ "${recent_errors}" -gt 0 ]]; then
+      warn "The ${SERVICE} service has logged ${recent_errors} 'No RTL-SDR devices found' error(s) in the past 5 minutes."
+      warn "The service user (rf_worker) may not have USB device permission."
+      warn "Fix: ensure rf_worker is in the 'plugdev' group and the udev rule"
+      warn "is installed, then re-plug the dongle and restart the service:"
+      warn "  sudo usermod -aG plugdev rf_worker"
+      warn "  sudo udevadm trigger"
+      warn "  sudo systemctl restart ${SERVICE}"
+      warn "Snapshot data may be unavailable; autotune will use synthetic signals."
+      ok=false
+    fi
+  fi
+
+  if $ok; then
+    echo "  Device pre-flight checks passed."
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
@@ -112,8 +166,8 @@ main() {
   echo ""
 
   require_python3
-
-  # Build python3 argument list
+  check_device_access
+  echo ""
   local py_args=(
     "${REPO_ROOT}/tools/autotune_thresholds.py"
     --snapshot-dir "${SNAPSHOT_DIR}"
