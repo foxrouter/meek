@@ -1416,6 +1416,20 @@ static void capture_thread_func(double center_freq, double sample_rate,
     } catch (const std::exception &ex) {
       std::cerr << "[capture] SoapySDR::Device::make() threw: " << ex.what()
                 << "\n";
+      // On the first failure, log an actionable hint: the most common cause of
+      // "No RTL-SDR devices found" when rtl_test can see the dongle is that the
+      // service user lacks access to the USB device node.  The udev rule grants
+      // GROUP="plugdev" MODE="0664", so the service user must be in plugdev.
+      if (attempt == 0) {
+        std::cerr << "[capture] Hint: if rtl_test detects the dongle but"
+                     " SoapySDR cannot, the service user likely lacks USB"
+                     " access.\n"
+                  << "[capture] Fix: ensure rf_worker is in the plugdev group"
+                     " and re-plug the dongle:\n"
+                  << "[capture]   sudo usermod -aG plugdev rf_worker\n"
+                  << "[capture]   sudo udevadm control --reload-rules &&"
+                     " sudo udevadm trigger\n";
+      }
     }
     if (attempt < max_retries && running) {
       int delay_ms = std::min(retry_base_ms * (1 << attempt), 30000);
