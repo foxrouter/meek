@@ -89,11 +89,9 @@ if ! id rf_worker &>/dev/null; then
   echo "Creating rf_worker system account..."
   run sudo useradd -r -s /sbin/nologin rf_worker
 fi
-# Ensure rf_worker is in plugdev so the service can access the RTL-SDR USB device
-# (the udev rule in 99-rtlsdr.rules grants access to the plugdev group).
-if id -nG rf_worker 2>/dev/null | grep -qw plugdev; then
-  echo "rf_worker is already in plugdev group."
-else
+# Ensure rf_worker is in plugdev so the udev rule (GROUP="plugdev", MODE="0664")
+# grants it access to the RTL-SDR USB device.
+if ! id -nG rf_worker 2>/dev/null | grep -qw plugdev; then
   echo "Adding rf_worker to plugdev group (required for RTL-SDR USB access)..."
   run sudo usermod -aG plugdev rf_worker
 fi

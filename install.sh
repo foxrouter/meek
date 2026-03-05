@@ -218,15 +218,14 @@ create_service_user() {
     run sudo useradd -r -s /sbin/nologin rf_worker
     info "User rf_worker created."
   fi
-
-  # Add rf_worker to the plugdev group so the systemd service can access the
-  # RTL-SDR USB device (the udev rule in 99-rtlsdr.rules grants plugdev access).
-  if id -nG rf_worker 2>/dev/null | grep -qw plugdev; then
-    info "rf_worker is already in plugdev group."
-  else
-    log "Adding rf_worker to plugdev group (required for RTL-SDR USB access)..."
+  # Ensure rf_worker is in the plugdev group so that the udev rule
+  # (GROUP="plugdev", MODE="0664") grants it access to the RTL-SDR USB device.
+  if ! id -nG rf_worker 2>/dev/null | grep -qw plugdev; then
+    info "Adding rf_worker to plugdev group (required for RTL-SDR USB access)..."
     run sudo usermod -aG plugdev rf_worker
     info "rf_worker added to plugdev."
+  else
+    info "rf_worker is already in plugdev group."
   fi
 }
 
