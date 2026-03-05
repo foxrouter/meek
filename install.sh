@@ -291,7 +291,8 @@ print_summary() {
     echo "    2. Run 'newgrp plugdev' or log out and back in for udev access."
   fi
   echo "    3. Check service logs: sudo journalctl -u process-worker -n 50 --no-pager"
-  echo "    4. Edit /etc/rf_worker/thresholds.env to tune thresholds."
+  echo "    4. Auto-tune thresholds: sudo bash ops/autotune.sh"
+  echo "       (or edit /etc/rf_worker/thresholds.env manually)"
   echo ""
   echo "  See docs/INSTALL.md for full documentation and troubleshooting."
   echo "================================================================"
