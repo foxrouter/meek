@@ -206,13 +206,14 @@ What `ops/deploy.sh` does:
 1. Backs up any existing `process-worker.service` to `/root/`.
 2. Installs the unit file and drop-in configuration.
 3. Creates `/var/lib/rf-adapt-intel/{snapshots,incoming,processed}`.
-4. Installs and enables the canary monitor timer.
-5. Runs `systemctl daemon-reload` and starts the service.
+4. Creates the `rf_worker` system account if it does not exist.
+5. Installs and enables the canary monitor timer.
+6. Runs `systemctl daemon-reload` and starts the service.
 
 ### Create the `rf_worker` service account
 
-The service runs as a dedicated low-privilege user.  Create it if it does not
-already exist:
+`ops/deploy.sh` automatically creates the `rf_worker` system account if it is
+missing.  To create it manually before running the deploy script:
 
 ```bash
 sudo useradd -r -s /sbin/nologin rf_worker
@@ -292,6 +293,7 @@ Key settings to review:
 | `RF_CONF_THRESHOLD` | `0.6` | Min confidence to write to database |
 | `RF_SNR_MIN_DB` | `0.0` | Minimum SNR gate (dB); set negative for passive mode |
 | `RF_SNAPSHOT_DIR` | `/var/lib/rf-adapt-intel/snapshots` | IQ snapshot output directory |
+| `RF_SNAPSHOT_RETENTION_DAYS` | `0` | Days to keep IQ snapshots; `0` = keep forever |
 | `RF_WORKER_LOG` | `/var/lib/rf-adapt-intel/worker.log` | JSON log file |
 
 ### 7.2 Restart after config changes

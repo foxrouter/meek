@@ -11,4 +11,5 @@ repos:
     hooks:
       - id: cpplint
         args:
-          - "--filter=-build/include_order,-build/c++11,-whitespace/line_length"
+          - "--filter=-build/c++11,-build/c++17"
+          - "--linelength=100"
