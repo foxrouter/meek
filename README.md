@@ -42,15 +42,18 @@ and troubleshooting.
 - [Build](#build)
 - [Quickstart](#quickstart)
 - [Optional decoder setup](#optional-decoder-setup-opssetupsh)
+- [Offline IQ metrics](#offline-iq-metrics-toolsiq_metricscpp)
 - [Offline IQ analysis](#offline-iq-analysis-toolsdecode_candidatespy)
 - [Canary procedure](#canary-procedure-opscanarysh)
 - [IQ file transfer](#iq-file-transfer-scriptstransfer_iqsh)
 - [Test harnesses](#test-harnesses)
+- [Container build](#container-build)
 - [Sensitive-data guidance](#sensitive-data-guidance)
 
 ## Layout
 
 ```
+benchmarks/               Python-vs-C++ benchmark scripts and results
 config/                   runtime configuration example
 docs/                     design plan and gap tracking
 ops/                      deploy, verify, setup, and canary helpers
@@ -66,9 +69,11 @@ Key files:
 | Path | Purpose |
 |---|---|
 | `src/main.cpp` | Core capture + classification + DB persistence |
+| `tools/iq_metrics.cpp` | Standalone C++ IQ metrics tool (avg_power, snr_db, spectral_flatness, est_bw_hz) |
 | `docs/INSTALL.md` | **Step-by-step installation guide** (Bookworm & Noble) |
 | `docs/rf-adapt-intel-plan.md` | Full design plan and execution status |
 | `docs/missing-features.md` | Gaps and pending implementation items |
+| `docs/audit.md` | Production-readiness audit, dependency map, and migration notes |
 | `install.sh` | **Automated one-shot installer** (detects OS, builds, deploys) |
 | `config/thresholds.env.example` | Runtime knobs (copy to `/etc/rf_worker/thresholds.env`) |
 | `systemd/process-worker.service` | Hardened systemd unit |
@@ -83,6 +88,8 @@ Key files:
 | `scripts/deploy_and_restart.sh` | Build, install binary, and restart service |
 | `tools/decode_candidates.py` | Offline modulation decode + JSON audit report |
 | `tests/gen_test_signals.py` | Synthetic RRC-shaped IQ vector generator |
+| `tests/test_iq_metrics.py` | Validates C++ `iq_metrics` output against the Python reference |
+| `benchmarks/bench_iq_metrics.py` | Python-vs-C++ throughput benchmark for IQ metrics |
 
 ## Prerequisites
 
@@ -120,6 +127,20 @@ Install the binary to `/usr/local/bin/`:
 
 ```bash
 sudo cmake --install .
+```
+
+### CMake build options
+
+| Option | Default | Description |
+|---|---|---|
+| `BUILD_HARDWARE_TARGETS` | `ON` | Build `rf_adapt_intel` and `soapy_read_test` (requires SoapySDR). Set `OFF` in CI or on machines without SDR hardware. |
+| `ENABLE_SANITIZERS` | `OFF` | Compile with AddressSanitizer and UndefinedBehaviorSanitizer (Clang recommended). |
+
+Build only `iq_metrics` (no SDR hardware required):
+
+```bash
+cmake -S . -B build -DBUILD_HARDWARE_TARGETS=OFF
+cmake --build build -t iq_metrics
 ```
 
 ## Quickstart
@@ -171,6 +192,65 @@ sudo bash ops/deploy.sh --setup
 
 After setup, decoder binary paths are written to `/etc/rf_worker/thresholds.env`
 so the `process-worker` systemd service picks them up automatically.
+
+## Offline IQ metrics (`tools/iq_metrics.cpp`)
+
+`iq_metrics` is a standalone C++17 tool that reads raw CF32 IQ snapshot files
+and computes four signal metrics: `avg_power`, `snr_db`, `spectral_flatness`,
+and `est_bw_hz`.  It mirrors the Python reference in
+`tools/autotune_thresholds.py` and is validated against it by
+`tests/test_iq_metrics.py`.
+
+### Build
+
+```bash
+cmake -S . -B build -DBUILD_HARDWARE_TARGETS=OFF
+cmake --build build -t iq_metrics
+```
+
+### Usage
+
+```bash
+# Analyse a single IQ snapshot (default sample rate: 2 048 000 Hz)
+./build/iq_metrics /var/lib/rf-adapt-intel/snapshots/snap_*.cf32
+
+# Specify sample rate and block size
+./build/iq_metrics --sample-rate 2048000 --block-size 4096 file.cf32
+
+# Batch: analyse multiple files
+./build/iq_metrics snap1.cf32 snap2.cf32
+
+# Show usage
+./build/iq_metrics --help
+```
+
+Output is JSON on stdout, for example:
+
+```json
+[
+  {
+    "file": "snap_1234_c85.cf32",
+    "n_samples": 65536,
+    "avg_power": -12.3,
+    "snr_db": 18.7,
+    "spectral_flatness": 0.21,
+    "est_bw_hz": 145000.0
+  }
+]
+```
+
+### Benchmark
+
+```bash
+python3 benchmarks/bench_iq_metrics.py build/iq_metrics \
+    --repetitions 20 \
+    --block-sizes 1024,4096,16384,65536
+```
+
+The benchmark compares per-block latency of the C++ tool against the Python
+reference and writes JSON results to `benchmarks/results/`.
+
+---
 
 ## Offline IQ analysis (`tools/decode_candidates.py`)
 
@@ -283,6 +363,10 @@ python3 tests/test_demod_ber.py -v
 # Throughput benchmark (frames per minute)
 python3 tests/bench_throughput.py -v
 
+# Validate C++ iq_metrics output against the Python reference
+cmake -S . -B build -DBUILD_HARDWARE_TARGETS=OFF && cmake --build build -t iq_metrics
+python3 tests/test_iq_metrics.py build/iq_metrics -v
+
 # Shell tests for ops/setup.sh
 bash tests/test_setup.sh -v
 
@@ -296,6 +380,26 @@ Generate synthetic IQ test vectors:
 # Generate RRC-shaped vectors for all supported bands and modulations
 python3 tests/gen_test_signals.py
 ```
+
+## Container build
+
+A `Dockerfile` is provided for reproducible builds and testing without
+installing any host dependencies.  It builds `iq_metrics` and runs all Python
+tests at image build time.
+
+```bash
+# Build the image (runs all tests as part of the build)
+docker build -t rf-adapt-intel:latest .
+
+# Run the full CTest suite inside the container
+docker run --rm rf-adapt-intel:latest ctest --test-dir /build -V
+```
+
+> **Note:** The Docker image targets the `iq_metrics` tool and Python test
+> harness only.  Building `rf_adapt_intel` with SoapySDR requires the
+> commented-out `hardware` stage in the `Dockerfile`.
+
+---
 
 ## Sensitive-data guidance
 
@@ -315,7 +419,10 @@ RF_SNAPSHOT_RETENTION_DAYS=7   # keep 7 days of snapshots; 0 = keep forever (def
 
 ## Development
 
-- C++ source is formatted with **clang-format v14** (`clang-format -i src/*.cpp`).
+- C++ source is formatted with **clang-format v14** (`clang-format -i src/*.cpp tools/iq_metrics.cpp`).
+- **clang-tidy** (v14) is run in CI on `tools/iq_metrics.cpp` with `clang-analyzer-*`, `bugprone-*`, `modernize-*`, `performance-*`, and `readability-*` checks.
 - **cpplint** runs as a pre-commit hook; install hooks with `pre-commit install`.
 - See `.cpplint-rationale.md` for the reasoning behind enabled/disabled checks.
+- The CI pipeline (`.github/workflows/ci.yml`) runs five jobs: Python lint + tests, C++ build + format + static analysis + test + benchmark, ASAN/UBSAN sanitizer build, Python dependency vulnerability scan (pip-audit), and Docker image build.
 - See `docs/missing-features.md` for a list of pending implementation items.
+- See `docs/audit.md` for the production-readiness audit and migration decision log.

@@ -183,6 +183,16 @@ which rf_adapt_intel
 # /usr/local/bin/rf_adapt_intel
 ```
 
+### Build without SDR hardware (`BUILD_HARDWARE_TARGETS=OFF`)
+
+On machines without SoapySDR (e.g. a CI server or a laptop), you can still
+build the standalone `iq_metrics` tool and run all Python tests:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_HARDWARE_TARGETS=OFF
+cmake --build build -t iq_metrics
+```
+
 ### Automated build via `scripts/deploy_and_restart.sh`
 
 If the service is already deployed and you want to rebuild and restart in one step:
@@ -325,6 +335,10 @@ python3 tests/test_guardrails.py -v
 python3 tests/test_snr_sweep.py -v
 python3 tests/test_demod_ber.py -v
 
+# Validate C++ iq_metrics output against the Python reference
+cmake -S . -B build -DBUILD_HARDWARE_TARGETS=OFF && cmake --build build -t iq_metrics
+python3 tests/test_iq_metrics.py build/iq_metrics -v
+
 # Shell tests (ops/setup.sh behaviour)
 bash tests/test_setup.sh -v
 
@@ -458,6 +472,13 @@ sudo cmake --install build
 sudo useradd -r -s /sbin/nologin rf_worker
 sudo bash ops/deploy.sh
 sudo bash ops/verify.sh
+
+# Build iq_metrics only (no SDR hardware required)
+cmake -S . -B build -DBUILD_HARDWARE_TARGETS=OFF && cmake --build build -t iq_metrics
+
+# Container build (builds iq_metrics + runs all tests inside Docker)
+docker build -t rf-adapt-intel:latest .
+docker run --rm rf-adapt-intel:latest ctest --test-dir /build -V
 ```
 
 See the main [README](../README.md) for full operational documentation.
