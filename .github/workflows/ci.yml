@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: ["main", "master"]
 
+# Default to read-only permissions for all jobs; individual jobs may widen
+# specific permissions as needed (e.g. docker job needs packages: write).
+permissions:
+  contents: read
+
 # Cancel in-progress runs for the same branch/PR
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,6 +23,8 @@ jobs:
   python-tests:
     name: Python lint + tests
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -66,6 +73,8 @@ jobs:
   cpp-iq-metrics:
     name: C++ iq_metrics (build + test + sanitizer)
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -129,6 +138,8 @@ jobs:
   sanitizer:
     name: C++ sanitizer build (ASAN + UBSAN)
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     env:
       # ASAN leak detection can produce false positives in subprocess; disable
       # for this job which runs iq_metrics via Python subprocess.
@@ -169,6 +180,8 @@ jobs:
   security-scan:
     name: Dependency vulnerability scan
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -200,6 +213,8 @@ jobs:
   docker:
     name: Container image build
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
