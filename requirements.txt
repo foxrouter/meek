@@ -1,0 +1,3 @@
+# Python test and tool dependencies for rf_adapt_intel
+# Install with: pip install -r requirements.txt
+numpy>=1.24,<3
