@@ -1,0 +1,10 @@
+---
+BasedOnStyle: Google
+IndentWidth: 2
+ColumnLimit: 100
+AlwaysBreakAfterReturnType: None
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+PointerAlignment: Left
+SpaceAfterCStyleCast: false

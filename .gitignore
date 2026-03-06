@@ -38,3 +38,9 @@ config/thresholds.env
 
 # Binaries
 tools/soapy_read_test
+tools/iq_metrics
+
+# Benchmark results (generated; committed only via CI artifact upload)
+benchmarks/results/*.json
+# Keep the placeholder so git tracks the directory
+!benchmarks/results/.gitkeep

@@ -1,0 +1,231 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master", "copilot/**"]
+  pull_request:
+    branches: ["main", "master"]
+
+# Default to read-only permissions for all jobs; individual jobs may widen
+# specific permissions as needed (e.g. docker job needs packages: write).
+permissions:
+  contents: read
+
+# Cancel in-progress runs for the same branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # 1. Python lint and tests
+  # ─────────────────────────────────────────────────────────────────────────
+  python-tests:
+    name: Python lint + tests
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Lint with pycodestyle (new files only)
+        run: |
+          pip install pycodestyle
+          # Enforce style on newly added files; pre-existing files are excluded
+          # to avoid blocking CI on unrelated pre-existing violations.
+          pycodestyle --max-line-length=100 \
+            tests/test_iq_metrics.py \
+            benchmarks/bench_iq_metrics.py
+
+      - name: test_autotune
+        run: python3 tests/test_autotune.py -v
+
+      - name: test_decode_candidates
+        run: python3 tests/test_decode_candidates.py -v
+
+      - name: test_guardrails
+        run: python3 tests/test_guardrails.py -v
+
+      - name: test_demod_ber
+        run: python3 tests/test_demod_ber.py -v
+
+      - name: test_snr_sweep
+        run: python3 tests/test_snr_sweep.py -v
+
+      - name: bench_throughput (acceptance gate)
+        run: python3 tests/bench_throughput.py -v
+
+      - name: test_setup.sh
+        run: bash tests/test_setup.sh -v
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 2. Build iq_metrics (C++, no hardware deps) + validate vs Python
+  # ─────────────────────────────────────────────────────────────────────────
+  cpp-iq-metrics:
+    name: C++ iq_metrics (build + test + sanitizer)
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build clang-14 clang-format-14 clang-tidy-14 \
+            pkg-config python3 python3-pip
+          sudo ln -sf /usr/bin/clang-format-14 /usr/local/bin/clang-format
+          sudo ln -sf /usr/bin/clang-tidy-14   /usr/local/bin/clang-tidy
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure (Release, no hardware targets)
+        run: |
+          cmake -S . -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_HARDWARE_TARGETS=OFF
+
+      - name: Build iq_metrics
+        run: cmake --build build -t iq_metrics
+
+      - name: clang-format check
+        run: |
+          clang-format --style=file -n --Werror tools/iq_metrics.cpp || {
+            echo "clang-format violations found. Run: clang-format -i tools/iq_metrics.cpp"
+            exit 1
+          }
+
+      - name: clang-tidy static analysis
+        run: |
+          clang-tidy-14 tools/iq_metrics.cpp \
+            --checks="-*,clang-analyzer-*,bugprone-*,modernize-*,performance-*,readability-*" \
+            -- -std=c++17 \
+            2>&1 | tee /tmp/clang-tidy.log
+          # Fail if any error-level findings
+          grep -qE "error:" /tmp/clang-tidy.log && exit 1 || true
+
+      - name: Validate C++ output vs Python reference
+        run: python3 tests/test_iq_metrics.py build/iq_metrics -v
+
+      - name: Run benchmark (informational — not a hard gate)
+        run: |
+          python3 benchmarks/bench_iq_metrics.py build/iq_metrics \
+            --repetitions 10 \
+            --block-sizes 4096,65536 \
+            --out benchmarks/results/bench_iq_metrics_ci.json
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmarks/results/bench_iq_metrics_ci.json
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 3. Sanitizer build (ASAN + UBSAN on iq_metrics)
+  # ─────────────────────────────────────────────────────────────────────────
+  sanitizer:
+    name: C++ sanitizer build (ASAN + UBSAN)
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    env:
+      # ASAN leak detection can produce false positives in subprocess; disable
+      # for this job which runs iq_metrics via Python subprocess.
+      ASAN_OPTIONS: detect_leaks=0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build clang-14 pkg-config python3 python3-pip
+          sudo update-alternatives --install /usr/bin/cc  cc  /usr/bin/clang-14 100
+          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-14 100
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure (Debug, sanitizers, no hardware targets)
+        run: |
+          cmake -S . -B build-san \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang-14 \
+            -DCMAKE_CXX_COMPILER=clang++-14 \
+            -DBUILD_HARDWARE_TARGETS=OFF \
+            -DENABLE_SANITIZERS=ON
+
+      - name: Build iq_metrics with sanitizers
+        run: cmake --build build-san -t iq_metrics
+
+      - name: Run validation tests under ASAN+UBSAN
+        run: python3 tests/test_iq_metrics.py build-san/iq_metrics -v
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 4. Security: Python dependency vulnerability scan
+  # ─────────────────────────────────────────────────────────────────────────
+  security-scan:
+    name: Dependency vulnerability scan
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit Python dependencies
+        run: |
+          pip-audit --requirement requirements.txt \
+            --output json \
+            --output-file security-audit.json || \
+          pip-audit --requirement requirements.txt
+
+      - name: Upload security audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit
+          path: security-audit.json
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 5. Container image build (Docker)
+  # ─────────────────────────────────────────────────────────────────────────
+  docker:
+    name: Container image build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (tests run inside Docker)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: rf-adapt-intel:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
