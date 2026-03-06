@@ -784,6 +784,66 @@ static const BandProfile UK_BANDS[] = {
    "GPS civil signal at 1575.42 MHz. BPSK spread-spectrum (-130 dBm typical). "
    "RTL-SDR v3 has marginal sensitivity at L1; use LNA + active antenna for "
    "any chance of signal. Useful as frequency reference check."},
+  {"APRS",        "APRS 2m packet radio (144.800 MHz)",
+   144.8e6, 0.1e6, 16e3, ModClass::FSK_LIKE, -999.0, 0.18,
+   "Automatic Packet Reporting System. Bell 202 AFSK 1200 bps on 144.800 MHz. "
+   "Decode with direwolf: direwolf -r <file> -n 1 -b 16 -t 0 -q hd -. "
+   "Very active UK frequency used by hams, weather stations, trackers."},
+  {"MARINE-CH16", "Marine VHF channel 16 (156.800 MHz)",
+   156.8e6, 0.025e6, 16e3, ModClass::FSK_LIKE, -999.0, 0.15,
+   "International distress, safety and calling channel. FM voice. "
+   "FM demod sufficient for audio monitoring. Mandatory listening channel for vessels."},
+  {"MARINE-CH70", "Marine VHF DSC channel 70 (156.525 MHz)",
+   156.525e6, 0.025e6, 16e3, ModClass::FSK_LIKE, -999.0, 0.15,
+   "Digital Selective Calling distress and safety channel. GFSK 1200 bps. "
+   "Decode with rtl-ais. Carries automated DSC distress alerts."},
+  {"METEOR-LRPT", "Meteor-M LRPT satellite (137.1 MHz)",
+   137.1e6, 0.15e6, 120e3, ModClass::PSK_QAM_LIKE, 3.0, 0.15,
+   "Russian Meteor-M weather satellite LRPT downlink at 137.100 MHz. OQPSK 72 kbps. "
+   "Decode with meteor_demod: meteor_demod -r <file> -o out.s. "
+   "Requires LNA + directional antenna for reliable decodes over UK passes."},
+  {"ELT-406",     "Emergency Locator Transmitter 406 MHz",
+   406.028e6, 0.1e6, 12e3, ModClass::FSK_LIKE, -999.0, 0.12,
+   "Aviation/maritime ELT/EPIRB/PLB distress beacons at 406.028 MHz. FSK. "
+   "Decode with multimon-ng. Monitored by COSPAS-SARSAT LEO/GEO satellite network."},
+  {"SIGFOX-868",  "Sigfox IoT network (868.130 MHz)",
+   868.13e6, 0.1e6, 200e3, ModClass::OOK_AM_LIKE, -999.0, 0.12,
+   "Sigfox LPWAN uplink at 868.130 MHz. Ultra-narrow-band OOK DBPSK. "
+   "Decode with rtl_433. Used for low-power IoT devices across UK."},
+  {"WMBUS-169",   "Wireless M-Bus 169 MHz",
+   169.406e6, 0.1e6, 12.5e3, ModClass::FSK_LIKE, -999.0, 0.13,
+   "Wireless M-Bus utility metering at 169.406 MHz (EN 13757-4 mode N). GFSK. "
+   "Decode with rtl-wmbus. Used for remote utility meter reading in EU/UK."},
+  {"ZIGBEE-868",  "ZigBee 868 MHz (EU channel 0)",
+   868.3e6, 0.1e6, 600e3, ModClass::PSK_QAM_LIKE, -999.0, 0.12,
+   "ZigBee/IEEE 802.15.4 at 868.3 MHz (EU channel 0). O-QPSK 250 kbps. "
+   "Decode with whsniff + Wireshark. Used in smart home, industrial IoT."},
+  {"DECT",        "DECT cordless phones (1881.792 MHz)",
+   1881.792e6, 20.0e6, 1.728e6, ModClass::FSK_LIKE, -999.0, 0.15,
+   "Digital Enhanced Cordless Telecommunications at 1880-1900 MHz. GFSK TDMA. "
+   "Decode with dect-scanner. Very common in UK residential/office environments."},
+  {"PMR446",      "PMR446 licence-free radio (446.006 MHz)",
+   446.006e6, 0.5e6, 12.5e3, ModClass::FSK_LIKE, -999.0, 0.15,
+   "Personal Mobile Radio 446 MHz. Analogue FM and digital DMR/dPMR. "
+   "Decode digital voice with dsd. Heavily used UK licence-free walkie-talkie band."},
+  {"ACARS-VHF",   "ACARS VHF aviation data (136.9 MHz)",
+   136.9e6, 0.05e6, 8e3, ModClass::OOK_AM_LIKE, -999.0, 0.15,
+   "Aircraft Communications Addressing and Reporting System on 136.900 MHz. AM-MSK. "
+   "Decode with acarsdec. Active over UK on multiple VHF frequencies."},
+  {"ISM-169",     "ISM 169 MHz sub-GHz IoT",
+   169.406e6, 0.1e6, 12.5e3, ModClass::FSK_LIKE, -999.0, 0.12,
+   "ISM/metering devices at 169.406 MHz. GFSK. "
+   "Decode with rtl_433. Overlaps with W-MBus N-mode in the 169 MHz allocation."},
+  {"IRIDIUM",     "Iridium LEO satellite (1621.250 MHz)",
+   1621.25e6, 5.0e6, 100e3, ModClass::PSK_QAM_LIKE, 3.0, 0.15,
+   "Iridium LEO satellite burst signals at 1616-1626 MHz. QPSK/OQPSK. "
+   "Decode headless with iridium-extractor --offline -f cf32_le <file> | "
+   "python3 iridium-parser.py. No GUI required."},
+  {"INMARSAT-AERO", "Inmarsat Aero L-band (1545.000 MHz)",
+   1545.0e6, 15.0e6, 500e3, ModClass::PSK_QAM_LIKE, 3.0, 0.13,
+   "Inmarsat Aero L-band aviation satellite at 1545 MHz. BPSK/QPSK. "
+   "Decode headless with satdump process inmarsat_aero_105 --baseband <file> "
+   "--baseband_format cf32. JAERO is soundcard-only and must not be used."},
 };
 // clang-format on
 

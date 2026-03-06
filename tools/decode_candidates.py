@@ -23,6 +23,13 @@ Decoders (applied in priority order per mod class):
   2. External free CLI tools (optional, enabled with --external flag):
        multimon-ng  : POCSAG/FLEX/OOK (fsk_like / ook_am_like)
        rtl_433      : OOK/ASK ISM-433 device packets (ook_am_like)
+       direwolf     : APRS/AX.25 packet radio (fsk_like)
+       acarsdec     : ACARS/VDL2 aviation data (ook_am_like, psk_qam_like)
+       rtl-ais      : AIS maritime vessel tracking (fsk_like)
+       rtl-wmbus    : Wireless M-Bus utility metering (fsk_like)
+       dsd          : DMR/P25/NXDN/DSTAR/TETRA digital voice (fsk_like, psk_qam_like)
+       iridium-extractor : Iridium LEO satellite bursts (psk_qam_like)
+       satdump      : Inmarsat Aero L-band ACARS (psk_qam_like)
 
 Requires: numpy, sqlite3 (stdlib)
 Optional: scipy (improved resampling; auto-detected at runtime)
@@ -72,6 +79,20 @@ _BAND_FREQ_HZ: Dict[str, int] = {
     "TETRA":         392_000_000,
     "DMR":           446_000_000,
     "GPS-L1":      1_575_420_000,
+    "APRS":          144_800_000,
+    "MARINE-CH16":   156_800_000,
+    "MARINE-CH70":   156_525_000,
+    "METEOR-LRPT":   137_100_000,
+    "ELT-406":       406_028_000,
+    "SIGFOX-868":    868_130_000,
+    "WMBUS-169":     169_406_000,
+    "ZIGBEE-868":    868_300_000,
+    "DECT":        1_881_792_000,
+    "PMR446":        446_006_000,
+    "ACARS-VHF":     136_900_000,
+    "ISM-169":       169_406_000,
+    "IRIDIUM":     1_621_250_000,
+    "INMARSAT-AERO": 1_545_000_000,
 }
 
 # ---------------------------------------------------------------------------
@@ -497,6 +518,9 @@ _BUILTIN_DECODERS = {
     "cw_like":      decode_cw,
 }
 
+# Protocol keywords recognised in dsd stderr output
+_DSD_PROTOCOL_KEYWORDS = ("DMR", "P25", "NXDN", "DSTAR", "TETRA")
+
 
 # ---------------------------------------------------------------------------
 # External free CLI decoders
@@ -616,6 +640,385 @@ def try_rtl_433(
         }
 
 
+def try_direwolf(
+    snap_path: str, fs: float = 2_048_000
+) -> Optional[Dict[str, Any]]:
+    """Attempt APRS/AX.25 decoding with direwolf (fsk_like).
+
+    FM-demodulates CF32 to s16 PCM and feeds it to direwolf via stdin.
+    Returns a result dict, or None if direwolf is not installed.
+    """
+    if not shutil.which("direwolf"):
+        return None
+
+    try:
+        samples  = load_cf32(snap_path, max_samples=500_000)
+        fm_bytes = _fm_demod_to_s16(samples)
+    except Exception as exc:  # pylint: disable=broad-except
+        return {
+            "decoded": False, "method": "direwolf", "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+    try:
+        result = subprocess.run(
+            [
+                "direwolf",
+                "-r", str(int(fs)),
+                "-n", "1",
+                "-b", "16",
+                "-t", "0",
+                "-q", "hd",
+                "-",
+            ],
+            input=fm_bytes,
+            capture_output=True,
+            timeout=20,
+        )
+        stdout = result.stdout.decode(errors="replace").strip()
+        lines  = [ln for ln in stdout.splitlines() if ln.strip()]
+        return {
+            "decoded":      bool(lines),
+            "method":       "direwolf",
+            "output_lines": lines[:20],
+            "return_code":  result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"decoded": False, "method": "direwolf", "error": "timeout"}
+    except Exception as exc:  # pylint: disable=broad-except
+        return {
+            "decoded": False, "method": "direwolf", "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+
+def try_acarsdec(
+    snap_path: str, center_freq_hz: int = 136_900_000, fs: float = 2_048_000
+) -> Optional[Dict[str, Any]]:
+    """Attempt ACARS decoding with acarsdec (ook_am_like, psk_qam_like).
+
+    Feeds raw CF32 bytes directly to acarsdec via stdin.
+    Returns a result dict, or None if acarsdec is not installed.
+    """
+    if not shutil.which("acarsdec"):
+        return None
+
+    try:
+        with open(snap_path, "rb") as fh:
+            raw_bytes = fh.read()
+    except Exception as exc:  # pylint: disable=broad-except
+        return {
+            "decoded": False, "method": "acarsdec", "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+    try:
+        result = subprocess.run(
+            [
+                "acarsdec",
+                "-r", str(int(fs)),
+                "-f", str(center_freq_hz),
+                "-",
+            ],
+            input=raw_bytes,
+            capture_output=True,
+            timeout=20,
+        )
+        stdout = result.stdout.decode(errors="replace").strip()
+        lines  = [ln for ln in stdout.splitlines() if ln.strip()]
+        return {
+            "decoded":      bool(lines),
+            "method":       "acarsdec",
+            "output_lines": lines[:20],
+            "return_code":  result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"decoded": False, "method": "acarsdec", "error": "timeout"}
+    except Exception as exc:  # pylint: disable=broad-except
+        return {
+            "decoded": False, "method": "acarsdec", "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+
+def try_rtl_ais(
+    snap_path: str, center_freq_hz: int = 161_975_000, fs: float = 2_048_000
+) -> Optional[Dict[str, Any]]:
+    """Attempt AIS decoding with rtl-ais (fsk_like).
+
+    Feeds raw CF32 bytes to rtl-ais via stdin; filters output for NMEA sentences.
+    Returns a result dict, or None if rtl-ais is not installed.
+    """
+    if not shutil.which("rtl-ais"):
+        return None
+
+    try:
+        with open(snap_path, "rb") as fh:
+            raw_bytes = fh.read()
+    except Exception as exc:  # pylint: disable=broad-except
+        return {
+            "decoded": False, "method": "rtl-ais", "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+    try:
+        result = subprocess.run(
+            [
+                "rtl-ais",
+                "-S",
+                "-f", str(center_freq_hz),
+                "-s", str(int(fs)),
+                "-",
+            ],
+            input=raw_bytes,
+            capture_output=True,
+            timeout=20,
+        )
+        stdout = result.stdout.decode(errors="replace").strip()
+        lines  = [
+            ln for ln in stdout.splitlines()
+            if ln.strip() and ("!AIVDM" in ln or "!AIVDO" in ln)
+        ]
+        return {
+            "decoded":      bool(lines),
+            "method":       "rtl-ais",
+            "output_lines": lines[:20],
+            "return_code":  result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"decoded": False, "method": "rtl-ais", "error": "timeout"}
+    except Exception as exc:  # pylint: disable=broad-except
+        return {
+            "decoded": False, "method": "rtl-ais", "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+
+def try_rtl_wmbus(
+    snap_path: str, fs: float = 2_048_000
+) -> Optional[Dict[str, Any]]:
+    """Attempt Wireless M-Bus decoding with rtl-wmbus (fsk_like).
+
+    Converts CF32 to interleaved uint8 (scale x127.5 + 127.5) and feeds stdin.
+    Returns a result dict, or None if rtl-wmbus is not installed.
+    """
+    if not shutil.which("rtl-wmbus"):
+        return None
+
+    try:
+        samples = load_cf32(snap_path, max_samples=500_000)
+        # Interleave real/imag and scale to uint8 [0, 255]
+        iq_flat = np.empty(len(samples) * 2, dtype=np.float32)
+        iq_flat[0::2] = samples.real
+        iq_flat[1::2] = samples.imag
+        uint8_bytes = (
+            np.clip(iq_flat * 127.5 + 127.5, 0, 255).astype(np.uint8).tobytes()
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        return {
+            "decoded": False, "method": "rtl-wmbus", "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+    try:
+        result = subprocess.run(
+            ["rtl-wmbus", "-s", str(int(fs))],
+            input=uint8_bytes,
+            capture_output=True,
+            timeout=20,
+        )
+        stdout = result.stdout.decode(errors="replace").strip()
+        lines  = [ln for ln in stdout.splitlines() if ln.strip()]
+        return {
+            "decoded":      bool(lines),
+            "method":       "rtl-wmbus",
+            "output_lines": lines[:20],
+            "return_code":  result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"decoded": False, "method": "rtl-wmbus", "error": "timeout"}
+    except Exception as exc:  # pylint: disable=broad-except
+        return {
+            "decoded": False, "method": "rtl-wmbus", "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+
+def try_dsd(
+    snap_path: str, mod_class: str = "fsk_like", fs: float = 2_048_000
+) -> Optional[Dict[str, Any]]:
+    """Attempt digital voice decoding with dsd (fsk_like, psk_qam_like).
+
+    FM-demodulates CF32 to s16 PCM and feeds it to dsd via stdin.
+    Scans stderr for recognised protocol keywords.
+    Returns a result dict, or None if dsd is not installed or mod class is unsuitable.
+    """
+    if not shutil.which("dsd"):
+        return None
+    if mod_class not in ("fsk_like", "psk_qam_like", "unknown"):
+        return None
+
+    try:
+        samples  = load_cf32(snap_path, max_samples=500_000)
+        fm_bytes = _fm_demod_to_s16(samples)
+    except Exception as exc:  # pylint: disable=broad-except
+        return {
+            "decoded": False, "method": "dsd", "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+    try:
+        result = subprocess.run(
+            ["dsd", "-i", "-", "-o", "/dev/null", "-n", "-f", "a"],
+            input=fm_bytes,
+            capture_output=True,
+            timeout=20,
+        )
+        stderr = result.stderr.decode(errors="replace")
+        proto_lines = [
+            ln for ln in stderr.splitlines()
+            if any(kw in ln for kw in _DSD_PROTOCOL_KEYWORDS)
+        ]
+        return {
+            "decoded":      bool(proto_lines),
+            "method":       "dsd",
+            "output_lines": proto_lines[:20],
+            "return_code":  result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"decoded": False, "method": "dsd", "error": "timeout"}
+    except Exception as exc:  # pylint: disable=broad-except
+        return {
+            "decoded": False, "method": "dsd", "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+
+def try_iridium_extractor(
+    snap_path: str,
+    center_freq_hz: int = 1_621_250_000,
+    fs: float = 2_048_000,
+) -> Optional[Dict[str, Any]]:
+    """Attempt Iridium burst decoding (psk_qam_like).
+
+    Runs iridium-extractor offline on the file then pipes stdout to
+    iridium-parser.py (if found). Filters output for A:OK lines.
+    Returns a result dict, or None if iridium-extractor is not installed.
+    """
+    if not shutil.which("iridium-extractor"):
+        return None
+
+    try:
+        ext_cmd = [
+            "iridium-extractor",
+            "-c", str(center_freq_hz),
+            "-r", str(int(fs)),
+            "-f", "cf32_le",
+            "--offline",
+            snap_path,
+        ]
+        parser_path = shutil.which("iridium-parser.py") or shutil.which("iridium-parser")
+
+        ext_result = subprocess.run(
+            ext_cmd,
+            capture_output=True,
+            timeout=30,
+        )
+        raw_output = ext_result.stdout.decode(errors="replace")
+
+        if parser_path:
+            parse_result = subprocess.run(
+                ["python3", parser_path],
+                input=ext_result.stdout,
+                capture_output=True,
+                timeout=30,
+            )
+            raw_output = parse_result.stdout.decode(errors="replace")
+
+        lines = [
+            ln for ln in raw_output.splitlines()
+            if "A:OK" in ln
+        ]
+        return {
+            "decoded":      bool(lines),
+            "method":       "iridium-extractor",
+            "output_lines": lines[:20],
+            "return_code":  ext_result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"decoded": False, "method": "iridium-extractor", "error": "timeout"}
+    except Exception as exc:  # pylint: disable=broad-except
+        return {
+            "decoded": False, "method": "iridium-extractor", "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+
+
+def try_satdump_aero(
+    snap_path: str,
+    center_freq_hz: int = 1_545_000_000,
+    fs: float = 2_048_000,
+) -> Optional[Dict[str, Any]]:
+    """Attempt Inmarsat Aero decoding with satdump (psk_qam_like).
+
+    Runs: satdump process inmarsat_aero_105 <tmpdir> --baseband <file>
+          --baseband_format cf32 --samplerate <fs> --frequency <freq>
+    Scans output JSON files and stderr for ACARS/SU content lines.
+    Returns a result dict, or None if satdump is not installed.
+    """
+    if not shutil.which("satdump"):
+        return None
+
+    tmpdir = tempfile.mkdtemp(prefix="satdump_aero_")
+    try:
+        result = subprocess.run(
+            [
+                "satdump",
+                "process",
+                "inmarsat_aero_105",
+                tmpdir,
+                "--baseband", snap_path,
+                "--baseband_format", "cf32",
+                "--samplerate", str(int(fs)),
+                "--frequency", str(center_freq_hz),
+            ],
+            capture_output=True,
+            timeout=45,
+        )
+        stderr = result.stderr.decode(errors="replace")
+
+        # Collect decoded content from JSON output files and stderr
+        acars_lines: List[str] = [
+            ln for ln in stderr.splitlines()
+            if "ACARS" in ln or " SU" in ln
+        ]
+        for json_file in Path(tmpdir).glob("*.json"):
+            try:
+                with open(json_file, encoding="utf-8") as jf:
+                    content = jf.read()
+                for ln in content.splitlines():
+                    if "ACARS" in ln or " SU" in ln:
+                        acars_lines.append(ln)
+            except OSError:
+                pass
+
+        return {
+            "decoded":      bool(acars_lines),
+            "method":       "satdump",
+            "output_lines": acars_lines[:20],
+            "return_code":  result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"decoded": False, "method": "satdump", "error": "timeout"}
+    except Exception as exc:  # pylint: disable=broad-except
+        return {
+            "decoded": False, "method": "satdump", "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 # Per-candidate decode pipeline
 # ---------------------------------------------------------------------------
@@ -689,10 +1092,32 @@ def decode_candidate(
         center_freq = _BAND_FREQ_HZ.get(band_name, 433_920_000)
 
         ext_result: Optional[Dict[str, Any]] = None
-        if mod_class in ("fsk_like", "ook_am_like", "unknown"):
+
+        # Band-specialist decoders (highest priority)
+        if ext_result is None and band_name == "APRS":
+            ext_result = try_direwolf(snap["path"], fs=fs)
+        if ext_result is None and band_name in ("ACARS", "ACARS-VHF", "VDL2"):
+            ext_result = try_acarsdec(snap["path"], center_freq_hz=center_freq, fs=fs)
+        if ext_result is None and band_name in ("AIS-A", "AIS-B", "MARINE-CH70"):
+            ext_result = try_rtl_ais(snap["path"], center_freq_hz=center_freq, fs=fs)
+        if ext_result is None and band_name in ("WMBUS-169", "SMETS2"):
+            ext_result = try_rtl_wmbus(snap["path"], fs=fs)
+        if ext_result is None and band_name == "IRIDIUM":
+            ext_result = try_iridium_extractor(
+                snap["path"], center_freq_hz=center_freq, fs=fs
+            )
+        if ext_result is None and band_name == "INMARSAT-AERO":
+            ext_result = try_satdump_aero(
+                snap["path"], center_freq_hz=center_freq, fs=fs
+            )
+
+        # Broad fallbacks in priority order
+        if ext_result is None and mod_class in ("fsk_like", "ook_am_like", "unknown"):
             ext_result = try_multimon_ng(snap["path"], mod_class, fs=fs)
         if ext_result is None and mod_class in ("ook_am_like", "unknown"):
             ext_result = try_rtl_433(snap["path"], center_freq_hz=center_freq, fs=fs)
+        if ext_result is None and mod_class in ("fsk_like", "psk_qam_like", "unknown"):
+            ext_result = try_dsd(snap["path"], mod_class=mod_class, fs=fs)
 
         if ext_result is not None:
             entry["decode_result"] = ext_result
