@@ -703,36 +703,53 @@ def try_acarsdec(
     if not shutil.which("acarsdec"):
         return None
 
+    proc: Optional[subprocess.Popen] = None  # type: ignore[type-arg]
     try:
-        with open(snap_path, "rb") as fh:
-            raw_bytes = fh.read()
-    except Exception as exc:  # pylint: disable=broad-except
-        return {
-            "decoded": False, "method": "acarsdec", "error": str(exc),
-            "traceback": traceback.format_exc(),
-        }
-
-    try:
-        result = subprocess.run(
+        proc = subprocess.Popen(  # pylint: disable=consider-using-with
             [
                 "acarsdec",
                 "-r", str(int(fs)),
                 "-f", str(center_freq_hz),
                 "-",
             ],
-            input=raw_bytes,
-            capture_output=True,
-            timeout=20,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-        stdout = result.stdout.decode(errors="replace").strip()
+        try:
+            chunk_size = 1024 * 1024
+            with open(snap_path, "rb") as fh:
+                while True:
+                    chunk = fh.read(chunk_size)
+                    if not chunk:
+                        break
+                    if proc.stdin is not None:
+                        proc.stdin.write(chunk)
+            if proc.stdin is not None:
+                proc.stdin.close()
+            stdout_bytes, _ = proc.communicate(timeout=20)
+        except Exception:
+            try:
+                proc.kill()
+                proc.wait()
+            except Exception:  # pylint: disable=broad-except
+                pass
+            raise
+        stdout = stdout_bytes.decode(errors="replace").strip()
         lines  = [ln for ln in stdout.splitlines() if ln.strip()]
         return {
             "decoded":      bool(lines),
             "method":       "acarsdec",
             "output_lines": lines[:20],
-            "return_code":  result.returncode,
+            "return_code":  proc.returncode,
         }
     except subprocess.TimeoutExpired:
+        try:
+            if proc is not None:
+                proc.kill()
+                proc.wait()
+        except Exception:  # pylint: disable=broad-except
+            pass
         return {"decoded": False, "method": "acarsdec", "error": "timeout"}
     except Exception as exc:  # pylint: disable=broad-except
         return {
@@ -752,17 +769,9 @@ def try_rtl_ais(
     if not shutil.which("rtl-ais"):
         return None
 
+    proc: Optional[subprocess.Popen] = None  # type: ignore[type-arg]
     try:
-        with open(snap_path, "rb") as fh:
-            raw_bytes = fh.read()
-    except Exception as exc:  # pylint: disable=broad-except
-        return {
-            "decoded": False, "method": "rtl-ais", "error": str(exc),
-            "traceback": traceback.format_exc(),
-        }
-
-    try:
-        result = subprocess.run(
+        proc = subprocess.Popen(  # pylint: disable=consider-using-with
             [
                 "rtl-ais",
                 "-S",
@@ -770,11 +779,30 @@ def try_rtl_ais(
                 "-s", str(int(fs)),
                 "-",
             ],
-            input=raw_bytes,
-            capture_output=True,
-            timeout=20,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-        stdout = result.stdout.decode(errors="replace").strip()
+        try:
+            chunk_size = 1024 * 1024
+            with open(snap_path, "rb") as fh:
+                while True:
+                    chunk = fh.read(chunk_size)
+                    if not chunk:
+                        break
+                    if proc.stdin is not None:
+                        proc.stdin.write(chunk)
+            if proc.stdin is not None:
+                proc.stdin.close()
+            stdout_bytes, _ = proc.communicate(timeout=20)
+        except Exception:
+            try:
+                proc.kill()
+                proc.wait()
+            except Exception:  # pylint: disable=broad-except
+                pass
+            raise
+        stdout = stdout_bytes.decode(errors="replace").strip()
         lines  = [
             ln for ln in stdout.splitlines()
             if ln.strip() and ("!AIVDM" in ln or "!AIVDO" in ln)
@@ -783,9 +811,15 @@ def try_rtl_ais(
             "decoded":      bool(lines),
             "method":       "rtl-ais",
             "output_lines": lines[:20],
-            "return_code":  result.returncode,
+            "return_code":  proc.returncode,
         }
     except subprocess.TimeoutExpired:
+        try:
+            if proc is not None:
+                proc.kill()
+                proc.wait()
+        except Exception:  # pylint: disable=broad-except
+            pass
         return {"decoded": False, "method": "rtl-ais", "error": "timeout"}
     except Exception as exc:  # pylint: disable=broad-except
         return {
@@ -1098,7 +1132,7 @@ def decode_candidate(
             ext_result = try_direwolf(snap["path"], fs=fs)
         if ext_result is None and band_name in ("ACARS", "ACARS-VHF", "VDL2"):
             ext_result = try_acarsdec(snap["path"], center_freq_hz=center_freq, fs=fs)
-        if ext_result is None and band_name in ("AIS-A", "AIS-B", "MARINE-CH70"):
+        if ext_result is None and band_name in ("AIS-A", "AIS-B"):
             ext_result = try_rtl_ais(snap["path"], center_freq_hz=center_freq, fs=fs)
         if ext_result is None and band_name in ("WMBUS-169", "SMETS2"):
             ext_result = try_rtl_wmbus(snap["path"], fs=fs)

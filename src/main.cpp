@@ -790,13 +790,13 @@ static const BandProfile UK_BANDS[] = {
    "Decode with direwolf: direwolf -r <file> -n 1 -b 16 -t 0 -q hd -. "
    "Very active UK frequency used by hams, weather stations, trackers."},
   {"MARINE-CH16", "Marine VHF channel 16 (156.800 MHz)",
-   156.8e6, 0.025e6, 16e3, ModClass::FSK_LIKE, -999.0, 0.15,
+   156.8e6, 0.025e6, 16e3, ModClass::UNKNOWN, -999.0, 0.0,
    "International distress, safety and calling channel. FM voice. "
    "FM demod sufficient for audio monitoring. Mandatory listening channel for vessels."},
   {"MARINE-CH70", "Marine VHF DSC channel 70 (156.525 MHz)",
    156.525e6, 0.025e6, 16e3, ModClass::FSK_LIKE, -999.0, 0.15,
    "Digital Selective Calling distress and safety channel. GFSK 1200 bps. "
-   "Decode with rtl-ais. Carries automated DSC distress alerts."},
+   "Carries automated DSC distress alerts; use a DSC-capable decoder for messages."},
   {"METEOR-LRPT", "Meteor-M LRPT satellite (137.1 MHz)",
    137.1e6, 0.15e6, 120e3, ModClass::PSK_QAM_LIKE, 3.0, 0.15,
    "Russian Meteor-M weather satellite LRPT downlink at 137.100 MHz. OQPSK 72 kbps. "
