@@ -171,8 +171,11 @@ static std::vector<std::complex<float>> read_cf32(const std::string& path) {
 
 static void emit_json(const std::string& path, const IqMetrics& m) {
   std::cout << std::fixed << std::setprecision(8);
-  std::cout << "{" << "\"file\":\"" << path << "\"," << "\"n_samples\":" << m.n_samples << ","
-            << "\"avg_power\":" << m.avg_power << "," << "\"snr_db\":" << m.snr_db << ","
+  std::cout << "{"
+            << "\"file\":\"" << path << "\","
+            << "\"n_samples\":" << m.n_samples << ","
+            << "\"avg_power\":" << m.avg_power << ","
+            << "\"snr_db\":" << m.snr_db << ","
             << "\"spectral_flatness\":" << m.spectral_flatness << ","
             << "\"est_bw_hz\":" << m.est_bw_hz << "}\n";
 }
