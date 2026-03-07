@@ -43,7 +43,7 @@ struct Config {
   double fdev{50'000.0};
 
   // Output paths
-  std::string db_path{"rf_adapt_intel.db"};
+  std::string db_path{"/var/lib/rf-adapt-intel/rf_adapt_intel.db"};
   std::string snapshot_dir{"/var/lib/rf-adapt-intel/snapshots"};
   std::string metrics_file{"/var/lib/rf-adapt-intel/metrics.prom"};
   std::string heartbeat_file{"/var/lib/rf-adapt-intel/heartbeat"};
@@ -135,7 +135,8 @@ inline std::string env_str(const char* name, const char* def) {
   }
 
   // Output paths
-  cfg.db_path = detail::env_str("RF_DB_PATH", "rf_adapt_intel.db");
+  cfg.db_path = detail::env_str("RF_DB_PATH",
+                                "/var/lib/rf-adapt-intel/rf_adapt_intel.db");
   cfg.snapshot_dir =
       detail::env_str("RF_SNAPSHOT_DIR", "/var/lib/rf-adapt-intel/snapshots");
   cfg.metrics_file =
