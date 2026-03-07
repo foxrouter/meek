@@ -17,6 +17,19 @@
 #include <fstream>
 #include <string>
 
+// httplib.h must be included at global scope (before any namespace) to avoid
+// GCC 12+ two-phase template lookup failures on aarch64.  If included inside
+// namespace meek, all of httplib's internals are compiled as meek::httplib::…
+// which breaks unqualified calls such as decode_url inside httplib itself.
+#ifdef HAVE_HTTPLIB
+#include <httplib.h>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <thread>
+#include <utility>
+#endif  // HAVE_HTTPLIB
+
 namespace meek {
 
 // ---------------------------------------------------------------------------
@@ -99,12 +112,6 @@ inline void write_heartbeat(const std::string& path) {
 // ---------------------------------------------------------------------------
 
 #ifdef HAVE_HTTPLIB
-#include <httplib.h>
-#include <memory>
-#include <mutex>
-#include <sstream>
-#include <thread>
-#include <utility>
 
 /// Thread-safe snapshot of metrics for the HTTP server.
 struct MetricsSnapshot {
