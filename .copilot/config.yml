@@ -7,6 +7,11 @@ exclude:
   - "*.a"
 include:
   - "src/"
+  - "include/"
+  - "tools/"
+  - "tests/"
   - "scripts/"
 global_prompts:
   - "Follow repository code style and conventions"
+  - "Use C++20 features; guard liquid-dsp code with #ifdef HAVE_LIQUID"
+  - "Run clang-format before committing C++ files"
