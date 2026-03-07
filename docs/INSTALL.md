@@ -439,7 +439,8 @@ reach Brian's `rf_worker` account without a password:
 # Generate a key for rf_worker (if not already present)
 sudo -u rf_worker ssh-keygen -t ed25519 -f /var/lib/rf-adapt-intel/.ssh/id_ed25519 -N ''
 
-# Copy the public key to Brian
+# Copy the public key to Brian (replace with Brian's IP address if .local resolution
+# is not available — mDNS/Avahi may not be installed on a minimal server setup)
 sudo -u rf_worker ssh-copy-id -i /var/lib/rf-adapt-intel/.ssh/id_ed25519.pub \
     rf_worker@brian.local
 ```

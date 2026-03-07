@@ -10,13 +10,13 @@
 # Environment overrides:
 #   INCOMING_DIR    Directory to scan  (default /var/lib/rf-adapt-intel/incoming)
 #   PROCESSED_DIR   Move target        (default /var/lib/rf-adapt-intel/processed)
-#   PROCESS_SCRIPT  Path to process_incoming.sh (default auto-detected from this script)
+#   PROCESS_SCRIPT  Path to process_incoming.sh
+#                   (default /usr/local/share/rf-adapt-intel/scripts/process_incoming.sh)
 set -euo pipefail
 
-REPO_SHARE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INCOMING_DIR="${INCOMING_DIR:-/var/lib/rf-adapt-intel/incoming}"
 PROCESSED_DIR="${PROCESSED_DIR:-/var/lib/rf-adapt-intel/processed}"
-PROCESS_SCRIPT="${PROCESS_SCRIPT:-${REPO_SHARE}/scripts/process_incoming.sh}"
+PROCESS_SCRIPT="${PROCESS_SCRIPT:-/usr/local/share/rf-adapt-intel/scripts/process_incoming.sh}"
 
 shopt -s nullglob
 
