@@ -3,8 +3,8 @@
 Step-by-step instructions for installing and running `rf_adapt_intel` on the two
 preferred platforms:
 
-- **Raspberry Pi OS Bookworm 64-bit** (Raspberry Pi 3B+ / 4 / 5)
-- **Ubuntu Server Noble 24.04 LTS** (x86-64 or ARM64)
+- **Raspberry Pi OS Bookworm 64-bit** (Raspberry Pi 3B+ / 4 / 5) — **Ray** (edge SDR node)
+- **Ubuntu Server Noble 24.04 LTS** (x86-64 or ARM64) — **Brian** (decode-only node)
 
 ---
 
@@ -18,7 +18,8 @@ preferred platforms:
 6. [Optional decoders](#6-optional-decoders)
 7. [Configuration](#7-configuration)
 8. [Verify the installation](#8-verify-the-installation)
-9. [Troubleshooting](#9-troubleshooting)
+9. [Two-node deployment (Ray + Brian)](#9-two-node-deployment-ray--brian)
+10. [Troubleshooting](#10-troubleshooting)
 
 ---
 
@@ -348,7 +349,138 @@ cmake --build build --target test
 
 ---
 
-## 9. Troubleshooting
+## 9. Two-node deployment (Ray + Brian)
+
+This section covers a split-node setup where:
+
+- **Ray** — Raspberry Pi 4 (64-bit Bookworm). Has the RTL-SDR dongle. Captures IQ
+  data and classifies modulation via `process-worker.service`. Writes `.cf32` snapshots
+  to `/var/lib/rf-adapt-intel/snapshots/` and rsync-transfers them to Brian.
+- **Brian** — Ubuntu Server. No SDR hardware. Receives IQ files from Ray, runs offline
+  decode analysis via `tools/decode_candidates.py`, and writes audit reports to
+  `/var/lib/rf-adapt-intel/processed/`.
+
+### 9.1 Ray setup
+
+Run the standard installer as usual:
+
+```bash
+git clone https://github.com/foxrouter/meek.git && cd meek
+sudo bash install.sh --all-decoders   # or without --all-decoders
+```
+
+Then configure and enable the IQ transfer watcher so snapshots are automatically
+sent to Brian as they are written:
+
+```bash
+# Copy the example config and set the destination
+sudo cp config/iq-transfer.env.example /etc/rf_worker/iq-transfer.env
+sudo nano /etc/rf_worker/iq-transfer.env
+# Set: IQ_DEST=rf_worker@brian.local:/var/lib/rf-adapt-intel/incoming/
+
+# Install the watcher service and its hardening drop-in
+sudo install -m 644 systemd/iq-transfer-watcher.service \
+    /etc/systemd/system/iq-transfer-watcher.service
+sudo mkdir -p /etc/systemd/system/iq-transfer-watcher.service.d
+sudo install -m 644 systemd/iq-transfer-watcher.service.d/hardening.conf \
+    /etc/systemd/system/iq-transfer-watcher.service.d/hardening.conf
+
+# Install scripts to the shared directory
+sudo mkdir -p /usr/local/share/rf-adapt-intel/scripts
+sudo install -m 755 scripts/transfer_iq.sh \
+    /usr/local/share/rf-adapt-intel/scripts/transfer_iq.sh
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now iq-transfer-watcher
+sudo systemctl status iq-transfer-watcher
+```
+
+The `iq-transfer-watcher` service is bound to `process-worker` — it starts and
+stops together with the capture daemon.
+
+### 9.2 Brian setup
+
+Run the installer with `--no-sdr` to skip RTL-SDR packages and udev rules:
+
+```bash
+git clone https://github.com/foxrouter/meek.git && cd meek
+sudo bash install.sh --no-sdr
+# With optional decoders (multimon-ng, rtl_433, liquid-dsp):
+# sudo bash install.sh --no-sdr --all-decoders
+```
+
+What `--no-sdr` does differently from the default:
+
+| Action | Default (Ray) | `--no-sdr` (Brian) |
+|---|---|---|
+| Install `librtlsdr-dev`, `soapysdr-module-rtlsdr` | ✓ | ✗ |
+| Set up udev rules + DVB blacklist | ✓ | ✗ |
+| Add `rf_worker` to `plugdev` group | ✓ | ✗ |
+| Build and install `rf_adapt_intel` binary | ✓ | ✗ |
+| Enable `process-worker.service` | ✓ | ✗ |
+| Enable `rf-incoming-processor.path` | ✗ | ✓ |
+
+After installation, verify the path unit is watching for incoming files:
+
+```bash
+sudo systemctl status rf-incoming-processor.path
+# Logs from each file processed:
+sudo journalctl -u rf-incoming-processor -f
+```
+
+### 9.3 Configure SSH key trust (Ray → Brian)
+
+The IQ transfer uses rsync over SSH.  Ray's `rf_worker` user must be able to
+reach Brian's `rf_worker` account without a password:
+
+**On Ray:**
+
+```bash
+# Generate a key for rf_worker (if not already present)
+sudo -u rf_worker ssh-keygen -t ed25519 -f /var/lib/rf-adapt-intel/.ssh/id_ed25519 -N ''
+
+# Copy the public key to Brian
+sudo -u rf_worker ssh-copy-id -i /var/lib/rf-adapt-intel/.ssh/id_ed25519.pub \
+    rf_worker@brian.local
+```
+
+**On Brian:** ensure `rf_worker`'s `~/.ssh/authorized_keys` contains Ray's public key
+and that `sshd` is running.
+
+Test the connection from Ray:
+
+```bash
+sudo -u rf_worker rsync --dry-run \
+    /var/lib/rf-adapt-intel/snapshots/ \
+    rf_worker@brian.local:/var/lib/rf-adapt-intel/incoming/
+```
+
+### 9.4 Verify end-to-end flow
+
+1. On Ray, check that snapshots are being sent:
+
+   ```bash
+   sudo journalctl -u iq-transfer-watcher -f
+   # Should show: "OK transferred: <filename>"
+   ```
+
+2. On Brian, check that files are processed:
+
+   ```bash
+   ls /var/lib/rf-adapt-intel/processed/
+   sudo journalctl -u rf-incoming-processor -f
+   # Should show: "[scan_incoming] OK: <filename>"
+   ```
+
+3. Audit JSON reports appear alongside the processed files:
+
+   ```bash
+   ls /var/lib/rf-adapt-intel/processed/*.json
+   ```
+
+---
+
+## 10. Troubleshooting
 
 ### "SoapySDR not found" during cmake
 

@@ -1,0 +1,42 @@
+[Unit]
+Description=Process incoming IQ files (batch dispatcher, Brian)
+Documentation=https://github.com/foxrouter/meek
+After=network.target
+
+[Service]
+Type=oneshot
+# Scans /var/lib/rf-adapt-intel/incoming/ for *.cf32 and *.raw files,
+# calls process_incoming.sh for each, then moves them to processed/.
+ExecStart=/usr/local/share/rf-adapt-intel/scripts/scan_incoming.sh
+User=rf_worker
+Group=rf_worker
+
+WorkingDirectory=/var/lib/rf-adapt-intel
+
+EnvironmentFile=-/etc/rf_worker/thresholds.env
+EnvironmentFile=-/etc/default/rf-adapt-intel
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rf-incoming-processor
+
+# Filesystem protection
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/rf-adapt-intel /var/log/rf-adapt-intel /etc/rf_worker
+NoNewPrivileges=yes
+CapabilityBoundingSet=~CAP_SYS_ADMIN CAP_SYS_MODULE CAP_NET_ADMIN
+AmbientCapabilities=
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+MemoryDenyWriteExecute=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallFilter=@system-service @chown @file-system
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

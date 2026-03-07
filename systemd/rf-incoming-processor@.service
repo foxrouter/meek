@@ -1,0 +1,42 @@
+[Unit]
+Description=Process incoming IQ file %I (Brian)
+Documentation=https://github.com/foxrouter/meek
+After=network.target
+
+[Service]
+Type=oneshot
+# %I is the systemd-decoded instance name — the full path to the IQ file.
+# Example: systemctl start "rf-incoming-processor@$(systemd-escape /path/to/file.cf32)"
+ExecStart=/bin/bash -c "/usr/local/share/rf-adapt-intel/scripts/process_incoming.sh '%I'; mv -f '%I' /var/lib/rf-adapt-intel/processed/ 2>/dev/null || true"
+User=rf_worker
+Group=rf_worker
+
+WorkingDirectory=/var/lib/rf-adapt-intel
+
+EnvironmentFile=-/etc/rf_worker/thresholds.env
+EnvironmentFile=-/etc/default/rf-adapt-intel
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rf-incoming-processor
+
+# Filesystem protection
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/rf-adapt-intel /var/log/rf-adapt-intel /etc/rf_worker
+NoNewPrivileges=yes
+CapabilityBoundingSet=~CAP_SYS_ADMIN CAP_SYS_MODULE CAP_NET_ADMIN
+AmbientCapabilities=
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+MemoryDenyWriteExecute=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallFilter=@system-service @chown @file-system
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
