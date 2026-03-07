@@ -140,6 +140,27 @@ inline bool Database::apply_schema() {
     sqlite3_free(err);
     return false;
   }
+
+  // Migration: add notes column to signals if it does not exist yet.
+  // ALTER TABLE ... ADD COLUMN returns SQLITE_ERROR when the column already
+  // exists; that is expected and harmless.  Log any other error for diagnostics
+  // but do not abort — statements will still fail in prepare_statements() if
+  // the column is genuinely absent.
+  {
+    char* mig_err = nullptr;
+    const int mig_rc = sqlite3_exec(db_, "ALTER TABLE signals ADD COLUMN notes TEXT;",
+                                    nullptr, nullptr, &mig_err);
+    if (mig_rc != SQLITE_OK) {
+      const std::string msg = mig_err ? mig_err : sqlite3_errmsg(db_);
+      sqlite3_free(mig_err);
+      // "duplicate column name" is the expected error when the column already
+      // exists; silence it to avoid noisy logs on every clean-install startup.
+      if (msg.find("duplicate column") == std::string::npos) {
+        std::cerr << "[DB] migrate signals.notes: " << msg << "\n";
+      }
+    }
+  }
+
   return true;
 }
 
