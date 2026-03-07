@@ -23,6 +23,9 @@
 #include <SoapySDR/Formats.h>
 #include <SoapySDR/Version.h>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -67,7 +70,29 @@ SoapySdrSource::SoapySdrSource(double center_freq, double sample_rate,
       sample_rate_hz_(sample_rate),
       read_timeout_us_(read_timeout_us) {
   SoapySDRKwargs args = {};
-  dev_ = SoapySDRDevice_makeStrArgs("");
+
+  // SoapySDR probes all installed driver plugins (including the ALSA audio
+  // plugin) during make().  On systems without a sound card the ALSA library
+  // writes benign "Invalid CTL default" / "No such file or directory" messages
+  // directly to fd 2.  Suppress them by redirecting stderr to /dev/null for
+  // the duration of the probe; restore it immediately afterwards so that any
+  // genuine errors from the rest of the constructor remain visible.
+  {
+    const int saved_stderr = ::dup(STDERR_FILENO);
+    if (saved_stderr >= 0) {
+      const int devnull = ::open("/dev/null", O_WRONLY | O_CLOEXEC);
+      if (devnull >= 0) {
+        ::dup2(devnull, STDERR_FILENO);
+        ::close(devnull);
+      }
+    }
+    dev_ = SoapySDRDevice_makeStrArgs("");
+    if (saved_stderr >= 0) {
+      ::dup2(saved_stderr, STDERR_FILENO);
+      ::close(saved_stderr);
+    }
+  }
+
   if (!dev_) throw std::runtime_error("SoapySDR: no device found");
 
   SoapySDRDevice_setSampleRate(dev_, SOAPY_SDR_RX, 0, sample_rate);
