@@ -9,7 +9,6 @@
 
   Signal handling:
     SIGTERM / SIGINT  → request cooperative stop on all jthreads
-    SIGHUP            → set g_reload flag (re-read config on next cycle)
 
   Outputs:
     SQLite (WAL mode)         RF_DB_PATH
@@ -145,6 +144,9 @@ static void write_snapshot(const std::string& dir,
     ofs.write(reinterpret_cast<const char*>(samples.data()),
               static_cast<std::streamsize>(samples.size() *
                                            sizeof(std::complex<float>)));
+    if (!ofs.good()) {
+      snap_errors.fetch_add(1, std::memory_order_relaxed);
+    }
   } catch (...) {
     snap_errors.fetch_add(1, std::memory_order_relaxed);
   }
@@ -504,13 +506,17 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
       }
     }
-    // Drain remaining tasks
-    std::lock_guard lk(snap_mu);
-    for (auto& t : snap_queue) {
+    // Drain remaining tasks: move the queue out under the lock, then
+    // release it before writing so proc_loop is never blocked on I/O.
+    std::deque<SnapTask> remaining;
+    {
+      std::lock_guard lk(snap_mu);
+      remaining = std::move(snap_queue);
+    }
+    for (auto& t : remaining) {
       write_snapshot(t.dir, std::span{t.samples}, t.conf, t.ts_ns,
                      snap_errors);
     }
-    snap_queue.clear();
   });
 
   std::jthread cap_thread([&](std::stop_token st) {
@@ -525,11 +531,13 @@ int main(int argc, char** argv) {
     output_loop(st, proc_to_out, *db, cfg, snap_errors);
   });
 
+#ifndef HAVE_HTTPLIB
   if (cfg.prometheus_port > 0) {
     std::cerr << "[WARN] RF_PROMETHEUS_PORT=" << cfg.prometheus_port
-              << " set but HTTP metrics not compiled in "
+              << " set but HTTP /metrics endpoint is disabled in this build "
                  "(rebuild with HAVE_HTTPLIB to enable)\n";
   }
+#endif
 
   while (!g_shutdown.load(std::memory_order_relaxed)) {
     std::this_thread::sleep_for(std::chrono::seconds(2));
