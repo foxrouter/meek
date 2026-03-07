@@ -23,6 +23,9 @@
 #include <SoapySDR/Formats.h>
 #include <SoapySDR/Version.h>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -67,7 +70,46 @@ SoapySdrSource::SoapySdrSource(double center_freq, double sample_rate,
       sample_rate_hz_(sample_rate),
       read_timeout_us_(read_timeout_us) {
   SoapySDRKwargs args = {};
-  dev_ = SoapySDRDevice_makeStrArgs("");
+
+  // SoapySDR probes all installed driver plugins (including the ALSA audio
+  // plugin) during make().  On systems without a sound card the ALSA library
+  // writes benign "Invalid CTL default" / "No such file or directory" messages
+  // directly to fd 2.  Suppress them by redirecting stderr to /dev/null for
+  // the duration of the probe; restore it immediately afterwards so that any
+  // genuine errors from the rest of the constructor remain visible.
+  //
+  // dup2() can be interrupted by a signal (EINTR); retry until it succeeds or
+  // fails for a reason other than EINTR.
+  auto dup2_eintr = [](int oldfd, int newfd) -> int {
+    int r;
+    do {
+      r = ::dup2(oldfd, newfd);
+    } while (r < 0 && errno == EINTR);
+    return r;
+  };
+  {
+    const int saved_stderr = ::dup(STDERR_FILENO);
+    bool redirected = false;
+    if (saved_stderr >= 0) {
+      const int devnull = ::open("/dev/null", O_WRONLY | O_CLOEXEC);
+      if (devnull >= 0) {
+        redirected = (dup2_eintr(devnull, STDERR_FILENO) >= 0);
+        ::close(devnull);
+      }
+    }
+    dev_ = SoapySDRDevice_makeStrArgs("");
+    if (saved_stderr >= 0) {
+      if (redirected && dup2_eintr(saved_stderr, STDERR_FILENO) < 0) {
+        // Last resort: report the failure on saved_stderr before closing it,
+        // since STDERR_FILENO may still point at /dev/null.
+        static constexpr char kMsg[] =
+            "[WARN] rf_adapt_intel: failed to restore stderr after SoapySDR probe\n";
+        (void)::write(saved_stderr, kMsg, sizeof(kMsg) - 1);
+      }
+      ::close(saved_stderr);
+    }
+  }
+
   if (!dev_) throw std::runtime_error("SoapySDR: no device found");
 
   SoapySDRDevice_setSampleRate(dev_, SOAPY_SDR_RX, 0, sample_rate);
