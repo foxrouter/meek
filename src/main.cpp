@@ -489,7 +489,9 @@ int main(int argc, char** argv) {
 
   auto db = Database::open(cfg.db_path);
   if (!db) {
-    const std::string db_dir = std::filesystem::path(cfg.db_path).parent_path().string();
+    const std::filesystem::path db_path_obj(cfg.db_path);
+    const std::string db_dir =
+        db_path_obj.has_parent_path() ? db_path_obj.parent_path().string() : std::string(".");
     std::cerr << "[FATAL] Failed to open database: " << cfg.db_path << "\n"
               << "  Ensure the directory exists and is writable by this process.\n"
               << "  Run: sudo mkdir -p " << db_dir << " && sudo chown rf_worker:rf_worker "
