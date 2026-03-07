@@ -68,8 +68,8 @@ if(BUILD_HARDWARE_TARGETS)
   # cpp-httplib (optional Prometheus HTTP server)
   FetchContent_Declare(
     cpp_httplib
-    URL https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.17.3.tar.gz
-    URL_HASH SHA256=95bd6dba4241656c59d6f0854d408d14c220f7c71e673319ee27d30aee741aaa
+    URL https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.20.0.tar.gz
+    URL_HASH SHA256=18064587e0cc6a0d5d56d619f4cbbcaba47aa5d84d86013abbd45d95c6653866
   )
   set(HTTPLIB_COMPILE OFF CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(cpp_httplib)

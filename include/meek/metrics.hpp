@@ -98,6 +98,11 @@ inline void write_heartbeat(const std::string& path) {
 // Optional HTTP server (cpp-httplib) — compiled only with HAVE_HTTPLIB
 // ---------------------------------------------------------------------------
 
+}  // namespace meek
+
+// httplib.h must be included at global scope, not inside a namespace.
+// Including a third-party header inside a namespace causes GCC 12+ two-phase
+// template-name-lookup failures (seen on Raspberry Pi OS Bookworm aarch64).
 #ifdef HAVE_HTTPLIB
 #include <httplib.h>
 #include <memory>
@@ -105,6 +110,11 @@ inline void write_heartbeat(const std::string& path) {
 #include <sstream>
 #include <thread>
 #include <utility>
+#endif  // HAVE_HTTPLIB
+
+namespace meek {
+
+#ifdef HAVE_HTTPLIB
 
 /// Thread-safe snapshot of metrics for the HTTP server.
 struct MetricsSnapshot {
