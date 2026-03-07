@@ -5,10 +5,6 @@
 #
 # Run tests:
 #   docker run --rm rf-adapt-intel:latest ctest --test-dir /build -V
-#
-# NOTE: This image targets the iq_metrics standalone tool and Python test
-# harness only.  Building rf_adapt_intel itself requires SoapySDR, which
-# is installed via a separate stage below.
 
 FROM ubuntu:22.04 AS base
 LABEL maintainer="foxrouter"
@@ -20,7 +16,6 @@ ENV TZ=UTC
 # Core build tools + Python
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    cmake \
     ninja-build \
     pkg-config \
     clang \
@@ -30,11 +25,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-numpy \
     libsqlite3-dev \
+    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Symlink clang-format/tidy versioned binaries to unversioned names
 RUN ln -sf /usr/bin/clang-format-14 /usr/local/bin/clang-format && \
     ln -sf /usr/bin/clang-tidy-14   /usr/local/bin/clang-tidy
+
+# Install cmake >= 3.25 via pip (Ubuntu 22.04 ships 3.22 which is too old)
+RUN pip3 install --no-cache-dir "cmake>=3.25"
 
 # ── Source copy ─────────────────────────────────────────────────────────────
 WORKDIR /src
@@ -43,15 +43,14 @@ COPY . .
 # ── Python deps ─────────────────────────────────────────────────────────────
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# ── Build iq_metrics (no SoapySDR needed) ───────────────────────────────────
+# ── Build iq_metrics and rf_audit (no SoapySDR needed) ──────────────────────
 RUN cmake -S /src -B /build \
       -DCMAKE_BUILD_TYPE=Release \
       -DBUILD_HARDWARE_TARGETS=OFF \
       -G Ninja && \
-    cmake --build /build -t iq_metrics
+    cmake --build /build -t iq_metrics rf_audit
 
 # ── Run Python tests + iq_metrics validation ────────────────────────────────
-# Tests run at container build time to ensure the image is always green.
 RUN cd /src && python3 tests/test_autotune.py -v
 RUN cd /src && python3 tests/test_decode_candidates.py -v
 RUN cd /src && python3 tests/test_guardrails.py -v
@@ -63,7 +62,6 @@ RUN cd /src && python3 tests/test_iq_metrics.py /build/iq_metrics -v
 CMD ["ctest", "--test-dir", "/build", "-V", "--output-on-failure"]
 
 # ── (Optional) Hardware build stage — requires SoapySDR ─────────────────────
-# Uncomment and run `docker build --target hardware .` to build rf_adapt_intel.
 # FROM base AS hardware
 # RUN apt-get update && apt-get install -y --no-install-recommends \
 #     libsoapysdr-dev && rm -rf /var/lib/apt/lists/*
@@ -71,4 +69,4 @@ CMD ["ctest", "--test-dir", "/build", "-V", "--output-on-failure"]
 #       -DCMAKE_BUILD_TYPE=Release \
 #       -DBUILD_HARDWARE_TARGETS=ON \
 #       -G Ninja && \
-#     cmake --build /build-hw
+#     cmake --build /build-hw -t rf_adapt_intel
