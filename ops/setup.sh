@@ -242,6 +242,7 @@ install_liquid_dsp() {
       if [[ "$liquid_ver" == "unknown" ]]; then
         liquid_ver=$(find /usr/local/lib -maxdepth 1 -name 'libliquid.so.*' ! -type l \
           2>/dev/null | sort -V | tail -1 | sed 's|.*libliquid\.so\.||' || echo "unknown")
+        [[ -z "$liquid_ver" ]] && liquid_ver="unknown"
       fi
       sudo tee "${LIQUID_PKGCFG_DIR}/liquid.pc" > /dev/null <<PC
 prefix=/usr/local
