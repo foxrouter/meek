@@ -161,6 +161,22 @@ inline bool Database::apply_schema() {
     }
   }
 
+  // Migration: add params column to methods if it does not exist yet.
+  // Databases created before this column was added will fail to prepare the
+  // insert_method statement unless the column is added here at startup.
+  {
+    char* mig_err = nullptr;
+    const int mig_rc = sqlite3_exec(db_, "ALTER TABLE methods ADD COLUMN params TEXT;",
+                                    nullptr, nullptr, &mig_err);
+    if (mig_rc != SQLITE_OK) {
+      const std::string msg = mig_err ? mig_err : sqlite3_errmsg(db_);
+      sqlite3_free(mig_err);
+      if (msg.find("duplicate column") == std::string::npos) {
+        std::cerr << "[DB] migrate methods.params: " << msg << "\n";
+      }
+    }
+  }
+
   return true;
 }
 
