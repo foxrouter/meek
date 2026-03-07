@@ -362,37 +362,27 @@ This section covers a split-node setup where:
 
 ### 9.1 Ray setup
 
-Run the standard installer as usual:
+Run the standard installer, passing `--iq-dest` with Brian's rsync destination to
+enable automatic IQ transfer in a single step:
 
 ```bash
 git clone https://github.com/foxrouter/meek.git && cd meek
-sudo bash install.sh --all-decoders   # or without --all-decoders
+sudo bash install.sh --all-decoders \
+    --iq-dest rf_worker@brian.local:/var/lib/rf-adapt-intel/incoming/
 ```
 
-Then configure and enable the IQ transfer watcher so snapshots are automatically
-sent to Brian as they are written:
+The `--iq-dest` flag automates all of the following:
+
+- Writes `/etc/rf_worker/iq-transfer.env` with the provided `IQ_DEST`.
+- Installs `iq-transfer-watcher.service` and its hardening drop-in to systemd.
+- Enables and starts `iq-transfer-watcher.service`.
+
+If you need to update the destination later, simply re-run `install.sh` with the
+new `--iq-dest` value, or edit `/etc/rf_worker/iq-transfer.env` directly and
+restart the service:
 
 ```bash
-# Copy the example config and set the destination
-sudo cp config/iq-transfer.env.example /etc/rf_worker/iq-transfer.env
-sudo nano /etc/rf_worker/iq-transfer.env
-# Set: IQ_DEST=rf_worker@brian.local:/var/lib/rf-adapt-intel/incoming/
-
-# Install the watcher service and its hardening drop-in
-sudo install -m 644 systemd/iq-transfer-watcher.service \
-    /etc/systemd/system/iq-transfer-watcher.service
-sudo mkdir -p /etc/systemd/system/iq-transfer-watcher.service.d
-sudo install -m 644 systemd/iq-transfer-watcher.service.d/hardening.conf \
-    /etc/systemd/system/iq-transfer-watcher.service.d/hardening.conf
-
-# Install scripts to the shared directory
-sudo mkdir -p /usr/local/share/rf-adapt-intel/scripts
-sudo install -m 755 scripts/transfer_iq.sh \
-    /usr/local/share/rf-adapt-intel/scripts/transfer_iq.sh
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now iq-transfer-watcher
-sudo systemctl status iq-transfer-watcher
+sudo systemctl restart iq-transfer-watcher
 ```
 
 The `iq-transfer-watcher` service is bound to `process-worker` — it starts and
