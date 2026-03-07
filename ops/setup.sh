@@ -221,26 +221,67 @@ install_liquid_dsp() {
   run bash -c "cd '${src_dir}' && sudo make install"
   run sudo ldconfig
 
-  # On Ubuntu/Debian, /usr/local/lib/pkgconfig is not in the default pkg-config
-  # search path.  If the .pc file exists there but pkg-config cannot find it,
-  # register the path persistently via profile.d and export it for this session.
-  if ! $DRY_RUN && ! pkg-config --exists liquid 2>/dev/null \
-      && [[ -f "${LIQUID_PKGCFG_DIR}/liquid.pc" ]]; then
+  if ! $DRY_RUN; then
+    # Ensure the pkgconfig directory exists (Ubuntu does not create it by default).
+    sudo mkdir -p "${LIQUID_PKGCFG_DIR}"
+
+    # If make install did not generate a liquid.pc file, synthesise one so that
+    # CMake / pkg-config can find liquid-dsp without manual path tweaking.
+    if [[ ! -f "${LIQUID_PKGCFG_DIR}/liquid.pc" ]]; then
+      local liquid_ver="unknown"
+      # Try to extract the quoted version string from the installed header, e.g.:
+      #   #define LIQUID_VERSION "1.7.0"
+      if [[ -f /usr/local/include/liquid/liquid.h ]]; then
+        liquid_ver=$(grep -m1 'define LIQUID_VERSION ' /usr/local/include/liquid/liquid.h \
+          | sed 's/.*"\([0-9][^"]*\)".*/\1/' 2>/dev/null || echo "unknown")
+        # Reject anything that doesn't look like a version number.
+        [[ "$liquid_ver" =~ ^[0-9]+\.[0-9] ]] || liquid_ver="unknown"
+      fi
+      # Fall back to the highest-version shared-library soname (real files only,
+      # not symlinks), e.g. libliquid.so.1.7.0 → 1.7.0.
+      if [[ "$liquid_ver" == "unknown" ]]; then
+        liquid_ver=$(find /usr/local/lib -maxdepth 1 -name 'libliquid.so.*' ! -type l \
+          2>/dev/null | sort -V | tail -1 | sed 's|.*libliquid\.so\.||' || echo "unknown")
+        [[ -z "$liquid_ver" ]] && liquid_ver="unknown"
+      fi
+      sudo tee "${LIQUID_PKGCFG_DIR}/liquid.pc" > /dev/null <<PC
+prefix=/usr/local
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: liquid
+Description: liquid-dsp software-defined radio DSP library
+Version: ${liquid_ver}
+Libs: -L\${libdir} -lliquid
+Cflags: -I\${includedir}
+PC
+      echo "  Generated ${LIQUID_PKGCFG_DIR}/liquid.pc (version: ${liquid_ver})"
+    fi
+
+    # On Ubuntu/Debian, /usr/local/lib/pkgconfig is not in the default pkg-config
+    # search path.  Register the path persistently via profile.d and export it
+    # for the current session so subsequent calls in this script succeed too.
     local profile_file="/etc/profile.d/liquid-dsp.sh"
-    sudo bash -c "echo 'export PKG_CONFIG_PATH=\"${LIQUID_PKGCFG_DIR}\${PKG_CONFIG_PATH:+:\$PKG_CONFIG_PATH}\"' > '${profile_file}'"
-    sudo chmod 644 "${profile_file}"
-    export PKG_CONFIG_PATH="${LIQUID_PKGCFG_DIR}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
-    echo "  Registered PKG_CONFIG_PATH in ${profile_file}"
+    if ! grep -q "${LIQUID_PKGCFG_DIR}" "${profile_file}" 2>/dev/null; then
+      sudo bash -c "echo 'export PKG_CONFIG_PATH=\"${LIQUID_PKGCFG_DIR}\${PKG_CONFIG_PATH:+:\$PKG_CONFIG_PATH}\"' > '${profile_file}'"
+      sudo chmod 644 "${profile_file}"
+      echo "  Registered PKG_CONFIG_PATH in ${profile_file}"
+    fi
+    if [[ ":${PKG_CONFIG_PATH:-}:" != *":${LIQUID_PKGCFG_DIR}:"* ]]; then
+      export PKG_CONFIG_PATH="${LIQUID_PKGCFG_DIR}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+    fi
   fi
 
-  # Confirm pkg-config visibility
-  if pkg-config --exists liquid 2>/dev/null; then
+  # Confirm pkg-config visibility, using the (possibly just-exported)
+  # PKG_CONFIG_PATH so the check succeeds even before a re-login.
+  if PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}" pkg-config --exists liquid 2>/dev/null; then
     local ver
     ver="$(pkg-config --modversion liquid)"
     echo "  liquid-dsp installed, version: ${ver}"
     write_env_var "LIQUID_DSP_VERSION" "${ver}"
   else
-    warn "liquid-dsp installed but pkg-config cannot find 'liquid'. You may need to set PKG_CONFIG_PATH=/usr/local/lib/pkgconfig."
+    warn "liquid-dsp installed but pkg-config cannot find 'liquid'. You may need to set PKG_CONFIG_PATH=${LIQUID_PKGCFG_DIR}."
   fi
 }
 

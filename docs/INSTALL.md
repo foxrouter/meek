@@ -430,15 +430,29 @@ sudo ldconfig
 
 ### "pkg-config cannot find liquid" after install
 
+`ops/setup.sh --install-liquid-dsp` handles this automatically on Ubuntu/Debian:
+
+1. If `make install` did not create `/usr/local/lib/pkgconfig/liquid.pc`, the
+   script synthesises one from the installed header/library.
+2. `/etc/profile.d/liquid-dsp.sh` is written so every new login shell has the
+   correct `PKG_CONFIG_PATH`.
+3. `PKG_CONFIG_PATH` is also exported in the current session so the smoke tests
+   run immediately without requiring a re-login.
+
+If you installed liquid-dsp **manually** (outside `ops/setup.sh`) and still see
+the warning, run the one-time fix by hand:
+
 ```bash
 export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
 pkg-config --modversion liquid
 ```
 
-To make this permanent for the service, add to `/etc/rf_worker/thresholds.env`:
+To make this permanent, create `/etc/profile.d/liquid-dsp.sh`:
 
 ```bash
-PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
+echo 'export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"' \
+  | sudo tee /etc/profile.d/liquid-dsp.sh
+sudo chmod 644 /etc/profile.d/liquid-dsp.sh
 ```
 
 ---
