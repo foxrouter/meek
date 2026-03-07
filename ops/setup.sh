@@ -322,8 +322,9 @@ run_decoder_tests() {
     if [[ ":${_liq_pkgcfg}:" != *":${LIQUID_PKGCFG_DIR}:"* ]]; then
       _liq_pkgcfg="${LIQUID_PKGCFG_DIR}${_liq_pkgcfg:+:${_liq_pkgcfg}}"
     fi
-    if PKG_CONFIG_PATH="${_liq_pkgcfg}" pkg-config --exists liquid 2>/dev/null; then
-      echo "  [PASS] liquid-dsp: $(PKG_CONFIG_PATH="${_liq_pkgcfg}" pkg-config --modversion liquid)"
+    local liq_ver
+    if liq_ver=$(PKG_CONFIG_PATH="${_liq_pkgcfg}" pkg-config --modversion liquid 2>/dev/null); then
+      echo "  [PASS] liquid-dsp: ${liq_ver}"
     else
       echo "  [FAIL] liquid-dsp pkg-config entry not found" >&2
       failed=$(( failed + 1 ))
