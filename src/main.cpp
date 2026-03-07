@@ -30,6 +30,7 @@
 #include <complex>
 #include <csignal>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -45,7 +46,6 @@
 
 #include <nlohmann/json.hpp>
 
-#define HAVE_SOAPY
 #include "meek/band_profiles.hpp"
 #include "meek/classifier.hpp"
 #include "meek/config.hpp"
@@ -239,11 +239,22 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
     blk.center_freq_hz = sdr.center_freq_hz();
     blk.sample_rate_hz = sdr.sample_rate_hz();
 
-    // Backpressure: spin-wait up to 10ms before dropping the block (100 × 100μs)
-    for (int retry = 0; retry < 100 && !out_buf.push(std::move(blk)); ++retry)
+    // Backpressure: spin-wait up to 10ms before dropping the block (100 × 100μs).
+    // push(T&&) only moves from blk after confirming there is space; on false
+    // return blk remains valid and can be retried.
+    bool pushed = false;
+    for (int retry = 0; retry < 100; ++retry) {
+      if (out_buf.push(std::move(blk))) {
+        pushed = true;
+        break;
+      }
       std::this_thread::sleep_for(std::chrono::microseconds(100));
+    }
+    if (!pushed) {
+      // Block dropped under sustained backpressure; re-assign for next iteration.
+      blk = SampleBlock{};
+    }
   }
-}
 
 // ---------------------------------------------------------------------------
 // Processing thread
@@ -252,7 +263,9 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
 static void proc_loop(std::stop_token st,
                       SpscRingBuffer<SampleBlock, 64>& in_buf,
                       SpscRingBuffer<ClassificationResult, 64>& out_buf,
-                      const Config& cfg) {
+                      const Config& cfg,
+                      std::mutex& snap_mu,
+                      std::deque<SnapTask>& snap_queue) {
   const BandProfile* band = find_band(cfg.center_freq);
   if (band) {
     std::cout << "[BAND] Matched: " << band->name << " (" << band->description
@@ -285,9 +298,24 @@ static void proc_loop(std::stop_token st,
     cr.center_freq_hz = blk.center_freq_hz;
     cr.sample_rate_hz = blk.sample_rate_hz;
 
-    // Backpressure: spin-wait up to 10ms before dropping the result (100 × 100μs)
-    for (int retry = 0; retry < 100 && !out_buf.push(std::move(cr)); ++retry)
+    // Enqueue CF32 snapshot when confidence exceeds the snapshot threshold.
+    if (cr.confidence >= cfg.snapshot_conf && cr.snr_gate_pass) {
+      SnapTask task;
+      task.samples = blk.samples;  // copy raw IQ before blk is moved
+      task.dir = cfg.snapshot_dir;
+      task.conf = cr.confidence;
+      task.ts_ns = cr.timestamp_ns;
+      std::lock_guard lk(snap_mu);
+      snap_queue.push_back(std::move(task));
+    }
+
+    // Backpressure: spin-wait up to 10ms before dropping the result.
+    // push(T&&) only moves from cr after confirming there is space; on false
+    // return cr remains valid and can be retried.
+    for (int retry = 0; retry < 100; ++retry) {
+      if (out_buf.push(std::move(cr))) break;
       std::this_thread::sleep_for(std::chrono::microseconds(100));
+    }
   }
 }
 
@@ -298,8 +326,7 @@ static void proc_loop(std::stop_token st,
 static void output_loop(std::stop_token st,
                          SpscRingBuffer<ClassificationResult, 64>& in_buf,
                          Database& db, const Config& cfg,
-                         std::mutex& snap_mu,
-                         std::vector<SnapTask>& snap_queue) {
+                         std::atomic<std::uint64_t>& snap_errors) {
   const std::int64_t method_id = db.upsert_method(
       "modulation_classifier",
       R"({"type":"heuristic","version":3,"classes":["cw_like","fsk_like","psk_qam_like","ook_am_like"]})");
@@ -371,6 +398,8 @@ static void output_loop(std::stop_token st,
 
     const auto now = std::chrono::steady_clock::now();
     if (now - last_metrics_write >= std::chrono::seconds(5)) {
+      // Sync snapshot error counter from the shared atomic into metrics.
+      metrics.snap_errors = snap_errors.load(std::memory_order_relaxed);
       write_prometheus_textfile(cfg.metrics_file, metrics);
       last_metrics_write = now;
     }
@@ -384,6 +413,7 @@ static void output_loop(std::stop_token st,
     }
   }
 
+  metrics.snap_errors = snap_errors.load(std::memory_order_relaxed);
   write_prometheus_textfile(cfg.metrics_file, metrics);
 }
 
@@ -436,9 +466,11 @@ int main(int argc, char** argv) {
   SpscRingBuffer<SampleBlock, 64> cap_to_proc;
   SpscRingBuffer<ClassificationResult, 64> proc_to_out;
 
-  // Snapshot worker — joinable background thread
+  // Snapshot worker — joinable background thread; uses std::deque for O(1)
+  // pop_front() instead of std::vector::erase(begin()) which is O(n).
   std::mutex snap_mu;
-  std::vector<SnapTask> snap_queue;
+  std::deque<SnapTask> snap_queue;
+  std::atomic<std::uint64_t> snap_errors{0};
 
   std::jthread snap_thread([&](std::stop_token st) {
     while (!st.stop_requested()) {
@@ -447,7 +479,7 @@ int main(int argc, char** argv) {
         std::lock_guard lk(snap_mu);
         if (!snap_queue.empty()) {
           task = std::move(snap_queue.front());
-          snap_queue.erase(snap_queue.begin());
+          snap_queue.pop_front();
         }
       }
       if (!task.samples.empty()) {
@@ -470,11 +502,11 @@ int main(int argc, char** argv) {
   });
 
   std::jthread proc_thread([&](std::stop_token st) {
-    proc_loop(st, cap_to_proc, proc_to_out, cfg);
+    proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_mu, snap_queue);
   });
 
   std::jthread out_thread([&](std::stop_token st) {
-    output_loop(st, proc_to_out, *db, cfg, snap_mu, snap_queue);
+    output_loop(st, proc_to_out, *db, cfg, snap_errors);
   });
 
   while (!g_shutdown.load(std::memory_order_relaxed)) {

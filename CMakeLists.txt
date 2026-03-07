@@ -104,6 +104,8 @@ if(BUILD_HARDWARE_TARGETS)
 
   target_compile_options(rf_adapt_intel PRIVATE
     -Wall -Wextra -Wno-unused-parameter)
+  # HAVE_SOAPY enables the SoapySdrSource implementation in isdr_source.hpp
+  target_compile_definitions(rf_adapt_intel PRIVATE HAVE_SOAPY)
 
   # ── soapy_read_test ───────────────────────────────────────────────────────
   add_executable(soapy_read_test tools/soapy_read_test.cpp)
@@ -171,7 +173,8 @@ set(CPACK_PACKAGE_NAME "rf-adapt-intel")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_CONTACT "foxrouter")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
-set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+# Architecture is intentionally left unset so CPack/dpkg picks the host arch
+# automatically (e.g. amd64, arm64, armhf for Raspberry Pi).
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
   "libsqlite3-0 (>= 3.31), libstdc++6 (>= 11)")
 set(CPACK_DEBIAN_PACKAGE_SECTION "electronics")

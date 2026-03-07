@@ -33,8 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN ln -sf /usr/bin/clang-format-14 /usr/local/bin/clang-format && \
     ln -sf /usr/bin/clang-tidy-14   /usr/local/bin/clang-tidy
 
-# Install cmake >= 3.25 via pip (Ubuntu 22.04 ships 3.22 which is too old)
-RUN pip3 install --no-cache-dir "cmake>=3.25"
+# Install cmake >= 3.25 via pip (Ubuntu 22.04 ships 3.22 which is too old).
+# Pin to an exact version for reproducible builds.
+RUN pip3 install --no-cache-dir "cmake==3.31.6"
 
 # ── Source copy ─────────────────────────────────────────────────────────────
 WORKDIR /src

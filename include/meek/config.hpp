@@ -1,8 +1,8 @@
 // include/meek/config.hpp — Runtime configuration parsed from environment
 // variables and command-line arguments.
 //
-// All env-var reads happen once at startup only; the daemon uses SIGHUP to
-// reload where appropriate (see Config::reload()).
+// All env-var reads happen once at startup only; configuration changes require
+// restarting the daemon to take effect.
 
 #pragma once
 

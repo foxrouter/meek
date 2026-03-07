@@ -109,15 +109,45 @@ int main(int argc, char** argv) {
       print_usage(argv[0]);
       return 0;
     } else if (arg == "--sample-rate" && i + 1 < argc) {
-      sample_rate = std::stod(argv[++i]);
+      try {
+        sample_rate = std::stod(argv[++i]);
+      } catch (const std::exception&) {
+        std::cerr << "rf_audit: invalid value for --sample-rate: '" << argv[i] << "'\n";
+        print_usage(argv[0]);
+        return 2;
+      }
     } else if (arg == "--center-freq" && i + 1 < argc) {
-      center_freq = std::stod(argv[++i]);
+      try {
+        center_freq = std::stod(argv[++i]);
+      } catch (const std::exception&) {
+        std::cerr << "rf_audit: invalid value for --center-freq: '" << argv[i] << "'\n";
+        print_usage(argv[0]);
+        return 2;
+      }
     } else if (arg == "--block-size" && i + 1 < argc) {
-      block_size = static_cast<std::size_t>(std::stoull(argv[++i]));
+      try {
+        block_size = static_cast<std::size_t>(std::stoull(argv[++i]));
+      } catch (const std::exception&) {
+        std::cerr << "rf_audit: invalid value for --block-size: '" << argv[i] << "'\n";
+        print_usage(argv[0]);
+        return 2;
+      }
     } else if (arg == "--snr-min" && i + 1 < argc) {
-      snr_min = std::stod(argv[++i]);
+      try {
+        snr_min = std::stod(argv[++i]);
+      } catch (const std::exception&) {
+        std::cerr << "rf_audit: invalid value for --snr-min: '" << argv[i] << "'\n";
+        print_usage(argv[0]);
+        return 2;
+      }
     } else if (arg == "--conf-threshold" && i + 1 < argc) {
-      conf_threshold = std::stod(argv[++i]);
+      try {
+        conf_threshold = std::stod(argv[++i]);
+      } catch (const std::exception&) {
+        std::cerr << "rf_audit: invalid value for --conf-threshold: '" << argv[i] << "'\n";
+        print_usage(argv[0]);
+        return 2;
+      }
     } else if (arg == "--pretty") {
       pretty = true;
     } else if (arg.rfind("--", 0) == 0) {

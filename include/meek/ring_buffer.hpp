@@ -7,7 +7,10 @@
 //
 // Cache-line padding between head and tail prevents false sharing on SMP cores.
 //
-// push() returns false when the buffer is full (non-blocking).
+// push() returns false when the buffer is full (non-blocking).  The item is
+// only moved/copied into the buffer slot *after* the full-check passes, so
+// a false return guarantees the caller's value was not consumed.
+// Effective usable capacity is Capacity-1 (one slot is reserved as sentinel).
 // pop() returns false when the buffer is empty (non-blocking).
 
 #pragma once
@@ -35,14 +38,30 @@ class SpscRingBuffer {
   SpscRingBuffer(const SpscRingBuffer&) = delete;
   SpscRingBuffer& operator=(const SpscRingBuffer&) = delete;
 
-  /// Push an item.  Returns true on success, false if the buffer is full.
+  /// Push a copy of item.  Returns true on success, false if the buffer is
+  /// full.  The item is only copied after the full-check passes.
   /// Called from the producer thread only.
-  [[nodiscard]] bool push(T item) noexcept(
+  [[nodiscard]] bool push(const T& item) noexcept(
+      std::is_nothrow_copy_assignable_v<T>) {
+    const std::size_t head = head_.load(std::memory_order_relaxed);
+    const std::size_t next = (head + 1) & kMask;
+    if (next == tail_.load(std::memory_order_acquire)) {
+      return false;  // full — item untouched
+    }
+    buffer_[head] = item;
+    head_.store(next, std::memory_order_release);
+    return true;
+  }
+
+  /// Push by move.  Returns true on success, false if the buffer is full.
+  /// The item is only moved after the full-check passes; on false the caller's
+  /// value remains valid.
+  [[nodiscard]] bool push(T&& item) noexcept(
       std::is_nothrow_move_assignable_v<T>) {
     const std::size_t head = head_.load(std::memory_order_relaxed);
     const std::size_t next = (head + 1) & kMask;
     if (next == tail_.load(std::memory_order_acquire)) {
-      return false;  // full
+      return false;  // full — item untouched
     }
     buffer_[head] = std::move(item);
     head_.store(next, std::memory_order_release);
@@ -70,7 +89,10 @@ class SpscRingBuffer {
 
   [[nodiscard]] bool empty_approx() const noexcept { return size_approx() == 0; }
 
-  [[nodiscard]] static constexpr std::size_t capacity() noexcept { return Capacity; }
+  /// Effective usable capacity (one slot reserved as sentinel).
+  [[nodiscard]] static constexpr std::size_t capacity() noexcept {
+    return Capacity - 1;
+  }
 
  private:
   static constexpr std::size_t kMask = Capacity - 1;

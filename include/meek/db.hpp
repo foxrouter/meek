@@ -1,15 +1,15 @@
-// include/meek/db.hpp — SQLite3 RAII wrapper with WAL mode and schema
-// migrations.
+// include/meek/db.hpp — SQLite3 RAII wrapper with WAL mode and fixed schema.
 //
 // Database uses prepared statements for all writes to avoid SQL injection and
-// reduce per-row overhead.  Schema migrations are embedded as string literals;
-// the schema_version PRAGMA is used to gate them.
+// reduce per-row overhead.  The schema is created on first open by
+// apply_schema() using CREATE TABLE IF NOT EXISTS statements.
 //
 // All public methods are called from the output thread only.
 
 #pragma once
 
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <string>
 
@@ -176,7 +176,12 @@ inline std::int64_t Database::upsert_method(const std::string& name,
   sqlite3_reset(stmt);
   sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(stmt, 2, params_json.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_step(stmt);
+  const int rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE && rc != SQLITE_CONSTRAINT) {
+    // SQLITE_CONSTRAINT is expected when the row already exists (IGNORE).
+    std::cerr << "[DB] upsert_method failed: " << sqlite3_errmsg(db_) << "\n";
+    return -1;
+  }
 
   // Retrieve the row-id (INSERT OR IGNORE won't change last_insert_rowid if
   // the row already existed).

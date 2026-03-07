@@ -2,8 +2,7 @@
 //
 // Contains a constexpr array of BandProfile structs covering 33 UK SDR-relevant
 // frequency allocations.  No runtime JSON/YAML parsing is needed for static data.
-//
-// Override at startup via /etc/meek/bands.conf (handled in config.hpp).
+// These are built-in defaults; runtime configuration is handled at a higher level.
 
 #pragma once
 

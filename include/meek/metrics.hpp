@@ -34,7 +34,6 @@ struct ProcMetrics {
   std::uint64_t class_ook{0};
   std::uint64_t db_errors{0};
   std::uint64_t snap_errors{0};
-  std::uint64_t queue_depth{0};  // capture→process buffer depth (gauge)
 };
 
 // ---------------------------------------------------------------------------
@@ -53,9 +52,9 @@ inline void write_prometheus_textfile(const std::string& path,
                                 ? m.conf_sum / static_cast<double>(m.frames_candidate)
                                 : 0.0;
 
-    ofs << "# HELP rf_captures_total Total IQ frames captured\n"
-        << "# TYPE rf_captures_total counter\n"
-        << "rf_captures_total " << m.frames_total << "\n"
+    ofs << "# HELP rf_frames_total Total IQ frames processed by classifier\n"
+        << "# TYPE rf_frames_total counter\n"
+        << "rf_frames_total " << m.frames_total << "\n"
         << "# HELP rf_classifications_total Frames classified by modulation type\n"
         << "# TYPE rf_classifications_total counter\n"
         << "rf_classifications_total{class=\"cw_like\"} " << m.class_cw << "\n"
@@ -71,9 +70,6 @@ inline void write_prometheus_textfile(const std::string& path,
         << "# HELP rf_confidence_avg Average confidence of candidate frames\n"
         << "# TYPE rf_confidence_avg gauge\n"
         << "rf_confidence_avg " << avg_conf << "\n"
-        << "# HELP rf_queue_depth Current capture→process queue depth\n"
-        << "# TYPE rf_queue_depth gauge\n"
-        << "rf_queue_depth " << m.queue_depth << "\n"
         << "# HELP rf_errors_total Total write errors\n"
         << "# TYPE rf_errors_total counter\n"
         << "rf_errors_total{type=\"db\"} " << m.db_errors << "\n"
@@ -106,6 +102,9 @@ inline void write_heartbeat(const std::string& path) {
 #include <httplib.h>
 #include <memory>
 #include <mutex>
+#include <sstream>
+#include <thread>
+#include <utility>
 
 /// Thread-safe snapshot of metrics for the HTTP server.
 struct MetricsSnapshot {
@@ -114,9 +113,11 @@ struct MetricsSnapshot {
 };
 
 /// Starts a background HTTP server on the given port serving GET /metrics.
-/// Returns the server object; caller keeps it alive for the daemon's lifetime.
-[[nodiscard]] inline std::unique_ptr<httplib::Server> start_prometheus_http(
-    std::uint16_t port, std::shared_ptr<MetricsSnapshot> snapshot) {
+/// Binds the port synchronously; listening runs on a background std::thread.
+/// Returns {server, thread} on success or {nullptr, {}} if bind fails.
+[[nodiscard]] inline std::pair<std::unique_ptr<httplib::Server>, std::thread>
+start_prometheus_http(std::uint16_t port,
+                      std::shared_ptr<MetricsSnapshot> snapshot) {
   auto svr = std::make_unique<httplib::Server>();
   svr->Get("/metrics", [snapshot](const httplib::Request&, httplib::Response& res) {
     ProcMetrics snap;
@@ -124,15 +125,13 @@ struct MetricsSnapshot {
       std::lock_guard lk(snapshot->mu);
       snap = snapshot->data;
     }
-    // Serialise inline
     std::ostringstream body;
-    // (Reuse the textfile logic by serialising to a temp string)
     const double avg_conf = snap.frames_candidate > 0
                                 ? snap.conf_sum / static_cast<double>(snap.frames_candidate)
                                 : 0.0;
-    body << "# HELP rf_captures_total Total IQ frames captured\n"
-         << "# TYPE rf_captures_total counter\n"
-         << "rf_captures_total " << snap.frames_total << "\n"
+    body << "# HELP rf_frames_total Total IQ frames processed by classifier\n"
+         << "# TYPE rf_frames_total counter\n"
+         << "rf_frames_total " << snap.frames_total << "\n"
          << "# HELP rf_classifications_total Frames classified\n"
          << "# TYPE rf_classifications_total counter\n"
          << "rf_classifications_total{class=\"cw_like\"} " << snap.class_cw << "\n"
@@ -142,15 +141,19 @@ struct MetricsSnapshot {
          << "rf_frames_rejected " << snap.frames_rejected << "\n"
          << "rf_frames_candidate " << snap.frames_candidate << "\n"
          << "rf_confidence_avg " << avg_conf << "\n"
-         << "rf_queue_depth " << snap.queue_depth << "\n"
          << "rf_errors_total{type=\"db\"} " << snap.db_errors << "\n"
          << "rf_errors_total{type=\"snapshot\"} " << snap.snap_errors << "\n";
     res.set_content(body.str(), "text/plain; version=0.0.4; charset=utf-8");
   });
 
-  svr->listen_after_bind();
-  svr->bind_to_port("0.0.0.0", port);
-  return svr;
+  if (!svr->bind_to_port("0.0.0.0", static_cast<int>(port))) {
+    return {nullptr, {}};
+  }
+
+  // listen_after_bind() is blocking; run it on a background thread.
+  httplib::Server* raw = svr.get();
+  std::thread listener([raw]() { raw->listen_after_bind(); });
+  return {std::move(svr), std::move(listener)};
 }
 #endif  // HAVE_HTTPLIB
 

@@ -9,6 +9,7 @@
 #pragma once
 
 #include <complex>
+#include <concepts>
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -22,7 +23,7 @@ namespace meek {
 
 template <typename T>
 concept SdrSourceConcept = requires(T& t, std::span<std::complex<float>> buf) {
-  { t.read_samples(buf) } -> std::convertible_to<std::size_t>;
+  { t.read_samples(buf) } -> std::same_as<std::ptrdiff_t>;
   { t.center_freq_hz() } -> std::same_as<double>;
   { t.sample_rate_hz() } -> std::same_as<double>;
   { t.is_open() } -> std::same_as<bool>;
