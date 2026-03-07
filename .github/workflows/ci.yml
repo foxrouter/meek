@@ -114,6 +114,7 @@ jobs:
           clang-tidy-14 tools/iq_metrics.cpp \
             --checks="-*,clang-analyzer-*,bugprone-*,modernize-*,performance-*,readability-*" \
             -- -std=c++17 \
+            -I build/_deps/nlohmann_json-src/include \
             2>&1 | tee /tmp/clang-tidy.log
           # Fail if any error-level findings
           grep -qE "error:" /tmp/clang-tidy.log && exit 1 || true
