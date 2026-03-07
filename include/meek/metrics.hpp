@@ -17,10 +17,10 @@
 #include <fstream>
 #include <string>
 
-// httplib.h must be included at global scope (before any namespace) to avoid
-// GCC 12+ two-phase template lookup failures on aarch64.  If included inside
-// namespace meek, all of httplib's internals are compiled as meek::httplib::…
-// which breaks unqualified calls such as decode_url inside httplib itself.
+// httplib.h must be included at global scope (outside any namespace) to avoid
+// unqualified-lookup failures inside template instantiations on GCC/aarch64.
+// Wrapping it in a namespace (e.g. namespace meek) causes errors such as
+// "'decode_url' was not declared in this scope".
 #ifdef HAVE_HTTPLIB
 #include <httplib.h>
 #include <memory>
