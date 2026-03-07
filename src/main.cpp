@@ -104,7 +104,7 @@ SoapySdrSource::SoapySdrSource(double center_freq, double sample_rate,
         // since STDERR_FILENO may still point at /dev/null.
         static constexpr char kMsg[] =
             "[WARN] rf_adapt_intel: failed to restore stderr after SoapySDR probe\n";
-        (void)::write(saved_stderr, kMsg, sizeof(kMsg) - 1);
+        if (::write(saved_stderr, kMsg, sizeof(kMsg) - 1) < 0) { /* best effort */ }
       }
       ::close(saved_stderr);
     }
