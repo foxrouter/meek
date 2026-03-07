@@ -154,13 +154,17 @@ start_prometheus_http(std::uint16_t port,
   });
 
   if (!svr->bind_to_port("0.0.0.0", static_cast<int>(port))) {
-    return {std::unique_ptr<httplib::Server>(), std::thread{}};
+    // Use std::make_pair instead of a braced-init-list: GCC 12 on aarch64
+    // cannot deduce the std::thread default constructor from `{}` inside a
+    // brace-enclosed initializer list for std::pair with move-only types,
+    // producing "could not convert '{nullptr, ()}' to std::pair<...>".
+    return std::make_pair(std::unique_ptr<httplib::Server>{}, std::thread{});
   }
 
   // listen_after_bind() is blocking; run it on a background thread.
   httplib::Server* raw = svr.get();
   std::thread listener([raw]() { raw->listen_after_bind(); });
-  return {std::move(svr), std::move(listener)};
+  return std::make_pair(std::move(svr), std::move(listener));
 }
 #endif  // HAVE_HTTPLIB
 
