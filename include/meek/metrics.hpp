@@ -17,6 +17,19 @@
 #include <fstream>
 #include <string>
 
+// httplib.h must be included at global scope (outside any namespace) to avoid
+// unqualified-lookup failures inside template instantiations on GCC/aarch64.
+// Wrapping it in a namespace (e.g. namespace meek) causes errors such as
+// "'decode_url' was not declared in this scope".
+#ifdef HAVE_HTTPLIB
+#include <httplib.h>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <thread>
+#include <utility>
+#endif  // HAVE_HTTPLIB
+
 namespace meek {
 
 // ---------------------------------------------------------------------------
@@ -97,22 +110,6 @@ inline void write_heartbeat(const std::string& path) {
 // ---------------------------------------------------------------------------
 // Optional HTTP server (cpp-httplib) — compiled only with HAVE_HTTPLIB
 // ---------------------------------------------------------------------------
-
-}  // namespace meek
-
-// httplib.h must be included at global scope, not inside a namespace.
-// Including a third-party header inside a namespace causes GCC 12+ two-phase
-// template-name-lookup failures (seen on Raspberry Pi OS Bookworm aarch64).
-#ifdef HAVE_HTTPLIB
-#include <httplib.h>
-#include <memory>
-#include <mutex>
-#include <sstream>
-#include <thread>
-#include <utility>
-#endif  // HAVE_HTTPLIB
-
-namespace meek {
 
 #ifdef HAVE_HTTPLIB
 
