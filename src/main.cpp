@@ -9,7 +9,6 @@
 
   Signal handling:
     SIGTERM / SIGINT  → request cooperative stop on all jthreads
-    SIGHUP            → set g_reload flag (re-read config on next cycle)
 
   Outputs:
     SQLite (WAL mode)         RF_DB_PATH
@@ -119,13 +118,9 @@ std::ptrdiff_t SoapySdrSource::read_samples(
 // ---------------------------------------------------------------------------
 
 static std::atomic<bool> g_shutdown{false};
-static std::atomic<bool> g_reload{false};
 
 static void handle_term(int) noexcept {
   g_shutdown.store(true, std::memory_order_relaxed);
-}
-static void handle_hup(int) noexcept {
-  g_reload.store(true, std::memory_order_relaxed);
 }
 
 // ---------------------------------------------------------------------------
@@ -134,18 +129,26 @@ static void handle_hup(int) noexcept {
 
 static void write_snapshot(const std::string& dir,
                             std::span<const std::complex<float>> samples,
-                            double conf, std::uint64_t ts_ns) noexcept {
+                            double conf, std::uint64_t ts_ns,
+                            std::atomic<std::uint64_t>& snap_errors) noexcept {
   try {
     std::filesystem::create_directories(dir);
     const int conf_pct = static_cast<int>(conf * 100.0);
     std::ostringstream name;
     name << dir << "/snap_" << ts_ns << "_c" << conf_pct << ".cf32";
     std::ofstream ofs(name.str(), std::ios::binary);
-    if (!ofs) return;
+    if (!ofs) {
+      snap_errors.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
     ofs.write(reinterpret_cast<const char*>(samples.data()),
               static_cast<std::streamsize>(samples.size() *
                                            sizeof(std::complex<float>)));
+    if (!ofs.good()) {
+      snap_errors.fetch_add(1, std::memory_order_relaxed);
+    }
   } catch (...) {
+    snap_errors.fetch_add(1, std::memory_order_relaxed);
   }
 }
 
@@ -189,6 +192,8 @@ static void write_json_log(const std::string& path,
     j["time_occupancy"] = cr.time_occupancy;
     j["avg_abs_phase"] = cr.avg_abs_phase;
     j["trans_ratio"] = cr.trans_ratio;
+    j["p50"] = cr.p50;
+    j["p90"] = cr.p90;
     j["snr_gate_pass"] = cr.snr_gate_pass;
     j["bw_gate_pass"] = cr.bw_gate_pass;
     j["band"] = cr.band_name;
@@ -255,6 +260,7 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
       blk = SampleBlock{};
     }
   }
+}
 
 // ---------------------------------------------------------------------------
 // Processing thread
@@ -312,9 +318,16 @@ static void proc_loop(std::stop_token st,
     // Backpressure: spin-wait up to 10ms before dropping the result.
     // push(T&&) only moves from cr after confirming there is space; on false
     // return cr remains valid and can be retried.
+    bool pushed = false;
     for (int retry = 0; retry < 100; ++retry) {
-      if (out_buf.push(std::move(cr))) break;
+      if (out_buf.push(std::move(cr))) {
+        pushed = true;
+        break;
+      }
       std::this_thread::sleep_for(std::chrono::microseconds(100));
+    }
+    if (!pushed) {
+      cr = ClassificationResult{};
     }
   }
 }
@@ -330,6 +343,9 @@ static void output_loop(std::stop_token st,
   const std::int64_t method_id = db.upsert_method(
       "modulation_classifier",
       R"({"type":"heuristic","version":3,"classes":["cw_like","fsk_like","psk_qam_like","ook_am_like"]})");
+  if (method_id < 0) {
+    std::cerr << "[DB] upsert_method failed: all DB writes will be skipped\n";
+  }
 
   ProcMetrics metrics;
   auto last_metrics_write = std::chrono::steady_clock::now();
@@ -383,6 +399,8 @@ static void output_loop(std::stop_token st,
         } else {
           ++metrics.db_errors;
         }
+      } else {
+        ++metrics.db_errors;
       }
 
       write_json_log(cfg.worker_log, cr);
@@ -433,7 +451,6 @@ int main(int argc, char** argv) {
 
   std::signal(SIGINT, handle_term);
   std::signal(SIGTERM, handle_term);
-  std::signal(SIGHUP, handle_hup);
 
   std::cout << "rf_adapt_intel v3 (C++20)\n"
             << "  center=" << cfg.center_freq << " Hz"
@@ -484,17 +501,22 @@ int main(int argc, char** argv) {
       }
       if (!task.samples.empty()) {
         write_snapshot(task.dir, std::span{task.samples}, task.conf,
-                        task.ts_ns);
+                        task.ts_ns, snap_errors);
       } else {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
       }
     }
-    // Drain remaining tasks
-    std::lock_guard lk(snap_mu);
-    for (auto& t : snap_queue) {
-      write_snapshot(t.dir, std::span{t.samples}, t.conf, t.ts_ns);
+    // Drain remaining tasks: move the queue out under the lock, then
+    // release it before writing so proc_loop is never blocked on I/O.
+    std::deque<SnapTask> remaining;
+    {
+      std::lock_guard lk(snap_mu);
+      remaining = std::move(snap_queue);
     }
-    snap_queue.clear();
+    for (auto& t : remaining) {
+      write_snapshot(t.dir, std::span{t.samples}, t.conf, t.ts_ns,
+                     snap_errors);
+    }
   });
 
   std::jthread cap_thread([&](std::stop_token st) {
@@ -509,14 +531,18 @@ int main(int argc, char** argv) {
     output_loop(st, proc_to_out, *db, cfg, snap_errors);
   });
 
+#ifndef HAVE_HTTPLIB
+  if (cfg.prometheus_port > 0) {
+    std::cerr << "[WARN] RF_PROMETHEUS_PORT=" << cfg.prometheus_port
+              << " set but HTTP /metrics endpoint is disabled in this build "
+                 "(rebuild with HAVE_HTTPLIB to enable)\n";
+  }
+#endif
+
   while (!g_shutdown.load(std::memory_order_relaxed)) {
     std::this_thread::sleep_for(std::chrono::seconds(2));
     std::cout << "[STATUS] cap_queue=" << cap_to_proc.size_approx()
               << " out_queue=" << proc_to_out.size_approx() << "\n";
-
-    if (g_reload.exchange(false, std::memory_order_relaxed)) {
-      std::cout << "[SIGHUP] Configuration reload requested (restart to apply)\n";
-    }
   }
 
   std::cout << "Shutdown requested — stopping threads\n";

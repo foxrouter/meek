@@ -202,6 +202,8 @@ int main(int argc, char** argv) {
     j["time_occupancy"] = cr.time_occupancy;
     j["avg_abs_phase"] = cr.avg_abs_phase;
     j["trans_ratio"] = cr.trans_ratio;
+    j["p50"] = cr.p50;
+    j["p90"] = cr.p90;
     j["snr_gate_pass"] = cr.snr_gate_pass;
     j["bw_gate_pass"] = cr.bw_gate_pass;
     j["is_candidate"] = (cr.confidence >= conf_threshold &&

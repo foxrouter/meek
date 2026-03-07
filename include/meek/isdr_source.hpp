@@ -99,6 +99,10 @@ class SoapySdrSource final : public ISdrSource {
   std::string description_;
 };
 
+// Verify that SoapySdrSource satisfies the concept.
+static_assert(SdrSourceConcept<SoapySdrSource>,
+              "SoapySdrSource does not satisfy SdrSourceConcept");
+
 #endif  // HAVE_SOAPY
 
 }  // namespace meek
