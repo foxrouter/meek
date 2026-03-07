@@ -37,7 +37,8 @@ struct Config {
   double console_conf{0.8};
   double snapshot_conf{0.6};
 
-  // Demodulation hints
+  // Demodulation hints — reserved for future liquid-dsp demodulation;
+  // not currently read by classify_block() or any processing path.
   double rsym{128'000.0};
   double fdev{50'000.0};
 

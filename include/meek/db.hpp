@@ -64,6 +64,7 @@ class Database {
   sqlite3* db_{nullptr};
   StmtPtr insert_signal_stmt_;
   StmtPtr insert_method_stmt_;
+  StmtPtr select_method_stmt_;
   StmtPtr insert_example_stmt_;
 };
 
@@ -94,6 +95,7 @@ inline std::unique_ptr<Database> Database::open(const std::string& path) {
 inline Database::~Database() {
   insert_signal_stmt_.reset();
   insert_method_stmt_.reset();
+  select_method_stmt_.reset();
   insert_example_stmt_.reset();
   if (db_) {
     sqlite3_close(db_);
@@ -157,6 +159,13 @@ inline bool Database::prepare_statements() {
   }
   insert_example_stmt_.reset(s);
 
+  static constexpr const char* kSelectMethod =
+      "SELECT id FROM methods WHERE name = ? LIMIT 1";
+  if (sqlite3_prepare_v2(db_, kSelectMethod, -1, &s, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  select_method_stmt_.reset(s);
+
   return true;
 }
 
@@ -183,17 +192,13 @@ inline std::int64_t Database::upsert_method(const std::string& name,
     return -1;
   }
 
-  // Retrieve the row-id (INSERT OR IGNORE won't change last_insert_rowid if
-  // the row already existed).
-  sqlite3_stmt* sel = nullptr;
-  static constexpr const char* kSel =
-      "SELECT id FROM methods WHERE name = ? LIMIT 1";
-  if (sqlite3_prepare_v2(db_, kSel, -1, &sel, nullptr) != SQLITE_OK)
-    return -1;
+  // Retrieve the row-id using the cached prepared statement.
+  // (INSERT OR IGNORE won't change last_insert_rowid if the row already existed.)
+  sqlite3_stmt* sel = select_method_stmt_.get();
+  sqlite3_reset(sel);
   sqlite3_bind_text(sel, 1, name.c_str(), -1, SQLITE_TRANSIENT);
   std::int64_t id = -1;
   if (sqlite3_step(sel) == SQLITE_ROW) id = sqlite3_column_int64(sel, 0);
-  sqlite3_finalize(sel);
   return id;
 }
 

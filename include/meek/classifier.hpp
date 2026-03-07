@@ -182,7 +182,11 @@ struct ClassifyOptions {
   ClassificationResult r;
   r.center_freq_hz = opts.band ? opts.band->center_hz : 0.0;
 
-  if (s.size() < 32) return r;
+  if (s.size() < 32) {
+    r.decision_trace =
+        "REJECT:block_too_small n=" + std::to_string(s.size());
+    return r;
+  }
 
   double snr_gate = opts.snr_min_db;
   double bw_exp = opts.expected_bw_hz;
