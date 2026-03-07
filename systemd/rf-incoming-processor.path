@@ -1,0 +1,14 @@
+[Unit]
+Description=Watch /var/lib/rf-adapt-intel/incoming for new IQ files (Brian)
+Documentation=https://github.com/foxrouter/meek
+
+[Path]
+# Trigger when any file is closed-for-write in the incoming directory.
+# The service moves files to processed/ after handling, preventing re-trigger.
+PathChanged=/var/lib/rf-adapt-intel/incoming
+MakeDirectory=yes
+DirectoryMode=0750
+Unit=rf-incoming-processor.service
+
+[Install]
+WantedBy=multi-user.target
