@@ -32,6 +32,8 @@ DRY_RUN=false
 CONF_DIR="/etc/rf_worker"
 CONF_FILE="${CONF_DIR}/thresholds.env"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Path where liquid-dsp installs its .pc file (not searched by default on Ubuntu)
+LIQUID_PKGCFG_DIR="/usr/local/lib/pkgconfig"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -219,6 +221,18 @@ install_liquid_dsp() {
   run bash -c "cd '${src_dir}' && sudo make install"
   run sudo ldconfig
 
+  # On Ubuntu/Debian, /usr/local/lib/pkgconfig is not in the default pkg-config
+  # search path.  If the .pc file exists there but pkg-config cannot find it,
+  # register the path persistently via profile.d and export it for this session.
+  if ! $DRY_RUN && ! pkg-config --exists liquid 2>/dev/null \
+      && [[ -f "${LIQUID_PKGCFG_DIR}/liquid.pc" ]]; then
+    local profile_file="/etc/profile.d/liquid-dsp.sh"
+    sudo bash -c "echo 'export PKG_CONFIG_PATH=\"${LIQUID_PKGCFG_DIR}\${PKG_CONFIG_PATH:+:\$PKG_CONFIG_PATH}\"' > '${profile_file}'"
+    sudo chmod 644 "${profile_file}"
+    export PKG_CONFIG_PATH="${LIQUID_PKGCFG_DIR}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+    echo "  Registered PKG_CONFIG_PATH in ${profile_file}"
+  fi
+
   # Confirm pkg-config visibility
   if pkg-config --exists liquid 2>/dev/null; then
     local ver
@@ -301,8 +315,15 @@ run_decoder_tests() {
   fi
 
   if $INSTALL_LIQUID; then
-    if pkg-config --exists liquid 2>/dev/null; then
-      echo "  [PASS] liquid-dsp: $(pkg-config --modversion liquid)"
+    # Extend PKG_CONFIG_PATH to cover LIQUID_PKGCFG_DIR (not in Ubuntu's
+    # default path) so the test works even before a new login shell sources
+    # /etc/profile.d/liquid-dsp.sh created by install_liquid_dsp().
+    local _liq_pkgcfg="${PKG_CONFIG_PATH:-}"
+    if [[ ":${_liq_pkgcfg}:" != *":${LIQUID_PKGCFG_DIR}:"* ]]; then
+      _liq_pkgcfg="${LIQUID_PKGCFG_DIR}${_liq_pkgcfg:+:${_liq_pkgcfg}}"
+    fi
+    if PKG_CONFIG_PATH="${_liq_pkgcfg}" pkg-config --exists liquid 2>/dev/null; then
+      echo "  [PASS] liquid-dsp: $(PKG_CONFIG_PATH="${_liq_pkgcfg}" pkg-config --modversion liquid)"
     else
       echo "  [FAIL] liquid-dsp pkg-config entry not found" >&2
       failed=$(( failed + 1 ))
