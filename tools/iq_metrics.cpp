@@ -29,10 +29,9 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
-
-#include <nlohmann/json.hpp>
 
 // ---------------------------------------------------------------------------
 // Data types
