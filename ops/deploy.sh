@@ -83,8 +83,7 @@ for conf in "${TMPDIR}"/*.conf; do
   run sudo install -m 644 -o root -g root "${conf}" "${DROPIN_DST}/$(basename "${conf}")"
 done
 
-# Create runtime data directory
-run sudo mkdir -p /var/lib/rf-adapt-intel/{snapshots,incoming,processed}
+# Create service account first so directory ownership can be set correctly
 if ! id rf_worker &>/dev/null; then
   echo "Creating rf_worker system account..."
   run sudo useradd -r -s /sbin/nologin rf_worker
@@ -95,7 +94,21 @@ if ! id -nG rf_worker 2>/dev/null | grep -qw plugdev; then
   echo "Adding rf_worker to plugdev group (required for RTL-SDR USB access)..."
   run sudo usermod -aG plugdev rf_worker
 fi
+
+# Create runtime data directories owned by rf_worker
+run sudo mkdir -p /var/lib/rf-adapt-intel/{snapshots,incoming,processed}
 run sudo chown -R rf_worker:rf_worker /var/lib/rf-adapt-intel
+run sudo chmod 0750 /var/lib/rf-adapt-intel
+
+# Verify the directory is accessible by rf_worker before starting the service
+if ! $DRY_RUN; then
+  if ! sudo -u rf_worker test -w /var/lib/rf-adapt-intel; then
+    echo "[WARN] /var/lib/rf-adapt-intel is not writable by rf_worker — check ownership"
+    ls -la /var/lib/ | grep rf-adapt-intel || true
+  else
+    echo "    [OK] /var/lib/rf-adapt-intel is writable by rf_worker"
+  fi
+fi
 
 # Install canary monitor service + 30-minute timer
 echo ""

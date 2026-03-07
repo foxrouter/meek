@@ -16,9 +16,11 @@ Group=rf_worker
 SupplementaryGroups=plugdev
 
 # Runtime data directory
+# StateDirectory subdirectory paths require systemd >= 235 (Bookworm ships v252)
 WorkingDirectory=/var/lib/rf-adapt-intel
 RuntimeDirectory=rf-adapt-intel
-StateDirectory=rf-adapt-intel
+StateDirectory=rf-adapt-intel rf-adapt-intel/snapshots rf-adapt-intel/incoming rf-adapt-intel/processed
+StateDirectoryMode=0750
 LogsDirectory=rf-adapt-intel
 
 # Load environment from drop-in override

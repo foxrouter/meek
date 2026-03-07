@@ -8,12 +8,12 @@
 
 #pragma once
 
+#include <sqlite3.h>
+
 #include <cstdint>
 #include <iostream>
 #include <memory>
 #include <string>
-
-#include <sqlite3.h>
 
 namespace meek {
 
@@ -23,7 +23,8 @@ namespace meek {
 
 struct StmtDeleter {
   void operator()(sqlite3_stmt* s) noexcept {
-    if (s) sqlite3_finalize(s);
+    if (s)
+      sqlite3_finalize(s);
   }
 };
 using StmtPtr = std::unique_ptr<sqlite3_stmt, StmtDeleter>;
@@ -44,16 +45,14 @@ class Database {
   Database& operator=(const Database&) = delete;
 
   /// Insert a signal observation and return its row-id, or -1 on error.
-  [[nodiscard]] std::int64_t insert_signal(const std::string& source,
-                                           const std::string& notes);
+  [[nodiscard]] std::int64_t insert_signal(const std::string& source, const std::string& notes);
 
   /// Upsert the modulation classifier method and return its row-id, or -1.
-  [[nodiscard]] std::int64_t upsert_method(const std::string& name,
-                                           const std::string& params_json);
+  [[nodiscard]] std::int64_t upsert_method(const std::string& name, const std::string& params_json);
 
   /// Insert a classification example row.  Returns 0 on success, -1 on error.
-  int insert_example(std::int64_t signal_id, std::int64_t method_id,
-                     float confidence, const std::string& notes);
+  int insert_example(std::int64_t signal_id, std::int64_t method_id, float confidence,
+                     const std::string& notes);
 
  private:
   explicit Database(sqlite3* db) : db_(db) {}
@@ -75,6 +74,8 @@ class Database {
 inline std::unique_ptr<Database> Database::open(const std::string& path) {
   sqlite3* raw = nullptr;
   if (sqlite3_open(path.c_str(), &raw) != SQLITE_OK) {
+    const char* msg = raw ? sqlite3_errmsg(raw) : "out of memory";
+    std::cerr << "[DB] sqlite3_open(" << path << "): " << msg << "\n";
     if (raw) {
       sqlite3_close(raw);
     }
@@ -83,7 +84,14 @@ inline std::unique_ptr<Database> Database::open(const std::string& path) {
   auto db = std::unique_ptr<Database>(new Database(raw));
   sqlite3_exec(raw, "PRAGMA foreign_keys = ON;", nullptr, nullptr, nullptr);
   // WAL mode: reduces write-contention when readers and writer coexist.
-  sqlite3_exec(raw, "PRAGMA journal_mode = WAL;", nullptr, nullptr, nullptr);
+  {
+    char* wal_err = nullptr;
+    if (sqlite3_exec(raw, "PRAGMA journal_mode = WAL;", nullptr, nullptr, &wal_err) != SQLITE_OK) {
+      std::cerr << "[DB] journal_mode WAL failed: " << (wal_err ? wal_err : sqlite3_errmsg(raw))
+                << " - using default journal mode\n";
+      sqlite3_free(wal_err);
+    }
+  }
   sqlite3_exec(raw, "PRAGMA synchronous = NORMAL;", nullptr, nullptr, nullptr);
 
   if (!db->apply_schema() || !db->prepare_statements()) {
@@ -128,6 +136,7 @@ inline bool Database::apply_schema() {
   )sql";
   char* err = nullptr;
   if (sqlite3_exec(db_, kSchema, nullptr, nullptr, &err) != SQLITE_OK) {
+    std::cerr << "[DB] apply_schema: " << (err ? err : sqlite3_errmsg(db_)) << "\n";
     sqlite3_free(err);
     return false;
   }
@@ -137,9 +146,9 @@ inline bool Database::apply_schema() {
 inline bool Database::prepare_statements() {
   sqlite3_stmt* s = nullptr;
 
-  static constexpr const char* kInsertSignal =
-      "INSERT INTO signals(source, notes) VALUES(?, ?)";
+  static constexpr const char* kInsertSignal = "INSERT INTO signals(source, notes) VALUES(?, ?)";
   if (sqlite3_prepare_v2(db_, kInsertSignal, -1, &s, nullptr) != SQLITE_OK) {
+    std::cerr << "[DB] prepare insert_signal: " << sqlite3_errmsg(db_) << "\n";
     return false;
   }
   insert_signal_stmt_.reset(s);
@@ -147,6 +156,7 @@ inline bool Database::prepare_statements() {
   static constexpr const char* kInsertMethod =
       "INSERT OR IGNORE INTO methods(name, params) VALUES(?, ?)";
   if (sqlite3_prepare_v2(db_, kInsertMethod, -1, &s, nullptr) != SQLITE_OK) {
+    std::cerr << "[DB] prepare insert_method: " << sqlite3_errmsg(db_) << "\n";
     return false;
   }
   insert_method_stmt_.reset(s);
@@ -155,13 +165,14 @@ inline bool Database::prepare_statements() {
       "INSERT INTO examples(signal_id, method_id, confidence, notes) "
       "VALUES(?, ?, ?, ?)";
   if (sqlite3_prepare_v2(db_, kInsertExample, -1, &s, nullptr) != SQLITE_OK) {
+    std::cerr << "[DB] prepare insert_example: " << sqlite3_errmsg(db_) << "\n";
     return false;
   }
   insert_example_stmt_.reset(s);
 
-  static constexpr const char* kSelectMethod =
-      "SELECT id FROM methods WHERE name = ? LIMIT 1";
+  static constexpr const char* kSelectMethod = "SELECT id FROM methods WHERE name = ? LIMIT 1";
   if (sqlite3_prepare_v2(db_, kSelectMethod, -1, &s, nullptr) != SQLITE_OK) {
+    std::cerr << "[DB] prepare select_method: " << sqlite3_errmsg(db_) << "\n";
     return false;
   }
   select_method_stmt_.reset(s);
@@ -169,18 +180,18 @@ inline bool Database::prepare_statements() {
   return true;
 }
 
-inline std::int64_t Database::insert_signal(const std::string& source,
-                                             const std::string& notes) {
+inline std::int64_t Database::insert_signal(const std::string& source, const std::string& notes) {
   sqlite3_stmt* stmt = insert_signal_stmt_.get();
   sqlite3_reset(stmt);
   sqlite3_bind_text(stmt, 1, source.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(stmt, 2, notes.c_str(), -1, SQLITE_TRANSIENT);
-  if (sqlite3_step(stmt) != SQLITE_DONE) return -1;
+  if (sqlite3_step(stmt) != SQLITE_DONE)
+    return -1;
   return sqlite3_last_insert_rowid(db_);
 }
 
 inline std::int64_t Database::upsert_method(const std::string& name,
-                                              const std::string& params_json) {
+                                            const std::string& params_json) {
   sqlite3_stmt* stmt = insert_method_stmt_.get();
   sqlite3_reset(stmt);
   sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
@@ -198,13 +209,13 @@ inline std::int64_t Database::upsert_method(const std::string& name,
   sqlite3_reset(sel);
   sqlite3_bind_text(sel, 1, name.c_str(), -1, SQLITE_TRANSIENT);
   std::int64_t id = -1;
-  if (sqlite3_step(sel) == SQLITE_ROW) id = sqlite3_column_int64(sel, 0);
+  if (sqlite3_step(sel) == SQLITE_ROW)
+    id = sqlite3_column_int64(sel, 0);
   return id;
 }
 
-inline int Database::insert_example(std::int64_t signal_id,
-                                     std::int64_t method_id, float confidence,
-                                     const std::string& notes) {
+inline int Database::insert_example(std::int64_t signal_id, std::int64_t method_id,
+                                    float confidence, const std::string& notes) {
   sqlite3_stmt* stmt = insert_example_stmt_.get();
   sqlite3_reset(stmt);
   sqlite3_bind_int64(stmt, 1, signal_id);
