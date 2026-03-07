@@ -448,6 +448,22 @@ sudo -u rf_worker ssh-copy-id -i /var/lib/rf-adapt-intel/.ssh/id_ed25519.pub \
 **On Brian:** ensure `rf_worker`'s `~/.ssh/authorized_keys` contains Ray's public key
 and that `sshd` is running.
 
+> **Note — `rf_worker` shell and rsync-over-SSH:**  
+> `install.sh` creates `rf_worker` with `/sbin/nologin`, which blocks SSH interactive
+> logins but also prevents `rsync` from spawning a remote shell.  Choose one of:
+>
+> - **Option A (simple):** give `rf_worker` a minimal login shell on Brian so rsync
+>   can connect:
+>   ```bash
+>   sudo usermod -s /bin/sh rf_worker
+>   ```
+> - **Option B (locked-down):** keep `/sbin/nologin` and restrict access via a
+>   `forced-command` in `~rf_worker/.ssh/authorized_keys` on Brian, e.g.:
+>   ```text
+>   command="/usr/bin/rrsync /var/lib/rf-adapt-intel/incoming" ssh-ed25519 AAAA... ray@ray-hostname
+>   ```
+>   Then set `IQ_DEST=rf_worker@brian.local:/` on Ray (rrsync rewrites the path).
+
 Test the connection from Ray:
 
 ```bash

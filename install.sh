@@ -121,15 +121,11 @@ detect_os() {
 install_deps() {
   log "Installing system dependencies for ${PLATFORM}..."
 
-  # Common packages for both platforms (SDR and decode-only nodes)
+  # Runtime and tooling packages needed on both SDR and decode-only nodes
   local pkgs=(
     git
-    build-essential
-    cmake
-    pkg-config
     libsoapysdr-dev
     soapysdr-tools
-    libsqlite3-dev
     python3
     python3-numpy
     inotify-tools
@@ -137,8 +133,10 @@ install_deps() {
   )
 
   if $NO_SDR; then
-    info "Decode-only mode (--no-sdr): skipping RTL-SDR hardware packages."
+    info "Decode-only mode (--no-sdr): skipping build tools and RTL-SDR hardware packages."
   else
+    # Build tools — only needed on nodes that compile rf_adapt_intel
+    pkgs+=(build-essential cmake pkg-config libsqlite3-dev)
     # SDR hardware packages — only needed on nodes with an attached RTL-SDR dongle
     pkgs+=(rtl-sdr librtlsdr-dev)
     # SoapySDR RTL-SDR plugin name is the same on Bookworm and Noble
@@ -321,11 +319,9 @@ deploy_incoming_processor() {
       "${REPO_ROOT}/tools/decode_candidates.py" \
       "${share_dir}/tools/decode_candidates.py"
 
-  # Install requirements
-  if [[ -f "${REPO_ROOT}/requirements.txt" ]] && command -v pip3 &>/dev/null; then
-    run sudo pip3 install -q -r "${REPO_ROOT}/requirements.txt" || \
-      warn "pip3 install failed — check requirements.txt and python3 setup."
-  fi
+  # numpy is already installed via the python3-numpy apt package above;
+  # avoid pip3 here because Ubuntu Noble 24.04 rejects system-wide pip installs
+  # (PEP 668 / externally-managed-environment).
 
   run sudo systemctl daemon-reload
   run sudo systemctl enable --now rf-incoming-processor.path
