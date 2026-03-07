@@ -22,7 +22,6 @@
 #include <SoapySDR/Device.h>
 #include <SoapySDR/Formats.h>
 #include <SoapySDR/Version.h>
-
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -39,14 +38,13 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <span>
 #include <sstream>
 #include <stop_token>
 #include <string>
 #include <thread>
 #include <vector>
-
-#include <nlohmann/json.hpp>
 
 #include "meek/band_profiles.hpp"
 #include "meek/classifier.hpp"
@@ -64,8 +62,8 @@ using json = nlohmann::json;
 // SoapySdrSource implementation
 // ---------------------------------------------------------------------------
 
-SoapySdrSource::SoapySdrSource(double center_freq, double sample_rate,
-                               double gain, long long read_timeout_us)
+SoapySdrSource::SoapySdrSource(double center_freq, double sample_rate, double gain,
+                               long long read_timeout_us)
     : center_freq_hz_(center_freq),
       sample_rate_hz_(sample_rate),
       read_timeout_us_(read_timeout_us) {
@@ -104,21 +102,22 @@ SoapySdrSource::SoapySdrSource(double center_freq, double sample_rate,
         // since STDERR_FILENO may still point at /dev/null.
         static constexpr char kMsg[] =
             "[WARN] rf_adapt_intel: failed to restore stderr after SoapySDR probe\n";
-        if (::write(saved_stderr, kMsg, sizeof(kMsg) - 1) < 0) { /* best effort */ }
+        if (::write(saved_stderr, kMsg, sizeof(kMsg) - 1) < 0) { /* best effort */
+        }
       }
       ::close(saved_stderr);
     }
   }
 
-  if (!dev_) throw std::runtime_error("SoapySDR: no device found");
+  if (!dev_)
+    throw std::runtime_error("SoapySDR: no device found");
 
   SoapySDRDevice_setSampleRate(dev_, SOAPY_SDR_RX, 0, sample_rate);
   SoapySDRDevice_setFrequency(dev_, SOAPY_SDR_RX, 0, center_freq, &args);
   SoapySDRDevice_setGainMode(dev_, SOAPY_SDR_RX, 0, 0);
   SoapySDRDevice_setGain(dev_, SOAPY_SDR_RX, 0, gain);
 
-  stream_ = SoapySDRDevice_setupStream(dev_, SOAPY_SDR_RX, SOAPY_SDR_CF32,
-                                       nullptr, 0, nullptr);
+  stream_ = SoapySDRDevice_setupStream(dev_, SOAPY_SDR_RX, SOAPY_SDR_CF32, nullptr, 0, nullptr);
   if (!stream_) {
     SoapySDRDevice_unmake(dev_);
     dev_ = nullptr;
@@ -142,16 +141,16 @@ SoapySdrSource::~SoapySdrSource() {
   }
 }
 
-std::ptrdiff_t SoapySdrSource::read_samples(
-    std::span<std::complex<float>> buf) {
+std::ptrdiff_t SoapySdrSource::read_samples(std::span<std::complex<float>> buf) {
   void* buffs[1] = {buf.data()};
   int flags = 0;
   long long time_ns = 0;
-  const int n =
-      SoapySDRDevice_readStream(dev_, stream_, buffs, buf.size(), &flags,
-                                &time_ns, read_timeout_us_);
-  if (n == SOAPY_SDR_TIMEOUT || n == SOAPY_SDR_OVERFLOW) return 0;
-  if (n < 0) return -1;
+  const int n = SoapySDRDevice_readStream(dev_, stream_, buffs, buf.size(), &flags, &time_ns,
+                                          read_timeout_us_);
+  if (n == SOAPY_SDR_TIMEOUT || n == SOAPY_SDR_OVERFLOW)
+    return 0;
+  if (n < 0)
+    return -1;
   return static_cast<std::ptrdiff_t>(n);
 }
 
@@ -169,10 +168,9 @@ static void handle_term(int) noexcept {
 // Snapshot helpers
 // ---------------------------------------------------------------------------
 
-static void write_snapshot(const std::string& dir,
-                            std::span<const std::complex<float>> samples,
-                            double conf, std::uint64_t ts_ns,
-                            std::atomic<std::uint64_t>& snap_errors) noexcept {
+static void write_snapshot(const std::string& dir, std::span<const std::complex<float>> samples,
+                           double conf, std::uint64_t ts_ns,
+                           std::atomic<std::uint64_t>& snap_errors) noexcept {
   try {
     std::filesystem::create_directories(dir);
     const int conf_pct = static_cast<int>(conf * 100.0);
@@ -184,8 +182,7 @@ static void write_snapshot(const std::string& dir,
       return;
     }
     ofs.write(reinterpret_cast<const char*>(samples.data()),
-              static_cast<std::streamsize>(samples.size() *
-                                           sizeof(std::complex<float>)));
+              static_cast<std::streamsize>(samples.size() * sizeof(std::complex<float>)));
     if (!ofs.good()) {
       snap_errors.fetch_add(1, std::memory_order_relaxed);
     }
@@ -195,14 +192,13 @@ static void write_snapshot(const std::string& dir,
 }
 
 static void prune_old_snapshots(const std::string& dir, int retention_days) {
-  if (retention_days <= 0) return;
+  if (retention_days <= 0)
+    return;
   try {
     const auto cutoff =
-        std::filesystem::file_time_type::clock::now() -
-        std::chrono::hours(24 * retention_days);
+        std::filesystem::file_time_type::clock::now() - std::chrono::hours(24 * retention_days);
     for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-      if (entry.path().extension() == ".cf32" &&
-          entry.last_write_time() < cutoff) {
+      if (entry.path().extension() == ".cf32" && entry.last_write_time() < cutoff) {
         std::filesystem::remove(entry.path());
       }
     }
@@ -214,14 +210,14 @@ static void prune_old_snapshots(const std::string& dir, int retention_days) {
 // JSON log helper
 // ---------------------------------------------------------------------------
 
-static void write_json_log(const std::string& path,
-                            const ClassificationResult& cr) {
-  if (path.empty()) return;
+static void write_json_log(const std::string& path, const ClassificationResult& cr) {
+  if (path.empty())
+    return;
   try {
-    std::filesystem::create_directories(
-        std::filesystem::path(path).parent_path());
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path());
     std::ofstream ofs(path, std::ios::app);
-    if (!ofs) return;
+    if (!ofs)
+      return;
     json j;
     j["schema_version"] = "2";
     j["ts_ns"] = cr.timestamp_ns;
@@ -261,12 +257,10 @@ struct SnapTask {
 // ---------------------------------------------------------------------------
 
 static void capture_loop(std::stop_token st, ISdrSource& sdr,
-                          SpscRingBuffer<SampleBlock, 64>& out_buf,
-                          const Config& cfg) {
+                         SpscRingBuffer<SampleBlock, 64>& out_buf, const Config& cfg) {
   std::vector<std::complex<float>> buf(cfg.block_len);
 
-  while (!st.stop_requested() &&
-         !g_shutdown.load(std::memory_order_relaxed)) {
+  while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
     const auto n = sdr.read_samples(std::span{buf});
     if (n <= 0) {
       if (n < 0) {
@@ -279,10 +273,10 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
 
     SampleBlock blk;
     blk.samples.assign(buf.begin(), buf.begin() + n);
-    blk.timestamp_ns = static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::system_clock::now().time_since_epoch())
-            .count());
+    blk.timestamp_ns =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::system_clock::now().time_since_epoch())
+                                       .count());
     blk.center_freq_hz = sdr.center_freq_hz();
     blk.sample_rate_hz = sdr.sample_rate_hz();
 
@@ -308,16 +302,12 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
 // Processing thread
 // ---------------------------------------------------------------------------
 
-static void proc_loop(std::stop_token st,
-                      SpscRingBuffer<SampleBlock, 64>& in_buf,
-                      SpscRingBuffer<ClassificationResult, 64>& out_buf,
-                      const Config& cfg,
-                      std::mutex& snap_mu,
-                      std::deque<SnapTask>& snap_queue) {
+static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_buf,
+                      SpscRingBuffer<ClassificationResult, 64>& out_buf, const Config& cfg,
+                      std::mutex& snap_mu, std::deque<SnapTask>& snap_queue) {
   const BandProfile* band = find_band(cfg.center_freq);
   if (band) {
-    std::cout << "[BAND] Matched: " << band->name << " (" << band->description
-              << ")\n";
+    std::cout << "[BAND] Matched: " << band->name << " (" << band->description << ")\n";
   }
 
   ClassifyOptions opts;
@@ -335,13 +325,13 @@ static void proc_loop(std::stop_token st,
   while (!st.stop_requested() || !in_buf.empty_approx()) {
     SampleBlock blk;
     if (!in_buf.pop(blk)) {
-      if (st.stop_requested()) break;
+      if (st.stop_requested())
+        break;
       std::this_thread::sleep_for(std::chrono::microseconds(100));
       continue;
     }
 
-    ClassificationResult cr =
-        classify_block(std::span{blk.samples}, opts, scratch);
+    ClassificationResult cr = classify_block(std::span{blk.samples}, opts, scratch);
     cr.timestamp_ns = blk.timestamp_ns;
     cr.center_freq_hz = blk.center_freq_hz;
     cr.sample_rate_hz = blk.sample_rate_hz;
@@ -378,10 +368,8 @@ static void proc_loop(std::stop_token st,
 // Output thread
 // ---------------------------------------------------------------------------
 
-static void output_loop(std::stop_token st,
-                         SpscRingBuffer<ClassificationResult, 64>& in_buf,
-                         Database& db, const Config& cfg,
-                         std::atomic<std::uint64_t>& snap_errors) {
+static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult, 64>& in_buf,
+                        Database& db, const Config& cfg, std::atomic<std::uint64_t>& snap_errors) {
   const std::int64_t method_id = db.upsert_method(
       "modulation_classifier",
       R"({"type":"heuristic","version":3,"classes":["cw_like","fsk_like","psk_qam_like","ook_am_like"]})");
@@ -397,15 +385,15 @@ static void output_loop(std::stop_token st,
   while (!st.stop_requested() || !in_buf.empty_approx()) {
     ClassificationResult cr;
     if (!in_buf.pop(cr)) {
-      if (st.stop_requested()) break;
+      if (st.stop_requested())
+        break;
       std::this_thread::sleep_for(std::chrono::microseconds(200));
       continue;
     }
 
     ++metrics.frames_total;
 
-    if (!cr.snr_gate_pass || !cr.bw_gate_pass ||
-        cr.mod_class == ModClass::UNKNOWN) {
+    if (!cr.snr_gate_pass || !cr.bw_gate_pass || cr.mod_class == ModClass::UNKNOWN) {
       ++metrics.frames_rejected;
     }
 
@@ -431,11 +419,9 @@ static void output_loop(std::stop_token st,
       metrics.conf_sum += cr.confidence;
 
       if (method_id >= 0) {
-        const std::int64_t sig_id =
-            db.insert_signal("rf_adapt_intel", cr.decision_trace);
+        const std::int64_t sig_id = db.insert_signal("rf_adapt_intel", cr.decision_trace);
         if (sig_id >= 0) {
-          if (db.insert_example(sig_id, method_id, cr.confidence,
-                                 cr.decision_trace) < 0) {
+          if (db.insert_example(sig_id, method_id, cr.confidence, cr.decision_trace) < 0) {
             ++metrics.db_errors;
           }
         } else {
@@ -448,11 +434,9 @@ static void output_loop(std::stop_token st,
       write_json_log(cfg.worker_log, cr);
 
       if (cr.confidence >= cfg.console_conf) {
-        std::cout << "[DETECT] band="
-                  << (cr.band_name.empty() ? "<none>" : cr.band_name)
-                  << " mod=" << mod_class_name(cr.mod_class) << " conf="
-                  << std::fixed << std::setprecision(3) << cr.confidence
-                  << " snr=" << cr.snr_db << "dB\n";
+        std::cout << "[DETECT] band=" << (cr.band_name.empty() ? "<none>" : cr.band_name)
+                  << " mod=" << mod_class_name(cr.mod_class) << " conf=" << std::fixed
+                  << std::setprecision(3) << cr.confidence << " snr=" << cr.snr_db << "dB\n";
       }
     }
 
@@ -483,8 +467,7 @@ static void output_loop(std::stop_token st,
 
 int main(int argc, char** argv) {
   if (argc < 4) {
-    std::cerr << "Usage: " << argv[0]
-              << " <center_freq_Hz> <sample_rate_Sps> <gain>\n"
+    std::cerr << "Usage: " << argv[0] << " <center_freq_Hz> <sample_rate_Sps> <gain>\n"
               << "Example: " << argv[0] << " 433.92e6 1000000 20\n";
     return 1;
   }
@@ -495,11 +478,9 @@ int main(int argc, char** argv) {
   std::signal(SIGTERM, handle_term);
 
   std::cout << "rf_adapt_intel v3 (C++20)\n"
-            << "  center=" << cfg.center_freq << " Hz"
-            << "  rate=" << cfg.sample_rate << " Sps"
+            << "  center=" << cfg.center_freq << " Hz" << "  rate=" << cfg.sample_rate << " Sps"
             << "  gain=" << cfg.gain << "\n"
-            << "  block_len=" << cfg.block_len
-            << "  conf_threshold=" << cfg.conf_threshold
+            << "  block_len=" << cfg.block_len << "  conf_threshold=" << cfg.conf_threshold
             << "  snr_min_db=" << cfg.snr_min_db << "\n"
             << "  db=" << cfg.db_path << "\n"
             << "  snapshots=" << cfg.snapshot_dir << "\n"
@@ -508,14 +489,18 @@ int main(int argc, char** argv) {
 
   auto db = Database::open(cfg.db_path);
   if (!db) {
-    std::cerr << "Failed to open database: " << cfg.db_path << "\n";
+    const std::string db_dir = std::filesystem::path(cfg.db_path).parent_path().string();
+    std::cerr << "[FATAL] Failed to open database: " << cfg.db_path << "\n"
+              << "  Ensure the directory exists and is writable by this process.\n"
+              << "  Run: sudo mkdir -p " << db_dir << " && sudo chown rf_worker:rf_worker "
+              << db_dir << "\n";
     return 1;
   }
 
   std::unique_ptr<ISdrSource> sdr;
   try {
-    sdr = std::make_unique<SoapySdrSource>(cfg.center_freq, cfg.sample_rate,
-                                            cfg.gain, cfg.read_timeout_us);
+    sdr = std::make_unique<SoapySdrSource>(cfg.center_freq, cfg.sample_rate, cfg.gain,
+                                           cfg.read_timeout_us);
     std::cout << "[SDR] " << sdr->description() << " opened\n";
   } catch (const std::exception& e) {
     std::cerr << "Failed to open SDR device: " << e.what() << "\n";
@@ -542,8 +527,7 @@ int main(int argc, char** argv) {
         }
       }
       if (!task.samples.empty()) {
-        write_snapshot(task.dir, std::span{task.samples}, task.conf,
-                        task.ts_ns, snap_errors);
+        write_snapshot(task.dir, std::span{task.samples}, task.conf, task.ts_ns, snap_errors);
       } else {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
       }
@@ -556,22 +540,18 @@ int main(int argc, char** argv) {
       remaining = std::move(snap_queue);
     }
     for (auto& t : remaining) {
-      write_snapshot(t.dir, std::span{t.samples}, t.conf, t.ts_ns,
-                     snap_errors);
+      write_snapshot(t.dir, std::span{t.samples}, t.conf, t.ts_ns, snap_errors);
     }
   });
 
-  std::jthread cap_thread([&](std::stop_token st) {
-    capture_loop(st, *sdr, cap_to_proc, cfg);
-  });
+  std::jthread cap_thread([&](std::stop_token st) { capture_loop(st, *sdr, cap_to_proc, cfg); });
 
   std::jthread proc_thread([&](std::stop_token st) {
     proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_mu, snap_queue);
   });
 
-  std::jthread out_thread([&](std::stop_token st) {
-    output_loop(st, proc_to_out, *db, cfg, snap_errors);
-  });
+  std::jthread out_thread(
+      [&](std::stop_token st) { output_loop(st, proc_to_out, *db, cfg, snap_errors); });
 
 #ifndef HAVE_HTTPLIB
   if (cfg.prometheus_port > 0) {
