@@ -121,7 +121,7 @@ struct MetricsSnapshot {
 
 /// Starts a background HTTP server on the given port serving GET /metrics.
 /// Binds the port synchronously; listening runs on a background std::thread.
-/// Returns {server, thread} on success or {nullptr, {}} if bind fails.
+/// Returns {server, thread} on success or {nullptr, thread{}} if bind fails.
 [[nodiscard]] inline std::pair<std::unique_ptr<httplib::Server>, std::thread>
 start_prometheus_http(std::uint16_t port,
                       std::shared_ptr<MetricsSnapshot> snapshot) {
@@ -154,7 +154,7 @@ start_prometheus_http(std::uint16_t port,
   });
 
   if (!svr->bind_to_port("0.0.0.0", static_cast<int>(port))) {
-    return {nullptr, {}};
+    return {std::unique_ptr<httplib::Server>(), std::thread{}};
   }
 
   // listen_after_bind() is blocking; run it on a background thread.
