@@ -177,6 +177,26 @@ test_iq_dest_requires_value() {
   assert_contains "--iq-dest without value: shows error" "requires a destination argument" "${err}"
 }
 
+test_iq_dest_rejects_leading_dash() {
+  local rc=0
+  bash "${INSTALLER}" --iq-dest "-host:/path" < /dev/null 2>/dev/null || rc=$?
+  assert_exit "--iq-dest with leading '-' exits non-zero" 1 "${rc}"
+
+  local err
+  err="$(bash "${INSTALLER}" --iq-dest "-host:/path" 2>&1 || true)"
+  assert_contains "--iq-dest leading '-': shows error" "must not start with '-'" "${err}"
+}
+
+test_iq_dest_rejects_newline() {
+  local rc=0
+  bash "${INSTALLER}" --iq-dest $'user@host:/path\nINJECTED=bad' < /dev/null 2>/dev/null || rc=$?
+  assert_exit "--iq-dest with newline exits non-zero" 1 "${rc}"
+
+  local err
+  err="$(bash "${INSTALLER}" --iq-dest $'user@host:/path\nINJECTED=bad' 2>&1 || true)"
+  assert_contains "--iq-dest newline: shows error" "must not contain newlines" "${err}"
+}
+
 test_iq_dest_dry_run_installs_service() {
   setup_stubs
   local out rc=0
@@ -184,8 +204,11 @@ test_iq_dest_dry_run_installs_service() {
     --iq-dest "rf_worker@brian.local:/var/lib/rf-adapt-intel/incoming/" \
     --no-service)" || rc=$?
   teardown_stubs
-  # --no-service skips deployment, so we test only that IQ_DEST is echoed
+  # --no-service skips service deployment; verify the IQ_DEST value is echoed
+  # in the banner so a regression in argument parsing would be caught.
   assert_exit "--iq-dest --no-service exits 0" 0 "${rc}"
+  assert_contains "--iq-dest --no-service echoes IQ_DEST in banner" \
+    "rf_worker@brian.local:/var/lib/rf-adapt-intel/incoming/" "${out}"
 }
 
 test_iq_dest_dry_run_summary() {
@@ -242,6 +265,8 @@ echo "=== tests/test_install.sh ==="
 test_help_flag
 test_unknown_flag_fails
 test_iq_dest_requires_value
+test_iq_dest_rejects_leading_dash
+test_iq_dest_rejects_newline
 test_iq_dest_dry_run_installs_service
 test_iq_dest_dry_run_summary
 test_no_iq_dest_summary_shows_hint
