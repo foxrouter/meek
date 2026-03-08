@@ -335,9 +335,12 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     // Sub-window classification: slide through blk.samples in analysis_len
     // steps and keep the highest-confidence window.  When block_len ==
     // analysis_len there is exactly one iteration (original behaviour).
+    // have_best ensures the first window's result (including decision_trace)
+    // is always recorded, even when all windows return confidence == 0.
     ClassificationResult cr;
     std::size_t best_offset = 0;
     std::size_t best_len = 0;
+    bool have_best = false;
 
     const std::size_t n = blk.samples.size();
     const std::size_t step = cfg.analysis_len;
@@ -346,10 +349,11 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       if (win < kMinClassifyBlockSamples) break;
       std::span<const std::complex<float>> window{blk.samples.data() + off, win};
       ClassificationResult sub = classify_block(window, opts, scratch);
-      if (sub.confidence > cr.confidence) {
+      if (!have_best || sub.confidence > cr.confidence) {
         cr = sub;
         best_offset = off;
         best_len = win;
+        have_best = true;
       }
     }
 
