@@ -5,7 +5,9 @@
 // thread and one consumer thread with no additional locking.  Capacity must be
 // a power of two.
 //
-// Cache-line padding between head and tail prevents false sharing on SMP cores.
+// Cache-line alignment on head_, tail_, and buffer_ prevents false sharing on
+// SMP cores: the producer writes buffer_[head] and head_; the consumer writes
+// tail_.  Each lives on its own 64-byte cache line.
 //
 // push() returns false when the buffer is full (non-blocking).  The item is
 // only moved/copied into the buffer slot *after* the full-check passes, so
@@ -99,7 +101,7 @@ class SpscRingBuffer {
 
   alignas(64) std::atomic<std::size_t> head_{0};
   alignas(64) std::atomic<std::size_t> tail_{0};
-  std::array<T, Capacity> buffer_{};
+  alignas(64) std::array<T, Capacity> buffer_{};
 };
 
 }  // namespace meek

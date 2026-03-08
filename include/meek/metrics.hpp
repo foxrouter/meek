@@ -15,6 +15,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <mutex>
 #include <string>
 
 // httplib.h must be included at global scope (outside any namespace) to avoid
@@ -23,8 +25,6 @@
 // "'decode_url' was not declared in this scope".
 #ifdef HAVE_HTTPLIB
 #include <httplib.h>
-#include <memory>
-#include <mutex>
 #include <sstream>
 #include <thread>
 #include <utility>
@@ -47,6 +47,7 @@ struct ProcMetrics {
   std::uint64_t class_ook{0};
   std::uint64_t db_errors{0};
   std::uint64_t snap_errors{0};
+  std::uint64_t snap_dropped{0};
 };
 
 // ---------------------------------------------------------------------------
@@ -86,7 +87,10 @@ inline void write_prometheus_textfile(const std::string& path,
         << "# HELP rf_errors_total Total write errors\n"
         << "# TYPE rf_errors_total counter\n"
         << "rf_errors_total{type=\"db\"} " << m.db_errors << "\n"
-        << "rf_errors_total{type=\"snapshot\"} " << m.snap_errors << "\n";
+        << "rf_errors_total{type=\"snapshot\"} " << m.snap_errors << "\n"
+        << "# HELP rf_snapshots_dropped_total Snapshot tasks dropped due to full queue\n"
+        << "# TYPE rf_snapshots_dropped_total counter\n"
+        << "rf_snapshots_dropped_total " << m.snap_dropped << "\n";
   } catch (...) {
   }
 }
@@ -111,13 +115,16 @@ inline void write_heartbeat(const std::string& path) {
 // Optional HTTP server (cpp-httplib) — compiled only with HAVE_HTTPLIB
 // ---------------------------------------------------------------------------
 
-#ifdef HAVE_HTTPLIB
-
-/// Thread-safe snapshot of metrics for the HTTP server.
+/// Thread-safe snapshot of metrics, shared between the output thread and the
+/// optional HTTP server.  Constructed only when the Prometheus HTTP server is
+/// started; output_loop receives nullptr when the server is not enabled and
+/// skips the locking/copy step.
 struct MetricsSnapshot {
   std::mutex mu;
   ProcMetrics data;
 };
+
+#ifdef HAVE_HTTPLIB
 
 /// Starts a background HTTP server on the given port serving GET /metrics.
 /// Binds the port synchronously; listening runs on a background std::thread.
@@ -149,7 +156,8 @@ start_prometheus_http(std::uint16_t port,
          << "rf_frames_candidate " << snap.frames_candidate << "\n"
          << "rf_confidence_avg " << avg_conf << "\n"
          << "rf_errors_total{type=\"db\"} " << snap.db_errors << "\n"
-         << "rf_errors_total{type=\"snapshot\"} " << snap.snap_errors << "\n";
+         << "rf_errors_total{type=\"snapshot\"} " << snap.snap_errors << "\n"
+         << "rf_snapshots_dropped_total " << snap.snap_dropped << "\n";
     res.set_content(body.str(), "text/plain; version=0.0.4; charset=utf-8");
   });
 
