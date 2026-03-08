@@ -127,13 +127,19 @@ inline std::string env_str(const char* name, const char* def) {
   // Capture
   cfg.block_len = static_cast<std::size_t>(
       detail::env_ll("RF_BLOCK_LEN", detail::env_ll("BLOCK_LEN", 4096)));
-  cfg.analysis_len = static_cast<std::size_t>(
-      detail::env_ll("RF_ANALYSIS_LEN", 4096));
-  // Clamp analysis_len: must be at least kMinClassifyBlockSamples and no more
-  // than block_len (wider window adds no benefit and would exceed the buffer).
-  if (cfg.analysis_len < kMinClassifyBlockSamples)
-    cfg.analysis_len = kMinClassifyBlockSamples;
-  if (cfg.analysis_len > cfg.block_len) cfg.analysis_len = cfg.block_len;
+
+  // RF_ANALYSIS_LEN: clamp in signed space before casting to avoid negative
+  // values wrapping when converted to size_t. Must be at least
+  // kMinClassifyBlockSamples and no more than block_len (wider window adds
+  // no benefit and would exceed the buffer).
+  std::int64_t analysis_len_ll = detail::env_ll("RF_ANALYSIS_LEN", 4096);
+  const std::int64_t min_analysis_ll =
+      static_cast<std::int64_t>(kMinClassifyBlockSamples);
+  const std::int64_t max_analysis_ll =
+      static_cast<std::int64_t>(cfg.block_len);
+  if (analysis_len_ll < min_analysis_ll) analysis_len_ll = min_analysis_ll;
+  if (analysis_len_ll > max_analysis_ll) analysis_len_ll = max_analysis_ll;
+  cfg.analysis_len = static_cast<std::size_t>(analysis_len_ll);
   cfg.read_timeout_us =
       detail::env_ll("RF_READ_TIMEOUT_US",
                      detail::env_ll("READ_TIMEOUT_US", 500'000));
