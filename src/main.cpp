@@ -353,6 +353,16 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       }
     }
 
+    // Fallback: for too-small blocks the loop above never calls classify_block,
+    // which would leave cr default-constructed with an empty decision_trace.
+    // Restore the previous behaviour by classifying the full block so that
+    // short reads/timeouts still produce a diagnosable reject trace.
+    if (best_len == 0 && n > 0 && n < kMinClassifyBlockSamples) {
+      std::span<const std::complex<float>> window{blk.samples.data(), n};
+      cr = classify_block(window, opts, scratch);
+      best_offset = 0;
+      best_len = n;
+    }
     cr.timestamp_ns = blk.timestamp_ns;
     cr.center_freq_hz = blk.center_freq_hz;
     cr.sample_rate_hz = blk.sample_rate_hz;
