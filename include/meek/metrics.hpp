@@ -15,6 +15,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <mutex>
 #include <string>
 
 // httplib.h must be included at global scope (outside any namespace) to avoid
@@ -23,8 +25,6 @@
 // "'decode_url' was not declared in this scope".
 #ifdef HAVE_HTTPLIB
 #include <httplib.h>
-#include <memory>
-#include <mutex>
 #include <sstream>
 #include <thread>
 #include <utility>
@@ -111,13 +111,16 @@ inline void write_heartbeat(const std::string& path) {
 // Optional HTTP server (cpp-httplib) — compiled only with HAVE_HTTPLIB
 // ---------------------------------------------------------------------------
 
-#ifdef HAVE_HTTPLIB
-
-/// Thread-safe snapshot of metrics for the HTTP server.
+/// Thread-safe snapshot of metrics, shared between the output thread and the
+/// optional HTTP server.  Defined unconditionally so output_loop can always
+/// hold a shared_ptr<MetricsSnapshot> (it is simply nullptr when the HTTP
+/// server is not started).
 struct MetricsSnapshot {
   std::mutex mu;
   ProcMetrics data;
 };
+
+#ifdef HAVE_HTTPLIB
 
 /// Starts a background HTTP server on the given port serving GET /metrics.
 /// Binds the port synchronously; listening runs on a background std::thread.

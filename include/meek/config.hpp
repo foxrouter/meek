@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <stdexcept>
 #include <string>
 
 #include "meek/sample_types.hpp"
@@ -95,9 +96,16 @@ inline std::string env_str(const char* name, const char* def) {
   Config cfg;
 
   // Command-line overrides (positional)
-  if (argc >= 2) cfg.center_freq = std::stod(argv[1]);
-  if (argc >= 3) cfg.sample_rate = std::stod(argv[2]);
-  if (argc >= 4) cfg.gain = std::stod(argv[3]);
+  auto parse_arg = [&](const char* name, const char* raw) -> double {
+    try {
+      return std::stod(raw);
+    } catch (const std::exception&) {
+      throw std::invalid_argument(std::string("invalid value for ") + name + ": '" + raw + "'");
+    }
+  };
+  if (argc >= 2) cfg.center_freq = parse_arg("center_freq_Hz", argv[1]);
+  if (argc >= 3) cfg.sample_rate = parse_arg("sample_rate_Sps", argv[2]);
+  if (argc >= 4) cfg.gain = parse_arg("gain", argv[3]);
 
   // Capture
   cfg.block_len = static_cast<std::size_t>(

@@ -337,6 +337,8 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     cr.sample_rate_hz = blk.sample_rate_hz;
 
     // Enqueue CF32 snapshot when confidence exceeds the snapshot threshold.
+    // Cap at 64 pending tasks (~2 MB) so stalled snapshot I/O cannot cause
+    // unbounded memory growth; excess snapshots are dropped and counted.
     if (cr.confidence >= cfg.snapshot_conf && cr.snr_gate_pass) {
       SnapTask task;
       task.samples = blk.samples;  // copy raw IQ before blk is moved
@@ -344,7 +346,9 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       task.conf = cr.confidence;
       task.ts_ns = cr.timestamp_ns;
       std::lock_guard lk(snap_mu);
-      snap_queue.push_back(std::move(task));
+      if (snap_queue.size() < 64) {
+        snap_queue.push_back(std::move(task));
+      }
     }
 
     // Backpressure: spin-wait up to 10ms before dropping the result.
@@ -369,7 +373,8 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
 // ---------------------------------------------------------------------------
 
 static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult, 64>& in_buf,
-                        Database& db, const Config& cfg, std::atomic<std::uint64_t>& snap_errors) {
+                        Database& db, const Config& cfg, std::atomic<std::uint64_t>& snap_errors,
+                        std::shared_ptr<MetricsSnapshot> metrics_snapshot) {
   const std::int64_t method_id = db.upsert_method(
       "modulation_classifier",
       R"({"type":"heuristic","version":3,"classes":["cw_like","fsk_like","psk_qam_like","ook_am_like"]})");
@@ -445,6 +450,10 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
       // Sync snapshot error counter from the shared atomic into metrics.
       metrics.snap_errors = snap_errors.load(std::memory_order_relaxed);
       write_prometheus_textfile(cfg.metrics_file, metrics);
+      if (metrics_snapshot) {
+        std::lock_guard lk(metrics_snapshot->mu);
+        metrics_snapshot->data = metrics;
+      }
       last_metrics_write = now;
     }
     if (now - last_heartbeat >= std::chrono::seconds(30)) {
@@ -472,7 +481,16 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  const Config cfg = parse_config(argc, argv);
+  const Config cfg = [&]() -> Config {
+    try {
+      return parse_config(argc, argv);
+    } catch (const std::exception& e) {
+      std::cerr << "Error: " << e.what() << "\n"
+                << "Usage: " << argv[0] << " <center_freq_Hz> <sample_rate_Sps> <gain>\n"
+                << "Example: " << argv[0] << " 433.92e6 1000000 20\n";
+      std::exit(1);
+    }
+  }();
 
   std::signal(SIGINT, handle_term);
   std::signal(SIGTERM, handle_term);
@@ -514,6 +532,7 @@ int main(int argc, char** argv) {
 
   // Snapshot worker — joinable background thread; uses std::deque for O(1)
   // pop_front() instead of std::vector::erase(begin()) which is O(n).
+  // Queue is capped at 64 entries in proc_loop to bound memory use.
   std::mutex snap_mu;
   std::deque<SnapTask> snap_queue;
   std::atomic<std::uint64_t> snap_errors{0};
@@ -546,16 +565,36 @@ int main(int argc, char** argv) {
     }
   });
 
+  auto metrics_snapshot = std::make_shared<MetricsSnapshot>();
+
   std::jthread cap_thread([&](std::stop_token st) { capture_loop(st, *sdr, cap_to_proc, cfg); });
 
   std::jthread proc_thread([&](std::stop_token st) {
     proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_mu, snap_queue);
   });
 
-  std::jthread out_thread(
-      [&](std::stop_token st) { output_loop(st, proc_to_out, *db, cfg, snap_errors); });
+  std::jthread out_thread([&](std::stop_token st) {
+    output_loop(st, proc_to_out, *db, cfg, snap_errors, metrics_snapshot);
+  });
 
-#ifndef HAVE_HTTPLIB
+#ifdef HAVE_HTTPLIB
+  std::unique_ptr<httplib::Server> http_svr;
+  std::thread http_thread;
+  if (cfg.prometheus_port > 0) {
+    auto [svr, thr] = start_prometheus_http(cfg.prometheus_port, metrics_snapshot);
+    if (svr && thr.joinable()) {
+      std::cout << "[HTTP] Prometheus /metrics on port " << cfg.prometheus_port << "\n";
+      http_svr = std::move(svr);
+      http_thread = std::move(thr);
+    } else {
+      std::cerr << "[WARN] Failed to bind Prometheus HTTP server on port "
+                << cfg.prometheus_port << "\n";
+      // If bind succeeded but thread creation somehow failed, stop the server
+      // before discarding the unique_ptr.
+      if (svr) svr->stop();
+    }
+  }
+#else
   if (cfg.prometheus_port > 0) {
     std::cerr << "[WARN] RF_PROMETHEUS_PORT=" << cfg.prometheus_port
               << " set but HTTP /metrics endpoint is disabled in this build "
@@ -575,6 +614,14 @@ int main(int argc, char** argv) {
   out_thread.request_stop();
   snap_thread.request_stop();
   // jthreads join at scope exit
+
+#ifdef HAVE_HTTPLIB
+  if (http_svr) {
+    http_svr->stop();
+    if (http_thread.joinable())
+      http_thread.join();
+  }
+#endif
 
   std::cout << "rf_adapt_intel stopped\n";
   return 0;
