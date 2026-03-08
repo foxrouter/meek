@@ -1,0 +1,228 @@
+name: CI — suggested checks (non-blocking)
+
+on:
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  SUGGEST_MODE: "true"   # when "true" lint findings are suggestions (non-fatal)
+  AUTO_FIX: "false"      # when "true" attempt auto-fix and open PR
+
+# Default to read-only permissions; individual jobs may widen specific permissions
+permissions:
+  contents: read
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # 0. Common setup: install system deps and warm the build cache
+  # ──────────────────────────────────────────────────────────────────────────
+  setup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      python: "3.11"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build clang-format clang-tidy cppcheck
+
+      - name: Cache build
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt') }}
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. Configure, build (no hardware deps), and run unit tests via CTest
+  # ──────────────────────────────────────────────────────────────────────────
+  build-and-test:
+    needs: setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build
+
+      - name: Configure and build
+        run: |
+          mkdir -p build
+          cd build
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_HARDWARE_TARGETS=OFF ..
+          ninja -v
+
+      - name: Run unit tests
+        run: |
+          cd build
+          ctest --output-on-failure -j2
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. clang-format — advisory only (never fails the PR)
+  # ──────────────────────────────────────────────────────────────────────────
+  clang-format-suggest:
+    needs: setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Check formatting (clang-format)
+        id: fmt
+        run: |
+          git ls-files '*.cpp' '*.hpp' '*.c' '*.h' > /tmp/files || true
+          if [ -s /tmp/files ]; then
+            clang-format -style=file --dry-run --Werror $(cat /tmp/files) || true
+          fi
+
+      - name: Post suggestions (optional)
+        if: env.SUGGEST_MODE == 'true'
+        run: |
+          echo "Formatting issues reported as suggestions; set AUTO_FIX=true to auto-apply."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. clang-tidy — advisory + reviewdog PR annotations
+  # ──────────────────────────────────────────────────────────────────────────
+  clang-tidy-suggest:
+    needs: setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools and clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build clang-tidy
+
+      - name: Generate compile_commands
+        run: |
+          mkdir -p build && cd build
+          cmake -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_HARDWARE_TARGETS=OFF ..
+
+      - name: Run clang-tidy (advisory)
+        run: |
+          run-clang-tidy -p build || true
+
+      - name: Post annotations via reviewdog
+        uses: reviewdog/action-clang-tidy@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review
+          level: warning
+          fail_on_error: false
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. cppcheck — advisory + reviewdog PR annotations
+  # ──────────────────────────────────────────────────────────────────────────
+  cppcheck-suggest:
+    needs: setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck and build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck cmake ninja-build build-essential
+
+      - name: Generate compile_commands (for cppcheck --project)
+        run: |
+          mkdir -p build && cd build
+          cmake -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_HARDWARE_TARGETS=OFF ..
+
+      - name: Run cppcheck (advisory)
+        run: |
+          cppcheck --enable=warning,performance,portability,information --inline-suppr --project=build/compile_commands.json || true
+
+      - name: Post annotations via reviewdog
+        uses: reviewdog/action-cppcheck@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review
+          level: warning
+          fail_on_error: false
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 5. Decoder smoke test — synthetic cf32 fixture + optional smoke binary
+  # ──────────────────────────────────────────────────────────────────────────
+  decoder-smoke-suggest:
+    needs: setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create small synthetic cf32 fixture
+        run: |
+          mkdir -p tests/snapshots
+          python3 -c "import numpy as np; n=1024; i=np.random.randn(n).astype('float32'); q=np.random.randn(n).astype('float32'); arr=np.empty(n*2,dtype='float32'); arr[0::2]=i; arr[1::2]=q; open('tests/snapshots/snap_1610000000000000000_c600.cf32','wb').write(arr.tobytes())"
+
+      - name: Run C++ smoke binary (non-fatal)
+        run: |
+          if [ -x build/tools/soapy_read_test ]; then
+            build/tools/soapy_read_test --input tests/snapshots/snap_1610000000000000000_c600.cf32 || true
+          else
+            echo "smoke binary missing; suggestion: add smoke target"
+          fi
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 6. Auto-fix — only runs when AUTO_FIX=true; opens a PR with format fixes
+  # ──────────────────────────────────────────────────────────────────────────
+  auto-fix-pr:
+    if: ${{ env.AUTO_FIX == 'true' }}
+    needs: [clang-format-suggest, clang-tidy-suggest, cppcheck-suggest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Apply clang-format fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@github.com"
+          git ls-files '*.cpp' '*.hpp' '*.c' '*.h' | xargs -r clang-format -i
+          if ! git diff --quiet; then
+            git checkout -b ci/auto-fixes || git checkout ci/auto-fixes
+            git add -A
+            git commit -m "ci: apply clang-format auto-fixes"
+            git push --set-upstream origin ci/auto-fixes
+          else
+            echo "no formatting changes"
+          fi
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ci/auto-fixes
+          title: "CI: suggested auto-fixes (clang-format)"
+          body: |
+            This PR contains suggested formatting fixes. Lint and static analysis findings are intentionally advisory.
