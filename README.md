@@ -1,6 +1,6 @@
 # RF Process Worker (`rf_adapt_intel`)
 
-A C++17 RF signal-processing worker that captures IQ samples via SoapySDR,
+A C++20 RF signal-processing worker that captures IQ samples via SoapySDR,
 classifies modulation (GMSK/FSK/PSK/QAM/OOK), and persists results to SQLite.
 Deployed as a hardened systemd service on embedded Linux (Raspberry Pi and Ubuntu server).
 
@@ -97,8 +97,8 @@ Key files:
 
 | Component | Minimum version | Notes |
 |---|---|---|
-| GCC or Clang | C++17 capable | GCC 8+, Clang 7+ |
-| CMake | 3.10 | Build system |
+| GCC or Clang | C++20 capable | GCC 10+, Clang 12+ |
+| CMake | 3.25 | Build system |
 | SoapySDR | any | `libsoapysdr-dev` on Debian/Ubuntu |
 | SQLite 3 | any | `libsqlite3-dev` |
 | Python 3 | 3.8+ | For tests and tools (`numpy` required) |
@@ -195,7 +195,7 @@ so the `process-worker` systemd service picks them up automatically.
 
 ## Offline IQ metrics (`tools/iq_metrics.cpp`)
 
-`iq_metrics` is a standalone C++17 tool that reads raw CF32 IQ snapshot files
+`iq_metrics` is a standalone C++20 tool that reads raw CF32 IQ snapshot files
 and computes four signal metrics: `avg_power`, `snr_db`, `spectral_flatness`,
 and `est_bw_hz`.  It mirrors the Python reference in
 `tools/autotune_thresholds.py` and is validated against it by

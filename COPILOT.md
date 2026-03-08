@@ -5,7 +5,7 @@ how to get the best results when using Copilot with this codebase.
 
 ## Language and style
 
-- **C++17** — structured bindings, `std::filesystem`, `if constexpr`, etc.
+- **C++20** — structured bindings, `std::filesystem`, `if constexpr`, ranges, `std::span`, etc.
 - `snake_case` for variables and functions throughout `src/main.cpp`.
 - Prefer `[[nodiscard]]` on functions returning error codes or resources.
 - Lines formatted to ≤ 100 characters; `clang-format -i src/*.cpp` before committing.
@@ -23,13 +23,13 @@ Add a Doxygen comment block to the classify_block() function.
 
 ## Key architecture notes Copilot should know
 
-- **Thread model:** one capture thread → bounded `std::deque` (max 64 items) → one processing thread.
-- **Snapshot worker:** single joinable `snapshot_worker` thread with a task queue — no detached threads.
+- **Thread model:** one capture thread → lock-free `SpscRingBuffer<T, 64>` → one processing thread.
+- **Snapshot worker:** single background `snap_thread` (`std::jthread`) with a task queue — no detached threads.
 - **SQLite writes:** processing thread only; never from the capture thread.
-- **Signal handling:** `SIGINT`/`SIGTERM` set the `running` atomic flag; all thread loops check it.
+- **Signal handling:** `SIGINT`/`SIGTERM` set the `g_shutdown` atomic flag; all thread loops check it.
 - **Env vars:** all runtime configuration comes from environment variables; use the `env_to_*` helpers for new parameters.
 - **liquid-dsp:** guarded by `#ifdef HAVE_LIQUID`; CMake auto-detects via pkg-config or CMake config.
-- **Band profiles:** `UK_BANDS[]` in `src/main.cpp` — 18 entries with per-band SNR, BW, and prior_boost.
+- **Band profiles:** `kUkBands` (`constexpr std::array<BandProfile, 33>`) in `include/meek/band_profiles.hpp` — 33 entries with per-band SNR, BW, and prior_boost.
 
 ## Resources
 

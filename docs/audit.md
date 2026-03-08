@@ -22,10 +22,10 @@ Key file sizes:
 
 | File | Lines | Language | Role |
 |------|------:|----------|------|
-| `src/main.cpp` | 1 701 | C++17 | Core capture → classify → DB persist loop |
+| `src/main.cpp` | ~580 | C++20 | Core capture → classify → DB persist loop |
 | `tools/decode_candidates.py` | 838 | Python 3 | Offline signal audit / decode report |
 | `tools/autotune_thresholds.py` | 551 | Python 3 | Threshold optimisation from IQ snapshots |
-| `tools/soapy_read_test.cpp` | ~150 | C++17 | SoapySDR stream diagnostic |
+| `tools/soapy_read_test.cpp` | ~75 | C++20 | SoapySDR stream diagnostic |
 | `CMakeLists.txt` | 96 | CMake | Build system for C++ targets + CTest |
 | `install.sh` | ~280 | Bash | One-shot installer (Bookworm / Noble) |
 | `ops/deploy.sh` | ~200 | Bash | Systemd deployment + firewall hardening |
@@ -44,7 +44,7 @@ Key file sizes:
 | **SQLite 3** | `src/main.cpp` | Signal DB persistence |
 | **liquid-dsp** | `src/main.cpp` (conditional, `HAVE_LIQUID`) | FSK/PSK/OOK demodulation chains |
 | **pthreads** | `src/main.cpp` | Capture + snapshot worker threads |
-| **C++17 stdlib** | All C++ | `std::filesystem`, `std::optional`, structured bindings |
+| **C++20 stdlib** | All C++ | `std::filesystem`, `std::optional`, structured bindings, `std::span`, `std::jthread` |
 
 ### 2b. Python runtime dependencies
 
@@ -69,7 +69,7 @@ Key file sizes:
 |------|------|
 | clang-format v14 | Code formatting (pre-commit hook) |
 | cpplint | C++ lint (pre-commit hook) |
-| cmake ≥ 3.10 | Build orchestration |
+| cmake ≥ 3.25 | Build orchestration |
 | ninja or make | Build backend |
 | python3 + pip | Test execution |
 
@@ -110,7 +110,7 @@ Run `cppcheck` or `clang-tidy` on C++ sources (integrated into CI — see §5).
 |----------|---------------|-------|
 | `classify_block()` | **High** — O(N log N) sort for PAPR; O(N) for all power/entropy features | Called every IQ block; 2 048 000 samples/s → ~640 blocks/s at 3200-sample blocks |
 | `write_json_log()` | Medium | File I/O per classified block; uses `append` mode |
-| `snapshot_worker` | Low | Async; bounded queue; no contention with classifier |
+| `snap_thread` | Low | Async `std::jthread`; unbounded queue (mutex-protected `std::deque`); no contention with classifier |
 | `sqlite3_exec` | Low | One INSERT per block; consider WAL mode for higher throughput |
 
 ### 4b. Python tools
@@ -144,7 +144,7 @@ per-file due to:
 2. Subprocess spawn overhead (~1–2 ms per invocation) absorbed into per-file cost
 
 **Expected advantage on ARM (Raspberry Pi):**
-On ARMv7/ARMv8 targets where NumPy is not AVX2-accelerated, C++17 with NEON
+On ARMv7/ARMv8 targets where NumPy is not AVX2-accelerated, C++20 with NEON
 auto-vectorisation (enabled by `-O3 -march=native`) would outperform Python by an
 estimated 3–5× based on the relative compute cost. This is the primary target
 deployment environment.
@@ -169,7 +169,7 @@ Ranked by (performance gain × deployment benefit) ÷ (porting effort × mainten
 **Justification:**
 - Functions are already partially duplicated in `src/main.cpp` (`classify_block()`).
 - Pure numerical code — no I/O, no subprocess, no string handling.
-- C++17 with `nth_element` (O(N) median) and single-pass log-sum achieves ≥40% speedup over Python/NumPy at N=65 536.
+- C++20 with `nth_element` (O(N) median) and single-pass log-sum achieves ≥40% speedup over Python/NumPy at N=65 536.
 - No external library dependencies beyond C++ stdlib.
 - Easy to test: compare JSON output against Python reference within ±0.1% tolerance.
 
