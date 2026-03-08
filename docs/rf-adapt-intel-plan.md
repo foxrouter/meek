@@ -21,7 +21,7 @@
 - Code hygiene: ✅ cpplint re-enabled; latest lint fixes committed; `tests/test_setup.sh` shell test suite committed.
 - Service hardening/deploy: ✅ `systemd/process-worker.service` + drop-ins (`hardening.conf`, `override.conf`, `processor.conf`) committed; `ops/deploy.sh`, `ops/verify.sh`, `ops/setup.sh` all committed.
 - liquid-dsp build (Ray): ✅ `ops/setup.sh --install-liquid-dsp` builds from source (NEON auto-detected by configure); HAVE_LIQUID conditional integration in `main.cpp` is ⏳ pending.
-- UK band profile table: ✅ 18 profiles in `UK_BANDS[]` with `find_band()`, per-band SNR overrides, BW hints, and prior_boost committed to `src/main.cpp`.
+- UK band profile table: ✅ 33 profiles in `kUkBands` (`include/meek/band_profiles.hpp`) with `find_band()`, per-band SNR overrides, BW hints, and prior_boost committed.
 - Heartbeat + Prometheus textfile: ✅ written by processing thread every 10 s in `main.cpp`; also `scripts/heartbeat_and_metrics.sh` for standalone use.
 - JSON logging: ✅ `write_json_log()` emits `decision_trace`, `confidence`, all features, band name/notes to `worker.log`.
 - SNR / BW guardrails: ✅ `classify_block()` enforces SNR gate and ±25% BW guardrail; per-band overrides via `BandProfile`.
@@ -95,7 +95,7 @@ Brian (ops/central)
 - [x] Run `verify.sh`; `ops/verify.sh` checks ProtectSystem, ProtectHome, ReadWritePaths, LimitNOFILE, TasksMax, and service status.
 - [x] Enable JSON logging: `write_json_log()` in `main.cpp` emits `decision_trace`, `confidence`, feature stats, rejection reasons to `worker.log`.
 - [x] Add heartbeat writer and Prometheus textfile: `write_heartbeat()` + `write_prometheus_metrics()` in `main.cpp`; standalone `scripts/heartbeat_and_metrics.sh`.
-- [x] Wire guardrails: SNR gate >0 dB (except canary via `RF_SNR_MIN_DB`), BW gate ±25%, per-band overrides via `UK_BANDS[]`.
+- [x] Wire guardrails: SNR gate >0 dB (except canary via `RF_SNR_MIN_DB`), BW gate ±25%, per-band overrides via `kUkBands`.
 
 Ray (edge)
 - [x] Build/install liquid-dsp: `ops/setup.sh --install-liquid-dsp` builds from source (NEON via `./configure`); smoke-tested via pkg-config.
