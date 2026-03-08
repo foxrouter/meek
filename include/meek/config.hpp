@@ -25,6 +25,11 @@ struct Config {
 
   // Capture
   std::size_t block_len{4096};
+  // Analysis window: sub-divides each captured block so that short bursty
+  // signals are not diluted by averaging over a large noise-filled window.
+  // Must be >= 32.  Values larger than block_len are silently clamped to
+  // block_len (single-window path, identical to original behaviour).
+  std::size_t analysis_len{4096};
   std::int64_t read_timeout_us{500'000};
 
   // Processing gates
@@ -122,6 +127,13 @@ inline std::string env_str(const char* name, const char* def) {
   // Capture
   cfg.block_len = static_cast<std::size_t>(
       detail::env_ll("RF_BLOCK_LEN", detail::env_ll("BLOCK_LEN", 4096)));
+  cfg.analysis_len = static_cast<std::size_t>(
+      detail::env_ll("RF_ANALYSIS_LEN", 4096));
+  // Clamp analysis_len: must be at least kMinClassifyBlockSamples and no more
+  // than block_len (wider window adds no benefit and would exceed the buffer).
+  if (cfg.analysis_len < kMinClassifyBlockSamples)
+    cfg.analysis_len = kMinClassifyBlockSamples;
+  if (cfg.analysis_len > cfg.block_len) cfg.analysis_len = cfg.block_len;
   cfg.read_timeout_us =
       detail::env_ll("RF_READ_TIMEOUT_US",
                      detail::env_ll("READ_TIMEOUT_US", 500'000));

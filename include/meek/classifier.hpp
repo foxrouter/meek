@@ -182,7 +182,7 @@ struct ClassifyOptions {
   ClassificationResult r;
   r.center_freq_hz = opts.band ? opts.band->center_hz : 0.0;
 
-  if (s.size() < 32) {
+  if (s.size() < kMinClassifyBlockSamples) {
     r.decision_trace =
         "REJECT:block_too_small n=" + std::to_string(s.size());
     return r;
