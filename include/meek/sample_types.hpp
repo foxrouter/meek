@@ -88,4 +88,9 @@ struct ClassificationResult {
   std::string decision_trace;
 };
 
+// Minimum number of IQ samples required for a meaningful block classification.
+// Blocks smaller than this are rejected by classify_block() with
+// REJECT:block_too_small.  Also used as the lower bound for RF_ANALYSIS_LEN.
+constexpr std::size_t kMinClassifyBlockSamples = 32;
+
 }  // namespace meek

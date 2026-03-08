@@ -321,7 +321,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   opts.band = band;
 
   std::vector<float> scratch;
-  scratch.reserve(cfg.block_len);
+  scratch.reserve(cfg.analysis_len);
 
   while (!st.stop_requested() || !in_buf.empty_approx()) {
     SampleBlock blk;
@@ -332,21 +332,57 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       continue;
     }
 
-    ClassificationResult cr = classify_block(std::span{blk.samples}, opts, scratch);
+    // Sub-window classification: slide through blk.samples in analysis_len
+    // steps and keep the highest-confidence window.  When block_len ==
+    // analysis_len there is exactly one iteration (original behaviour).
+    // have_best ensures the first window's result (including decision_trace)
+    // is always recorded, even when all windows return confidence == 0.
+    ClassificationResult cr;
+    std::size_t best_offset = 0;
+    std::size_t best_len = 0;
+    bool have_best = false;
+
+    const std::size_t n = blk.samples.size();
+    const std::size_t step = cfg.analysis_len;
+    for (std::size_t off = 0; off < n; off += step) {
+      const std::size_t win = std::min(step, n - off);
+      if (win < kMinClassifyBlockSamples) break;
+      std::span<const std::complex<float>> window{blk.samples.data() + off, win};
+      ClassificationResult sub = classify_block(window, opts, scratch);
+      if (!have_best || sub.confidence > cr.confidence) {
+        cr = sub;
+        best_offset = off;
+        best_len = win;
+        have_best = true;
+      }
+    }
+
+    // Fallback: for too-small blocks the loop above never calls classify_block,
+    // which would leave cr default-constructed with an empty decision_trace.
+    // Restore the previous behaviour by classifying the full block so that
+    // short reads/timeouts still produce a diagnosable reject trace.
+    if (best_len == 0 && n > 0 && n < kMinClassifyBlockSamples) {
+      std::span<const std::complex<float>> window{blk.samples.data(), n};
+      cr = classify_block(window, opts, scratch);
+      best_offset = 0;
+      best_len = n;
+    }
     cr.timestamp_ns = blk.timestamp_ns;
     cr.center_freq_hz = blk.center_freq_hz;
     cr.sample_rate_hz = blk.sample_rate_hz;
 
     // Enqueue CF32 snapshot when confidence exceeds the snapshot threshold.
     // Cap at 64 pending tasks (~2 MB) so stalled snapshot I/O cannot cause
-    // unbounded memory growth.  The sample copy is done inside the lock so it
-    // only occurs when there is actually room; excess snapshots are dropped and
-    // counted in snap_dropped.
+    // unbounded memory growth.  Save only the best analysis window so the
+    // snapshot contains the actual signal, not surrounding noise.
     if (cr.confidence >= cfg.snapshot_conf && cr.snr_gate_pass) {
       std::lock_guard lk(snap_mu);
       if (snap_queue.size() < 64) {
         SnapTask task;
-        task.samples = blk.samples;  // copy raw IQ -- only when there is room
+        const auto snap_begin =
+            blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
+        const auto snap_end = snap_begin + static_cast<std::ptrdiff_t>(best_len);
+        task.samples.assign(snap_begin, snap_end);
         task.dir = cfg.snapshot_dir;
         task.conf = cr.confidence;
         task.ts_ns = cr.timestamp_ns;
@@ -506,7 +542,8 @@ int main(int argc, char** argv) {
   std::cout << "rf_adapt_intel v3 (C++20)\n"
             << "  center=" << cfg.center_freq << " Hz" << "  rate=" << cfg.sample_rate << " Sps"
             << "  gain=" << cfg.gain << "\n"
-            << "  block_len=" << cfg.block_len << "  conf_threshold=" << cfg.conf_threshold
+            << "  block_len=" << cfg.block_len << "  analysis_len=" << cfg.analysis_len
+            << "  conf_threshold=" << cfg.conf_threshold
             << "  snr_min_db=" << cfg.snr_min_db << "\n"
             << "  db=" << cfg.db_path << "\n"
             << "  snapshots=" << cfg.snapshot_dir << "\n"
