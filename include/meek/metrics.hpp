@@ -47,6 +47,7 @@ struct ProcMetrics {
   std::uint64_t class_ook{0};
   std::uint64_t db_errors{0};
   std::uint64_t snap_errors{0};
+  std::uint64_t snap_dropped{0};
 };
 
 // ---------------------------------------------------------------------------
@@ -86,7 +87,10 @@ inline void write_prometheus_textfile(const std::string& path,
         << "# HELP rf_errors_total Total write errors\n"
         << "# TYPE rf_errors_total counter\n"
         << "rf_errors_total{type=\"db\"} " << m.db_errors << "\n"
-        << "rf_errors_total{type=\"snapshot\"} " << m.snap_errors << "\n";
+        << "rf_errors_total{type=\"snapshot\"} " << m.snap_errors << "\n"
+        << "# HELP rf_snapshots_dropped_total Snapshot tasks dropped due to full queue\n"
+        << "# TYPE rf_snapshots_dropped_total counter\n"
+        << "rf_snapshots_dropped_total " << m.snap_dropped << "\n";
   } catch (...) {
   }
 }
@@ -112,9 +116,9 @@ inline void write_heartbeat(const std::string& path) {
 // ---------------------------------------------------------------------------
 
 /// Thread-safe snapshot of metrics, shared between the output thread and the
-/// optional HTTP server.  Defined unconditionally so output_loop can always
-/// hold a shared_ptr<MetricsSnapshot> (it is simply nullptr when the HTTP
-/// server is not started).
+/// optional HTTP server.  Constructed only when the Prometheus HTTP server is
+/// started; output_loop receives nullptr when the server is not enabled and
+/// skips the locking/copy step.
 struct MetricsSnapshot {
   std::mutex mu;
   ProcMetrics data;
@@ -152,7 +156,8 @@ start_prometheus_http(std::uint16_t port,
          << "rf_frames_candidate " << snap.frames_candidate << "\n"
          << "rf_confidence_avg " << avg_conf << "\n"
          << "rf_errors_total{type=\"db\"} " << snap.db_errors << "\n"
-         << "rf_errors_total{type=\"snapshot\"} " << snap.snap_errors << "\n";
+         << "rf_errors_total{type=\"snapshot\"} " << snap.snap_errors << "\n"
+         << "rf_snapshots_dropped_total " << snap.snap_dropped << "\n";
     res.set_content(body.str(), "text/plain; version=0.0.4; charset=utf-8");
   });
 

@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -98,7 +99,18 @@ inline std::string env_str(const char* name, const char* def) {
   // Command-line overrides (positional)
   auto parse_arg = [&](const char* name, const char* raw) -> double {
     try {
-      return std::stod(raw);
+      std::size_t pos{};
+      const double val = std::stod(raw, &pos);
+      // Reject any trailing non-whitespace (e.g. "433.92e6junk").
+      // Cast to unsigned char is required: on platforms where char is signed,
+      // passing a negative value to std::isspace is undefined behaviour.
+      while (raw[pos] != '\0') {
+        if (!std::isspace(static_cast<unsigned char>(raw[pos]))) {
+          throw std::invalid_argument("trailing characters");
+        }
+        ++pos;
+      }
+      return val;
     } catch (const std::exception&) {
       throw std::invalid_argument(std::string("invalid value for ") + name + ": '" + raw + "'");
     }
