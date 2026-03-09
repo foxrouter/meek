@@ -1,0 +1,11 @@
+# Bulk formatting-only commits — ignored by git blame.
+#
+# To activate locally:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Add the full 40-character SHA of any commit that only reformats code
+# (e.g. a clang-format -i sweep) so that git blame skips over it and
+# points to the commit with the substantive change instead.
+#
+# Example:
+# abc123def456...  # clang-format sweep YYYY-MM-DD

@@ -1,4 +1,4 @@
-# Pre-commit config with clang-format and cpplint
+# Pre-commit config with clang-format, cpplint, and gitleaks
 
 repos:
   - repo: https://github.com/pre-commit/mirrors-clang-format
@@ -13,3 +13,8 @@ repos:
         args:
           - "--filter=-build/c++11,-build/c++17"
           - "--linelength=100"
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
