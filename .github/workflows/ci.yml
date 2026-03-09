@@ -67,6 +67,9 @@ jobs:
       - name: test_setup.sh
         run: bash tests/test_setup.sh -v
 
+      - name: test_install.sh
+        run: bash tests/test_install.sh -v
+
   # ─────────────────────────────────────────────────────────────────────────
   # 2. Build iq_metrics (C++, no hardware deps) + validate vs Python
   # ─────────────────────────────────────────────────────────────────────────

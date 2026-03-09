@@ -258,6 +258,73 @@ test_iq_dest_no_sdr_warns() {
     "only meaningful on Ray" "${out}"
 }
 
+test_no_sdr_dry_run_banner() {
+  setup_stubs
+  local out rc=0
+  out="$(run_installer --dry-run --no-sdr)" || rc=$?
+  teardown_stubs
+  assert_exit "--no-sdr dry-run exits 0" 0 "${rc}"
+  # Installer banner should announce decode-only mode
+  assert_contains "--no-sdr banner: decode-only mode line" \
+    "decode-only (--no-sdr)" "${out}"
+  # Banner should confirm dry-run
+  assert_contains "--no-sdr banner: DRY-RUN mode" \
+    "DRY-RUN mode" "${out}"
+}
+
+test_no_sdr_dry_run_installs_incoming_processor() {
+  setup_stubs
+  local out rc=0
+  out="$(run_installer --dry-run --no-sdr)" || rc=$?
+  teardown_stubs
+  assert_exit "--no-sdr dry-run exits 0 (processor)" 0 "${rc}"
+  # Should install the rf-incoming-processor path/service units
+  assert_contains "--no-sdr: installs rf-incoming-processor.path" \
+    "rf-incoming-processor.path" "${out}"
+  assert_contains "--no-sdr: enables rf-incoming-processor.path" \
+    "enable --now rf-incoming-processor.path" "${out}"
+  # Must NOT attempt to deploy process-worker
+  assert_not_contains "--no-sdr: does not install process-worker" \
+    "process-worker" "${out}"
+}
+
+test_no_sdr_dry_run_skips_sdr_packages() {
+  setup_stubs
+  local out rc=0
+  out="$(run_installer --dry-run --no-sdr)" || rc=$?
+  teardown_stubs
+  assert_exit "--no-sdr dry-run exits 0 (skip sdr pkgs)" 0 "${rc}"
+  # Should skip RTL-SDR hardware packages
+  assert_contains "--no-sdr: skips RTL-SDR packages" \
+    "skipping build tools and RTL-SDR hardware packages" "${out}"
+  # Should skip udev rule and DVB blacklist
+  assert_contains "--no-sdr: skips udev rule" \
+    "skipping udev rule and DVB blacklist setup" "${out}"
+  # Should not install rtl-sdr or librtlsdr packages
+  assert_not_contains "--no-sdr: no rtlsdr in apt args" \
+    "rtlsdr" "${out}"
+}
+
+test_no_sdr_dry_run_summary() {
+  setup_stubs
+  local out rc=0
+  out="$(run_installer --dry-run --no-sdr)" || rc=$?
+  teardown_stubs
+  assert_exit "--no-sdr dry-run exits 0 (summary)" 0 "${rc}"
+  # Summary must show Brian/decode-only mode
+  assert_contains "--no-sdr summary: decode-only mode" \
+    "decode-only (Brian)" "${out}"
+  # Summary must reference rf-incoming-processor.path
+  assert_contains "--no-sdr summary: path unit status command" \
+    "rf-incoming-processor.path" "${out}"
+  # Summary must NOT reference process-worker status command
+  assert_not_contains "--no-sdr summary: no process-worker status cmd" \
+    "systemctl status process-worker" "${out}"
+  # Next-steps must mention ssh-copy-id for Ray→Brian trust
+  assert_contains "--no-sdr summary: ssh-copy-id hint" \
+    "ssh-copy-id rf_worker" "${out}"
+}
+
 # ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
@@ -271,6 +338,10 @@ test_iq_dest_dry_run_installs_service
 test_iq_dest_dry_run_summary
 test_no_iq_dest_summary_shows_hint
 test_iq_dest_no_sdr_warns
+test_no_sdr_dry_run_banner
+test_no_sdr_dry_run_installs_incoming_processor
+test_no_sdr_dry_run_skips_sdr_packages
+test_no_sdr_dry_run_summary
 
 echo ""
 echo "Results: ${_PASS} passed, ${_FAIL} failed."
