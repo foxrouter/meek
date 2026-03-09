@@ -319,6 +319,84 @@ class TestRejectionInWorkerLog(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Config invariant tests (mirrors parse_config() logic in config.hpp)
+# ---------------------------------------------------------------------------
+
+def _parse_snapshot_conf(
+    conf_threshold: float,
+    snapshot_conf_env: Optional[float],
+) -> float:
+    """Python mirror of the parse_config() snapshot_conf logic in config.hpp.
+
+    If RF_SNAPSHOT_CONF is unset, defaults to conf_threshold.
+    If RF_SNAPSHOT_CONF is set higher than conf_threshold, clamps down to
+    conf_threshold to prevent a silent gap where DB writes have no snapshot.
+    """
+    snapshot_conf = snapshot_conf_env if snapshot_conf_env is not None else conf_threshold
+    if snapshot_conf > conf_threshold:
+        snapshot_conf = conf_threshold
+    return snapshot_conf
+
+
+class TestSnapshotConfInvariant(unittest.TestCase):
+    """Verify the snapshot_conf ≤ conf_threshold invariant from config.hpp.
+
+    A misconfigured deployment (e.g. RF_CONF_THRESHOLD=0.35 but
+    RF_SNAPSHOT_CONF left at 0.6) would silently write signals to the DB
+    without IQ snapshots, breaking decode_candidates.py offline analysis.
+    """
+
+    def test_snapshot_conf_defaults_to_conf_threshold(self):
+        """When RF_SNAPSHOT_CONF is unset it should inherit conf_threshold."""
+        for threshold in (0.35, 0.5, 0.6, 0.8):
+            with self.subTest(threshold=threshold):
+                sc = _parse_snapshot_conf(threshold, snapshot_conf_env=None)
+                self.assertEqual(sc, threshold,
+                                 "snapshot_conf must default to conf_threshold")
+
+    def test_snapshot_conf_clamped_when_above_conf_threshold(self):
+        """When RF_SNAPSHOT_CONF > conf_threshold it must be clamped down."""
+        sc = _parse_snapshot_conf(conf_threshold=0.35, snapshot_conf_env=0.6)
+        self.assertEqual(sc, 0.35,
+                         "snapshot_conf must be clamped to conf_threshold")
+
+    def test_snapshot_conf_not_raised_when_below_conf_threshold(self):
+        """When RF_SNAPSHOT_CONF < conf_threshold it should be left as-is."""
+        sc = _parse_snapshot_conf(conf_threshold=0.6, snapshot_conf_env=0.4)
+        self.assertEqual(sc, 0.4,
+                         "snapshot_conf below conf_threshold must not be raised")
+
+    def test_snapshot_conf_equal_is_accepted(self):
+        """RF_SNAPSHOT_CONF == RF_CONF_THRESHOLD is the recommended setting."""
+        sc = _parse_snapshot_conf(conf_threshold=0.6, snapshot_conf_env=0.6)
+        self.assertEqual(sc, 0.6)
+
+    def test_no_gap_between_db_gate_and_snapshot(self):
+        """Signals that pass the DB gate must always trigger a snapshot.
+
+        Simulates a signal at exactly conf_threshold + epsilon:
+        snapshot_conf must be <= conf_threshold so the snapshot fires.
+        """
+        conf_threshold = 0.35
+        # Old (broken) behaviour: snapshot_conf defaulted to 0.6
+        broken_snapshot_conf = 0.6
+        # New (fixed) behaviour: snapshot_conf inherits conf_threshold
+        fixed_snapshot_conf = _parse_snapshot_conf(conf_threshold, snapshot_conf_env=None)
+
+        signal_confidence = conf_threshold + 0.01  # just above DB gate
+
+        db_write = signal_confidence > conf_threshold
+        broken_snapshot = signal_confidence >= broken_snapshot_conf
+        fixed_snapshot = signal_confidence >= fixed_snapshot_conf
+
+        self.assertTrue(db_write, "signal should be written to DB")
+        self.assertFalse(broken_snapshot,
+                         "broken config: no snapshot for a signal that was DB-written")
+        self.assertTrue(fixed_snapshot,
+                        "fixed config: snapshot must accompany every DB write")
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
