@@ -192,7 +192,11 @@ struct ClassifyOptions {
   double bw_exp = opts.expected_bw_hz;
 
   if (opts.band) {
-    if (opts.band->snr_min_db > kBandSnrUseDefault) snr_gate = opts.band->snr_min_db;
+    // Band-specific SNR floor raises the gate but never lowers the global
+    // RF_SNR_MIN_DB setting.  Use std::max so the user-configured global
+    // value always acts as a minimum: band can only tighten the gate.
+    if (opts.band->snr_min_db > kBandSnrUseDefault)
+      snr_gate = std::max(snr_gate, opts.band->snr_min_db);
     if (bw_exp <= 0.0) bw_exp = opts.band->expected_bw_hz;
     r.band_name = std::string(opts.band->name);
     r.band_notes = std::string(opts.band->notes);

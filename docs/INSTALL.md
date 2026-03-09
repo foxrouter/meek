@@ -302,7 +302,7 @@ Key settings to review:
 |---|---|---|
 | `RF_BLOCK_LEN` | `4096` | Samples per SDR read call |
 | `RF_CONF_THRESHOLD` | `0.6` | Min confidence to write to database |
-| `RF_SNR_MIN_DB` | `0.0` | Minimum SNR gate (dB); set negative for passive mode |
+| `RF_SNR_MIN_DB` | `3.0` | Minimum SNR gate (dB); set negative for passive mode |
 | `RF_SNAPSHOT_DIR` | `/var/lib/rf-adapt-intel/snapshots` | IQ snapshot output directory |
 | `RF_SNAPSHOT_RETENTION_DAYS` | `0` | Days to keep IQ snapshots; `0` = keep forever |
 | `RF_WORKER_LOG` | `/var/lib/rf-adapt-intel/worker.log` | JSON log file |
