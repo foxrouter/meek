@@ -303,7 +303,7 @@ Key settings to review:
 | `RF_BLOCK_LEN` | `4096` | Samples per SDR read call |
 | `RF_CONF_THRESHOLD` | `0.6` | Min confidence to write to database |
 | `RF_SNAPSHOT_CONF` | *(=`RF_CONF_THRESHOLD`)* | Min confidence to write IQ snapshot; inherits `RF_CONF_THRESHOLD` if unset so every DB write gets a snapshot |
-| `RF_SNR_MIN_DB` | `3.0` | Minimum SNR gate (dB); set negative (e.g. `-999`) for passive/canary mode |
+| `RF_SNR_MIN_DB` | `3.0` | Minimum SNR gate (dB); set to `0` for passive/canary mode (see `ops/canary.sh`) |
 | `RF_SNAPSHOT_DIR` | `/var/lib/rf-adapt-intel/snapshots` | IQ snapshot output directory |
 | `RF_SNAPSHOT_RETENTION_DAYS` | `0` | Days to keep IQ snapshots; `0` = keep forever |
 | `RF_WORKER_LOG` | `/var/lib/rf-adapt-intel/worker.log` | JSON log file |
