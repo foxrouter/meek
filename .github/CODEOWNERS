@@ -2,10 +2,10 @@
 # See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
 # Daemon entry-point and all public headers require review by the maintainer.
-src/main.cpp          @foxrouter
-include/meek/         @foxrouter
+/src/main.cpp         @foxrouter
+/include/meek/        @foxrouter
 
 # CI and deployment configuration.
-.github/              @foxrouter
-systemd/              @foxrouter
-ops/                  @foxrouter
+/.github/             @foxrouter
+/systemd/             @foxrouter
+/ops/                 @foxrouter

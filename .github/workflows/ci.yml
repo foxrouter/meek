@@ -122,21 +122,21 @@ jobs:
           clang-tidy-14 tools/iq_metrics.cpp \
             --checks="$TIDY_CHECKS" \
             -- -std=c++17 $COMMON_INCLUDES \
-            2>&1 | tee /tmp/clang-tidy-iq_metrics.log
+            2>&1 | tee /tmp/clang-tidy-iq_metrics.log || true
           grep -qE "error:" /tmp/clang-tidy-iq_metrics.log && TIDY_FAIL=1 || true
 
           # src/rf_audit.cpp (C++20, no hardware deps)
           clang-tidy-14 src/rf_audit.cpp \
             --checks="$TIDY_CHECKS" \
             -- -std=c++20 $COMMON_INCLUDES \
-            2>&1 | tee /tmp/clang-tidy-rf_audit.log
+            2>&1 | tee /tmp/clang-tidy-rf_audit.log || true
           grep -qE "error:" /tmp/clang-tidy-rf_audit.log && TIDY_FAIL=1 || true
 
-          # src/main.cpp (C++20, requires SoapySDR)
+          # src/main.cpp (C++20, liquid-dsp optional code paths)
           clang-tidy-14 src/main.cpp \
             --checks="$TIDY_CHECKS" \
-            -- -std=c++20 $COMMON_INCLUDES -DHAVE_SOAPY \
-            2>&1 | tee /tmp/clang-tidy-main.log
+            -- -std=c++20 $COMMON_INCLUDES -DHAVE_LIQUID \
+            2>&1 | tee /tmp/clang-tidy-main.log || true
           grep -qE "error:" /tmp/clang-tidy-main.log && TIDY_FAIL=1 || true
 
           exit $TIDY_FAIL
