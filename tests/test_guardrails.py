@@ -83,11 +83,11 @@ def classify_with_trace(
       mod_class, confidence, decision_trace, snr_gate_pass, bw_gate_pass,
       papr_gate_pass.
 
-    band_snr_min_db mirrors the BandProfile.snr_min_db field;
-    _BAND_SNR_USE_DEFAULT (-999.0) means "use global snr_min_db unchanged".
-    When the band value is != _BAND_SNR_USE_DEFAULT the effective gate is
-    max(snr_min_db, band_snr_min_db) — the global setting acts as a floor and
-    bands can only raise it, never lower it.
+    When band_snr_min_db is strictly greater than _BAND_SNR_USE_DEFAULT the
+    effective gate is max(snr_min_db, band_snr_min_db) — the global setting
+    acts as a floor and bands can only raise it, never lower it. Values less
+    than or equal to _BAND_SNR_USE_DEFAULT (including < -999.0) are treated
+    as "use global default".
     """
     # Mirror the C++ max() logic added to classify_block():
     effective_snr_min_db = snr_min_db
@@ -348,37 +348,37 @@ class TestBandSnrOverride(unittest.TestCase):
         np.random.seed(6)
 
     def test_global_floor_beats_lower_band_value(self):
-        """Global RF_SNR_MIN_DB=5.0 must override a band snr_min_db=0.0.
+        """Global RF_SNR_MIN_DB=7.0 must override a band snr_min_db=0.0.
 
         Note: the median-based SNR estimator measures *power variance*, not
         true AWGN SNR.  FSK signals have near-constant amplitude, so even
         when synthetic AWGN at 20 dB is added the median and top-25% power
         values stay close together, producing an estimated SNR of ~1–5 dB.
-        A gate of 5.0 dB therefore reliably rejects this signal.
+        A gate of 7.0 dB therefore reliably rejects this signal with margin.
         """
         s = _awgn(_fsk2(), snr_db=20.0)
-        # Band has SNR minimum 0.0, global is 5.0 → effective gate = max(5.0, 0.0) = 5.0
-        # FSK median-estimator gives ~1-5 dB, so the signal should fail the 5 dB gate.
-        r = classify_with_trace(s, snr_min_db=5.0, band_snr_min_db=0.0)
+        # Band has SNR minimum 0.0, global is 7.0 → effective gate = max(7.0, 0.0) = 7.0
+        # FSK median-estimator gives ~1-5 dB, so the signal should fail the 7 dB gate.
+        r = classify_with_trace(s, snr_min_db=7.0, band_snr_min_db=0.0)
         self.assertFalse(
             r["snr_gate_pass"],
-            "Global SNR floor (5.0 dB) must win over lower band value (0.0 dB): "
+            "Global SNR floor (7.0 dB) must win over lower band value (0.0 dB): "
             "FSK signal should be rejected",
         )
         self.assertIn("REJECT:snr_gate", r["decision_trace"])
 
     def test_band_raises_above_global(self):
-        """Band snr_min_db=5.0 raises the gate above global RF_SNR_MIN_DB=0.0.
+        """Band snr_min_db=7.0 raises the gate above global RF_SNR_MIN_DB=0.0.
 
         The median-estimator gives ~1-5 dB for FSK (constant amplitude), so
-        a 5 dB gate rejects even a nominally high-SNR FSK signal.
+        a 7 dB gate rejects even a nominally high-SNR FSK signal with margin.
         """
         s = _awgn(_fsk2(), snr_db=20.0)
-        # Global = 0.0, band = 5.0 → effective = max(0.0, 5.0) = 5.0
-        r = classify_with_trace(s, snr_min_db=0.0, band_snr_min_db=5.0)
+        # Global = 0.0, band = 7.0 → effective = max(0.0, 7.0) = 7.0
+        r = classify_with_trace(s, snr_min_db=0.0, band_snr_min_db=7.0)
         self.assertFalse(
             r["snr_gate_pass"],
-            "Band SNR minimum (5.0 dB) must raise the gate above global (0.0 dB): "
+            "Band SNR minimum (7.0 dB) must raise the gate above global (0.0 dB): "
             "FSK signal should be rejected",
         )
         self.assertIn("REJECT:snr_gate", r["decision_trace"])

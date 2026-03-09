@@ -461,7 +461,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
         break;
     }
 
-    if (cr.confidence > cfg.conf_threshold && cr.snr_gate_pass) {
+    if (cr.confidence >= cfg.conf_threshold && cr.snr_gate_pass) {
       ++metrics.frames_candidate;
       metrics.conf_sum += cr.confidence;
 

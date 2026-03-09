@@ -34,7 +34,7 @@ struct Config {
 
   // Processing gates
   double min_power{5e-6};
-  double snr_min_db{0.0};
+  double snr_min_db{3.0};
   double expected_bw_hz{0.0};
   double papr_max_db{0.0};
   ModClass mod_hint{ModClass::UNKNOWN};
@@ -146,14 +146,21 @@ inline std::string env_str(const char* name, const char* def) {
 
   // Processing
   cfg.min_power = detail::env_d("RF_MIN_POWER", 5e-6);
-  cfg.snr_min_db = detail::env_d("RF_SNR_MIN_DB", 0.0);
+  cfg.snr_min_db = detail::env_d("RF_SNR_MIN_DB", 3.0);
   cfg.expected_bw_hz = detail::env_d("RF_EXPECTED_BW_HZ", 0.0);
   cfg.papr_max_db = detail::env_d("PAPR_MAX", 0.0);
 
   // Classifier
   cfg.conf_threshold = detail::env_d("RF_CONF_THRESHOLD", 0.6);
   cfg.console_conf = detail::env_d("RF_CONSOLE_CONF", 0.8);
-  cfg.snapshot_conf = detail::env_d("RF_SNAPSHOT_CONF", 0.6);
+  // Default snapshot_conf to conf_threshold so every signal persisted to DB
+  // also receives an IQ snapshot.  If RF_SNAPSHOT_CONF is set explicitly above
+  // conf_threshold (e.g. a stale config with a higher default), clamp it down
+  // to conf_threshold to prevent a silent gap where DB writes have no snapshot.
+  cfg.snapshot_conf = detail::env_d("RF_SNAPSHOT_CONF", cfg.conf_threshold);
+  if (cfg.snapshot_conf > cfg.conf_threshold) {
+    cfg.snapshot_conf = cfg.conf_threshold;
+  }
 
   // Demodulation
   cfg.rsym = detail::env_d("RSYM", 128'000.0);
