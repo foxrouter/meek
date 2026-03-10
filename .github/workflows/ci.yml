@@ -132,10 +132,10 @@ jobs:
             2>&1 | tee /tmp/clang-tidy-rf_audit.log || true
           grep -qE "error:" /tmp/clang-tidy-rf_audit.log && TIDY_FAIL=1 || true
 
-          # src/main.cpp (C++20, liquid-dsp optional code paths)
+          # src/main.cpp (C++20, SoapySDR hardware abstraction)
           clang-tidy-14 src/main.cpp \
             --checks="$TIDY_CHECKS" \
-            -- -std=c++20 $COMMON_INCLUDES -DHAVE_LIQUID \
+            -- -std=c++20 $COMMON_INCLUDES -DHAVE_SOAPY \
             2>&1 | tee /tmp/clang-tidy-main.log || true
           grep -qE "error:" /tmp/clang-tidy-main.log && TIDY_FAIL=1 || true
 
