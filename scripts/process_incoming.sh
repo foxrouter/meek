@@ -46,7 +46,7 @@ BW_HZ="0"
 # First, try to extract the structured _b<band> tag embedded by rf_adapt_intel v3+.
 # This avoids false positives from numeric substrings in timestamps or directories.
 MATCHED_BAND=""
-if [[ "${BASENAME}" =~ _b([A-Za-z0-9_-]+)\. ]]; then
+if [[ "${BASENAME}" =~ _b([A-Za-z0-9_-]+)\.(cf32|raw)$ ]]; then
   MATCHED_BAND="${BASH_REMATCH[1]}"
 fi
 
