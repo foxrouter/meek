@@ -35,7 +35,7 @@ If liquid-dsp is installed, CMake will detect it automatically via pkg-config an
 
 - **Runtime configuration** is done exclusively via environment variables (e.g., `RF_BLOCK_LEN`, `RF_CONF_THRESHOLD`, `RF_SNAPSHOT_DIR`). Use the `env_to_*` helpers in `src/main.cpp` for new parameters.
 - **Thread model:** one capture thread → lock-free `SpscRingBuffer<SampleBlock, 64>` → one processing thread → `SpscRingBuffer<ClassificationResult, 64>` → one output thread.
-- **SQLite writes** happen only on the processing thread; never write to DB from the capture thread or snapshot worker.
+- **SQLite writes** happen only on the output thread; never write to DB from the capture thread or snapshot worker.
 - **Snapshot worker** is a single background `snap_thread` (`std::jthread`) with a `std::deque<SnapTask>` task queue (guarded by a mutex); it writes IQ snapshots to disk without blocking the processing thread.
 - **Signal handling:** `SIGINT`/`SIGTERM` set the `g_shutdown` atomic flag; all thread loops check `g_shutdown` or their `std::stop_token`.
 - **Band profiles:** `kUkBands` (`constexpr std::array<BandProfile, 33>`) in `include/meek/band_profiles.hpp` defines 33 frequency bands with per-band SNR, BW, and `prior_boost` fields.
