@@ -86,7 +86,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             ninja-build clang-14 clang-format-14 clang-tidy-14 \
-            pkg-config python3 python3-pip libsqlite3-dev
+            pkg-config python3 python3-pip libsqlite3-dev libsoapysdr-dev
           sudo ln -sf /usr/bin/clang-format-14 /usr/local/bin/clang-format
           sudo ln -sf /usr/bin/clang-tidy-14   /usr/local/bin/clang-tidy
           # Ensure cmake >= 3.25 (Ubuntu 22.04 ships 3.22 via apt)
@@ -114,13 +114,32 @@ jobs:
 
       - name: clang-tidy static analysis
         run: |
+          TIDY_CHECKS="-*,clang-analyzer-*,bugprone-*,modernize-*,performance-*,readability-*"
+          COMMON_INCLUDES="-I include -I build/_deps/nlohmann_json-src/include"
+          TIDY_FAIL=0
+
+          # tools/iq_metrics.cpp (C++17, no hardware deps)
           clang-tidy-14 tools/iq_metrics.cpp \
-            --checks="-*,clang-analyzer-*,bugprone-*,modernize-*,performance-*,readability-*" \
-            -- -std=c++17 \
-            -I build/_deps/nlohmann_json-src/include \
-            2>&1 | tee /tmp/clang-tidy.log
-          # Fail if any error-level findings
-          grep -qE "error:" /tmp/clang-tidy.log && exit 1 || true
+            --checks="$TIDY_CHECKS" \
+            -- -std=c++17 $COMMON_INCLUDES \
+            2>&1 | tee /tmp/clang-tidy-iq_metrics.log || true
+          grep -qE "error:" /tmp/clang-tidy-iq_metrics.log && TIDY_FAIL=1 || true
+
+          # src/rf_audit.cpp (C++20, no hardware deps)
+          clang-tidy-14 src/rf_audit.cpp \
+            --checks="$TIDY_CHECKS" \
+            -- -std=c++20 $COMMON_INCLUDES \
+            2>&1 | tee /tmp/clang-tidy-rf_audit.log || true
+          grep -qE "error:" /tmp/clang-tidy-rf_audit.log && TIDY_FAIL=1 || true
+
+          # src/main.cpp (C++20, SoapySDR hardware abstraction)
+          clang-tidy-14 src/main.cpp \
+            --checks="$TIDY_CHECKS" \
+            -- -std=c++20 $COMMON_INCLUDES -DHAVE_SOAPY \
+            2>&1 | tee /tmp/clang-tidy-main.log || true
+          grep -qE "error:" /tmp/clang-tidy-main.log && TIDY_FAIL=1 || true
+
+          exit $TIDY_FAIL
 
       - name: Validate C++ output vs Python reference
         run: python3 tests/test_iq_metrics.py build/iq_metrics -v
