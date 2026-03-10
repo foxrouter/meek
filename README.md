@@ -107,9 +107,9 @@ flowchart LR
     end
 
     subgraph Processing
-        rb1(["SpscRingBuffer\n&lt;SampleBlock, 64&gt;"])
+        rb1(["SpscRingBuffer\n<SampleBlock, 64>"])
         proc["proc_thread\nclassify_block()"]
-        rb2(["SpscRingBuffer\n&lt;ClassificationResult, 64&gt;"])
+        rb2(["SpscRingBuffer\n<ClassificationResult, 64>"])
         cap --> rb1 --> proc --> rb2
     end
 
