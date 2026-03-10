@@ -99,6 +99,9 @@ fi
 run sudo mkdir -p /var/lib/rf-adapt-intel/{snapshots,incoming,processed}
 run sudo chown -R rf_worker:rf_worker /var/lib/rf-adapt-intel
 run sudo chmod 0750 /var/lib/rf-adapt-intel
+run sudo chmod 0750 /var/lib/rf-adapt-intel/snapshots
+run sudo chmod 0750 /var/lib/rf-adapt-intel/incoming
+run sudo chmod 0750 /var/lib/rf-adapt-intel/processed
 
 # Verify the directory is accessible by rf_worker before starting the service
 if ! $DRY_RUN; then

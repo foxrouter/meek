@@ -433,6 +433,9 @@ deploy_incoming_processor() {
   run sudo mkdir -p /var/lib/rf-adapt-intel/{incoming,processed,snapshots}
   run sudo chown -R rf_worker:rf_worker /var/lib/rf-adapt-intel
   run sudo chmod 0750 /var/lib/rf-adapt-intel
+  run sudo chmod 0750 /var/lib/rf-adapt-intel/snapshots
+  run sudo chmod 0750 /var/lib/rf-adapt-intel/incoming
+  run sudo chmod 0750 /var/lib/rf-adapt-intel/processed
 
   # Install Python tools so decode_candidates.py is accessible
   run sudo mkdir -p "${share_dir}/tools"
