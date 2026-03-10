@@ -22,15 +22,15 @@ Key file sizes:
 
 | File | Lines | Language | Role |
 |------|------:|----------|------|
-| `src/main.cpp` | ~580 | C++20 | Core capture → classify → DB persist loop |
+| `src/main.cpp` | ~700 | C++20 | Core capture → classify → DB persist loop |
 | `tools/decode_candidates.py` | 838 | Python 3 | Offline signal audit / decode report |
 | `tools/autotune_thresholds.py` | 551 | Python 3 | Threshold optimisation from IQ snapshots |
 | `tools/soapy_read_test.cpp` | ~75 | C++20 | SoapySDR stream diagnostic |
-| `CMakeLists.txt` | 96 | CMake | Build system for C++ targets + CTest |
-| `install.sh` | ~280 | Bash | One-shot installer (Bookworm / Noble) |
-| `ops/deploy.sh` | ~200 | Bash | Systemd deployment + firewall hardening |
-| `ops/canary.sh` | ~150 | Bash | Canary rollout / promotion / rollback |
-| `ops/setup.sh` | ~330 | Bash | Optional decoder setup (multimon-ng, rtl_433, liquid-dsp) |
+| `CMakeLists.txt` | ~239 | CMake | Build system for C++ targets + CTest |
+| `install.sh` | ~569 | Bash | One-shot installer (Bookworm / Noble) |
+| `ops/deploy.sh` | ~136 | Bash | Systemd deployment + firewall hardening |
+| `ops/canary.sh` | ~328 | Bash | Canary rollout / promotion / rollback |
+| `ops/setup.sh` | ~417 | Bash | Optional decoder setup (multimon-ng, rtl_433, liquid-dsp) |
 
 ---
 
@@ -110,7 +110,7 @@ Run `cppcheck` or `clang-tidy` on C++ sources (integrated into CI — see §5).
 |----------|---------------|-------|
 | `classify_block()` | **High** — O(N log N) sort for PAPR; O(N) for all power/entropy features | Called every IQ block; 2 048 000 samples/s → ~640 blocks/s at 3200-sample blocks |
 | `write_json_log()` | Medium | File I/O per classified block; uses `append` mode |
-| `snap_thread` | Low | Async `std::jthread`; unbounded queue (mutex-protected `std::deque`); no contention with classifier |
+| `snap_thread` | Low | Async `std::jthread`; mutex-protected `std::deque` capped at 64 entries; no contention with classifier |
 | `sqlite3_exec` | Low | One INSERT per block; consider WAL mode for higher throughput |
 
 ### 4b. Python tools
