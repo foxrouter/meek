@@ -283,9 +283,12 @@ test_no_sdr_dry_run_installs_incoming_processor() {
     "rf-incoming-processor.path" "${out}"
   assert_contains "--no-sdr: enables rf-incoming-processor.path" \
     "enable --now rf-incoming-processor.path" "${out}"
-  # Must NOT attempt to deploy process-worker
-  assert_not_contains "--no-sdr: does not install process-worker" \
-    "process-worker" "${out}"
+  # Must NOT attempt to enable/start process-worker
+  assert_not_contains "--no-sdr: does not enable process-worker" \
+    "enable --now process-worker" "${out}"
+  # Must stop/disable any previously-running process-worker
+  assert_contains "--no-sdr: disables process-worker if previously installed" \
+    "disable --now process-worker" "${out}"
 }
 
 test_no_sdr_dry_run_skips_sdr_packages() {
@@ -303,6 +306,9 @@ test_no_sdr_dry_run_skips_sdr_packages() {
   # Should not install rtl-sdr or librtlsdr packages
   assert_not_contains "--no-sdr: no rtlsdr in apt args" \
     "rtlsdr" "${out}"
+  # Should not install SoapySDR packages (not needed on decode-only nodes)
+  assert_not_contains "--no-sdr: no soapysdr in apt args" \
+    "soapysdr" "${out}"
 }
 
 test_no_sdr_dry_run_summary() {
@@ -325,6 +331,29 @@ test_no_sdr_dry_run_summary() {
     "ssh-copy-id rf_worker" "${out}"
 }
 
+test_no_sdr_all_decoders_dry_run() {
+  setup_stubs
+  local out rc=0
+  out="$(run_installer --dry-run --no-sdr --all-decoders)" || rc=$?
+  teardown_stubs
+  assert_exit "--no-sdr --all-decoders dry-run exits 0" 0 "${rc}"
+  # Must invoke the decoder setup script
+  assert_contains "--no-sdr --all-decoders: invokes ops/setup.sh" \
+    "ops/setup.sh" "${out}"
+  # Must deploy the incoming-file processor (not the SDR capture service)
+  assert_contains "--no-sdr --all-decoders: deploys rf-incoming-processor.path" \
+    "rf-incoming-processor.path" "${out}"
+  # Must NOT start/enable process-worker
+  assert_not_contains "--no-sdr --all-decoders: does not enable process-worker" \
+    "enable --now process-worker" "${out}"
+  # Must stop/disable any previously-running process-worker
+  assert_contains "--no-sdr --all-decoders: disables process-worker" \
+    "disable --now process-worker" "${out}"
+  # Must not install SoapySDR packages
+  assert_not_contains "--no-sdr --all-decoders: no soapysdr in apt args" \
+    "soapysdr" "${out}"
+}
+
 # ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
@@ -342,6 +371,7 @@ test_no_sdr_dry_run_banner
 test_no_sdr_dry_run_installs_incoming_processor
 test_no_sdr_dry_run_skips_sdr_packages
 test_no_sdr_dry_run_summary
+test_no_sdr_all_decoders_dry_run
 
 echo ""
 echo "Results: ${_PASS} passed, ${_FAIL} failed."

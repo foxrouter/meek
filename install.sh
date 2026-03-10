@@ -152,8 +152,6 @@ install_deps() {
   # Runtime and tooling packages needed on both SDR and decode-only nodes
   local pkgs=(
     git
-    libsoapysdr-dev
-    soapysdr-tools
     python3
     python3-numpy
     inotify-tools
@@ -165,6 +163,8 @@ install_deps() {
   else
     # Build tools — only needed on nodes that compile rf_adapt_intel
     pkgs+=(build-essential cmake pkg-config libsqlite3-dev)
+    # SoapySDR — only needed on SDR nodes (compile-time headers + runtime + utilities)
+    pkgs+=(libsoapysdr-dev soapysdr-tools)
     # SDR hardware packages — only needed on nodes with an attached RTL-SDR dongle
     pkgs+=(rtl-sdr librtlsdr-dev)
     # SoapySDR RTL-SDR plugin name is the same on Bookworm and Noble
@@ -399,6 +399,15 @@ deploy_incoming_processor() {
   log "Deploying rf-incoming-processor (path + service) for decode-only node..."
   local unit_dir="/etc/systemd/system"
   local share_dir="/usr/local/share/rf-adapt-intel"
+
+  # If process-worker was previously deployed (e.g. migrating from a full SDR
+  # node to a decode-only node), stop and disable it so it does not continue
+  # capturing on a node that has no attached SDR hardware.
+  if systemctl is-enabled process-worker &>/dev/null || \
+     systemctl is-active process-worker &>/dev/null; then
+    info "Stopping and disabling process-worker (not needed on decode-only nodes)..."
+    run sudo systemctl disable --now process-worker 2>/dev/null || true
+  fi
 
   # Install the path unit and service pair
   run sudo install -m 644 -o root -g root \
