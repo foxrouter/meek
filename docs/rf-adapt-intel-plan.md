@@ -22,7 +22,7 @@
 - Service hardening/deploy: ✅ `systemd/process-worker.service` + drop-ins (`hardening.conf`, `override.conf`, `processor.conf`) committed; `ops/deploy.sh`, `ops/verify.sh`, `ops/setup.sh` all committed.
 - liquid-dsp build (Ray): ✅ `ops/setup.sh --install-liquid-dsp` builds from source (NEON auto-detected by configure); HAVE_LIQUID conditional integration in `main.cpp` is ⏳ pending.
 - UK band profile table: ✅ 33 profiles in `kUkBands` (`include/meek/band_profiles.hpp`) with `find_band()`, per-band SNR overrides, BW hints, and prior_boost committed.
-- Heartbeat + Prometheus textfile: ✅ written by processing thread every 10 s in `main.cpp`; also `scripts/heartbeat_and_metrics.sh` for standalone use.
+- Heartbeat + Prometheus textfile: ✅ written by output thread (`output_loop`) in `main.cpp`; Prometheus textfile every 5 s, heartbeat every 30 s; also `scripts/heartbeat_and_metrics.sh` for standalone use.
 - JSON logging: ✅ `write_json_log()` emits `decision_trace`, `confidence`, all features, band name/notes to `worker.log`.
 - SNR / BW guardrails: ✅ `classify_block()` enforces SNR gate and ±25% BW guardrail; per-band overrides via `BandProfile`.
 - Snapshot worker: ✅ single background thread with task queue; clean shutdown (no detached threads).

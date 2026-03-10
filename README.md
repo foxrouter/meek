@@ -410,7 +410,7 @@ docker run --rm rf-adapt-intel:latest ctest --test-dir /build -V
 
 IQ snapshot files (`.cf32`) accumulate in `RF_SNAPSHOT_DIR` and can fill disk on
 long-running deployments. Set `RF_SNAPSHOT_RETENTION_DAYS` to automatically prune
-files older than *N* days (checked once per hour by the worker):
+files older than *N* days (checked once per day by the worker):
 
 ```bash
 # /etc/rf_worker/thresholds.env

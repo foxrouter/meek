@@ -23,9 +23,9 @@ Add a Doxygen comment block to the classify_block() function.
 
 ## Key architecture notes Copilot should know
 
-- **Thread model:** one capture thread → lock-free `SpscRingBuffer<T, 64>` → one processing thread.
+- **Thread model:** three-stage pipeline — `capture_thread` → `SpscRingBuffer<SampleBlock, 64>` → `proc_thread` → `SpscRingBuffer<ClassificationResult, 64>` → `output_thread`.
 - **Snapshot worker:** single background `snap_thread` (`std::jthread`) with a task queue — no detached threads.
-- **SQLite writes:** processing thread only; never from the capture thread.
+- **SQLite writes:** `output_thread` only; never from the capture or proc threads.
 - **Signal handling:** `SIGINT`/`SIGTERM` set the `g_shutdown` atomic flag; all thread loops check it.
 - **Env vars:** all runtime configuration comes from environment variables; use the `env_to_*` helpers for new parameters.
 - **liquid-dsp:** guarded by `#ifdef HAVE_LIQUID`; CMake auto-detects via pkg-config or CMake config.
