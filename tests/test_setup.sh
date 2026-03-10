@@ -100,17 +100,24 @@ EOF
 exit 0
 EOF
 
-  # stub: git — pretend clone succeeded by creating a minimal dir structure
-  cat > "${_STUB_DIR}/git" <<'EOF'
+  # Extract the expected commit hash from setup.sh so the stub can echo it back.
+  local _expected_commit
+  _expected_commit=$(grep '^LIQUID_DSP_EXPECTED_COMMIT=' "${SETUP}" | cut -d'"' -f2)
+
+  # stub: git — pretend clone succeeded by creating a minimal dir structure;
+  # echo the expected commit on "rev-parse HEAD" so verification passes.
+  cat > "${_STUB_DIR}/git" <<EOF
 #!/usr/bin/env bash
-# Stub: git clone creates empty target dir
-if [[ "${1:-}" == "clone" ]]; then
-  # ${*: -1} extracts the last argument (the clone destination directory)
-  dest="${*: -1}"
-  mkdir -p "${dest}"
+# Stub: git clone creates empty target dir; rev-parse returns expected commit
+if [[ "\${1:-}" == "clone" ]]; then
+  # \${*: -1} extracts the last argument (the clone destination directory)
+  dest="\${*: -1}"
+  mkdir -p "\${dest}"
   # Minimal autoconf stubs so setup.sh bootstrap steps succeed
-  touch "${dest}/bootstrap.sh"
-  chmod +x "${dest}/bootstrap.sh"
+  touch "\${dest}/bootstrap.sh"
+  chmod +x "\${dest}/bootstrap.sh"
+elif [[ "\${1:-}" == "-C" && "\${3:-}" == "rev-parse" && "\${4:-}" == "HEAD" ]]; then
+  echo "${_expected_commit}"
 fi
 exit 0
 EOF
@@ -175,6 +182,35 @@ test_dry_run_liquid_dsp() {
   teardown_stubs
   assert_exit "--install-liquid-dsp --dry-run exits 0" 0 "${rc}"
   assert_contains "--dry-run: liquid-dsp in output" "liquid-dsp" "${out}"
+  # Verify the clone is pinned to the declared version tag (not HEAD).
+  local liq_tag
+  liq_tag=$(grep '^LIQUID_DSP_GIT_TAG=' "${SETUP}" | cut -d'"' -f2)
+  assert_contains "--dry-run: clones specific version tag" "${liq_tag}" "${out}"
+}
+
+test_liquid_dsp_commit_mismatch_fails() {
+  setup_stubs
+  # Override the git stub so rev-parse returns an all-zero (wrong) commit hash.
+  cat > "${_STUB_DIR}/git" <<'EOF'
+#!/usr/bin/env bash
+# Stub: clone creates dir; rev-parse returns a deliberately wrong hash.
+if [[ "${1:-}" == "clone" ]]; then
+  dest="${*: -1}"
+  mkdir -p "${dest}"
+  touch "${dest}/bootstrap.sh"
+  chmod +x "${dest}/bootstrap.sh"
+elif [[ "${1:-}" == "-C" && "${3:-}" == "rev-parse" && "${4:-}" == "HEAD" ]]; then
+  echo "0000000000000000000000000000000000000000"
+fi
+exit 0
+EOF
+  chmod +x "${_STUB_DIR}/git"
+
+  local out rc=0
+  out="$(run_setup --non-interactive --install-liquid-dsp)" || rc=$?
+  teardown_stubs
+  assert_exit "commit mismatch: exits non-zero" 1 "${rc}"
+  assert_contains "commit mismatch: error message shown" "commit hash mismatch" "${out}"
 }
 
 test_dry_run_all_flags() {
@@ -220,6 +256,7 @@ test_no_decoders_exits_zero
 test_dry_run_multimon
 test_dry_run_rtl_433
 test_dry_run_liquid_dsp
+test_liquid_dsp_commit_mismatch_fails
 test_dry_run_all_flags
 test_non_interactive_no_tty
 test_platform_check_runs
