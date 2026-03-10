@@ -138,8 +138,10 @@ def query_candidates(
 # Snapshot file helpers
 # ---------------------------------------------------------------------------
 
-# Filename pattern: snap_<ts_ns>_c<conf_pct>.cf32
-_SNAP_RE = re.compile(r"^snap_(\d+)_c(\d+)\.cf32$")
+# Filename patterns:
+#   Legacy:     snap_<ts_ns>_c<conf_pct>.cf32
+#   With band:  snap_<ts_ns>_c<conf_pct>_b<band_name>.cf32  (rf_adapt_intel v3+)
+_SNAP_RE = re.compile(r"^snap_(\d+)_c(\d+)(?:_b([A-Za-z0-9_\-]+))?\.cf32$")
 
 
 def index_snapshots(snap_dir: str) -> List[Dict[str, Any]]:
@@ -160,6 +162,7 @@ def index_snapshots(snap_dir: str) -> List[Dict[str, Any]]:
             {
                 "ts_ns":      int(m.group(1)),
                 "conf_pct":   int(m.group(2)),
+                "band_name":  m.group(3) or "",
                 "path":       fpath,
                 "filename":   fname,
                 "mtime":      st.st_mtime,
