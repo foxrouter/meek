@@ -19,9 +19,11 @@
     HTTP /metrics (optional)  RF_PROMETHEUS_PORT
 */
 
+#ifdef HAVE_SOAPY
 #include <SoapySDR/Device.h>
 #include <SoapySDR/Formats.h>
 #include <SoapySDR/Version.h>
+#endif  // HAVE_SOAPY
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -61,6 +63,8 @@ using json = nlohmann::json;
 // ---------------------------------------------------------------------------
 // SoapySdrSource implementation
 // ---------------------------------------------------------------------------
+
+#ifdef HAVE_SOAPY
 
 SoapySdrSource::SoapySdrSource(double center_freq, double sample_rate, double gain,
                                long long read_timeout_us)
@@ -153,6 +157,8 @@ std::ptrdiff_t SoapySdrSource::read_samples(std::span<std::complex<float>> buf) 
     return -1;
   return static_cast<std::ptrdiff_t>(n);
 }
+
+#endif  // HAVE_SOAPY
 
 // ---------------------------------------------------------------------------
 // Signal handling
@@ -563,6 +569,7 @@ int main(int argc, char** argv) {
   }
 
   std::unique_ptr<ISdrSource> sdr;
+#ifdef HAVE_SOAPY
   try {
     sdr = std::make_unique<SoapySdrSource>(cfg.center_freq, cfg.sample_rate, cfg.gain,
                                            cfg.read_timeout_us);
@@ -571,6 +578,11 @@ int main(int argc, char** argv) {
     std::cerr << "Failed to open SDR device: " << e.what() << "\n";
     return 1;
   }
+#else
+  std::cerr << "[FATAL] Built without SoapySDR support (HAVE_SOAPY is not defined).\n"
+            << "  Rebuild with BUILD_HARDWARE_TARGETS=ON and SoapySDR installed.\n";
+  return 1;
+#endif  // HAVE_SOAPY
 
   SpscRingBuffer<SampleBlock, 64> cap_to_proc;
   SpscRingBuffer<ClassificationResult, 64> proc_to_out;
