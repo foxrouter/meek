@@ -337,8 +337,9 @@ class TestSnapshotMatching(unittest.TestCase):
         shutil.rmtree(self._tmp)
 
     def _make_snap(self, ts_ns: int, conf_pct: int,
-                   samples: np.ndarray) -> str:
-        fname = f"snap_{ts_ns}_c{conf_pct}.cf32"
+                   samples: np.ndarray, band: str = "") -> str:
+        band_suffix = f"_b{band}" if band else ""
+        fname = f"snap_{ts_ns}_c{conf_pct}{band_suffix}.cf32"
         path  = os.path.join(self._tmp, fname)
         with open(path, "wb") as fh:
             fh.write(cf32_bytes(samples))
@@ -381,6 +382,31 @@ class TestSnapshotMatching(unittest.TestCase):
     def test_missing_snapshot_dir(self):
         snaps = dc.index_snapshots("/nonexistent/path")
         self.assertEqual(snaps, [])
+
+    def test_index_with_band_tag(self):
+        """Files with _b<band> tag are indexed and band_name is extracted."""
+        self._make_snap(2_000_000, 800, np.ones(32, dtype=np.complex64), band="ISM-433")
+        snaps = dc.index_snapshots(self._tmp)
+        self.assertEqual(len(snaps), 1)
+        self.assertEqual(snaps[0]["band_name"], "ISM-433")
+        self.assertEqual(snaps[0]["conf_pct"], 800)
+
+    def test_index_without_band_tag_has_empty_band_name(self):
+        """Legacy files without _b<band> tag still index with empty band_name."""
+        self._make_snap(3_000_000, 700, np.ones(32, dtype=np.complex64))
+        snaps = dc.index_snapshots(self._tmp)
+        self.assertEqual(len(snaps), 1)
+        self.assertEqual(snaps[0]["band_name"], "")
+
+    def test_index_mixed_legacy_and_banded(self):
+        """Legacy and banded snapshots can coexist in the same directory."""
+        self._make_snap(4_000_000, 650, np.ones(32, dtype=np.complex64))
+        self._make_snap(5_000_000, 900, np.ones(32, dtype=np.complex64), band="LORA-868")
+        snaps = dc.index_snapshots(self._tmp)
+        self.assertEqual(len(snaps), 2)
+        by_ts = {s["ts_ns"]: s for s in snaps}
+        self.assertEqual(by_ts[4_000_000]["band_name"], "")
+        self.assertEqual(by_ts[5_000_000]["band_name"], "LORA-868")
 
 
 # ---------------------------------------------------------------------------

@@ -175,13 +175,17 @@ static void handle_term(int) noexcept {
 // ---------------------------------------------------------------------------
 
 static void write_snapshot(const std::string& dir, std::span<const std::complex<float>> samples,
-                           double conf, std::uint64_t ts_ns,
+                           double conf, std::uint64_t ts_ns, const std::string& band_name,
                            std::atomic<std::uint64_t>& snap_errors) noexcept {
   try {
     std::filesystem::create_directories(dir);
     const int conf_pct = static_cast<int>(conf * 100.0);
     std::ostringstream name;
-    name << dir << "/snap_" << ts_ns << "_c" << conf_pct << ".cf32";
+    name << dir << "/snap_" << ts_ns << "_c" << conf_pct;
+    if (!band_name.empty()) {
+      name << "_b" << band_name;
+    }
+    name << ".cf32";
     std::ofstream ofs(name.str(), std::ios::binary);
     if (!ofs) {
       snap_errors.fetch_add(1, std::memory_order_relaxed);
@@ -256,6 +260,7 @@ struct SnapTask {
   std::string dir;
   double conf{0.0};
   std::uint64_t ts_ns{0};
+  std::string band_name;  // embedded in filename; empty when no band matched
 };
 
 // ---------------------------------------------------------------------------
@@ -392,6 +397,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
         task.dir = cfg.snapshot_dir;
         task.conf = cr.confidence;
         task.ts_ns = cr.timestamp_ns;
+        task.band_name = band ? std::string(band->name) : "";
         snap_queue.push_back(std::move(task));
       } else {
         snap_dropped.fetch_add(1, std::memory_order_relaxed);
@@ -606,7 +612,7 @@ int main(int argc, char** argv) {
         }
       }
       if (!task.samples.empty()) {
-        write_snapshot(task.dir, std::span{task.samples}, task.conf, task.ts_ns, snap_errors);
+        write_snapshot(task.dir, std::span{task.samples}, task.conf, task.ts_ns, task.band_name, snap_errors);
       } else {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
       }
@@ -619,7 +625,7 @@ int main(int argc, char** argv) {
       remaining = std::move(snap_queue);
     }
     for (auto& t : remaining) {
-      write_snapshot(t.dir, std::span{t.samples}, t.conf, t.ts_ns, snap_errors);
+      write_snapshot(t.dir, std::span{t.samples}, t.conf, t.ts_ns, t.band_name, snap_errors);
     }
   });
 
