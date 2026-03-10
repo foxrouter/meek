@@ -397,7 +397,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
         task.dir = cfg.snapshot_dir;
         task.conf = cr.confidence;
         task.ts_ns = cr.timestamp_ns;
-        task.band_name = band ? std::string(band->name) : "";
+        task.band_name = cr.band_name;
         snap_queue.push_back(std::move(task));
       } else {
         snap_dropped.fetch_add(1, std::memory_order_relaxed);
