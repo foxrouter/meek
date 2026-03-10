@@ -403,10 +403,19 @@ deploy_incoming_processor() {
   # If process-worker was previously deployed (e.g. migrating from a full SDR
   # node to a decode-only node), stop and disable it so it does not continue
   # capturing on a node that has no attached SDR hardware.
-  if systemctl is-enabled process-worker &>/dev/null || \
-     systemctl is-active process-worker &>/dev/null; then
-    info "Stopping and disabling process-worker (not needed on decode-only nodes)..."
-    run sudo systemctl disable --now process-worker 2>/dev/null || true
+  if command -v systemctl &>/dev/null; then
+    if $DRY_RUN; then
+      # Skip live probes in dry-run; just show the intended action.
+      info "Stopping and disabling process-worker (not needed on decode-only nodes)..."
+      run sudo systemctl disable --now process-worker
+    elif systemctl is-enabled process-worker &>/dev/null || \
+         systemctl is-active process-worker &>/dev/null; then
+      info "Stopping and disabling process-worker (not needed on decode-only nodes)..."
+      if ! sudo systemctl disable --now process-worker; then
+        warn "Failed to disable/stop process-worker; it may still be running."
+        warn "Please run 'systemctl status process-worker' and stop/disable it manually."
+      fi
+    fi
   fi
 
   # Install the path unit and service pair
