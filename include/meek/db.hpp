@@ -84,12 +84,26 @@ inline std::unique_ptr<Database> Database::open(const std::string& path) {
   auto db = std::unique_ptr<Database>(new Database(raw));
   sqlite3_exec(raw, "PRAGMA foreign_keys = ON;", nullptr, nullptr, nullptr);
   // WAL mode: reduces write-contention when readers and writer coexist.
+  // The callback captures the journal mode returned by SQLite so we can
+  // confirm WAL was actually applied (SQLITE_OK alone is not sufficient —
+  // some filesystems silently ignore the request and stay in delete mode).
   {
     char* wal_err = nullptr;
-    if (sqlite3_exec(raw, "PRAGMA journal_mode = WAL;", nullptr, nullptr, &wal_err) != SQLITE_OK) {
+    std::string actual_mode;
+    auto mode_cb = [](void* ctx, int argc, char** argv, char**) -> int {
+      if (argc > 0 && argv[0] && argv[0][0] != '\0')
+        *static_cast<std::string*>(ctx) = argv[0];
+      return 0;
+    };
+    const int wal_rc =
+        sqlite3_exec(raw, "PRAGMA journal_mode = WAL;", mode_cb, &actual_mode, &wal_err);
+    if (wal_rc != SQLITE_OK) {
       std::cerr << "[DB] journal_mode WAL failed: " << (wal_err ? wal_err : sqlite3_errmsg(raw))
                 << " - using default journal mode\n";
       sqlite3_free(wal_err);
+    } else if (actual_mode != "wal") {
+      std::cerr << "[DB] journal_mode WAL not available (continuing with journal_mode='"
+                << actual_mode << "')\n";
     }
   }
   sqlite3_exec(raw, "PRAGMA synchronous = NORMAL;", nullptr, nullptr, nullptr);

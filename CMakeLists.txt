@@ -228,6 +228,12 @@ if(PYTHON3_EXECUTABLE)
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
   )
   set_tests_properties(test_iq_metrics PROPERTIES DEPENDS iq_metrics)
+  # SQLite WAL mode availability and behaviour
+  add_test(
+    NAME test_db_wal
+    COMMAND ${PYTHON3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_db_wal.py
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  )
 endif()
 
 if(BASH_EXECUTABLE)
