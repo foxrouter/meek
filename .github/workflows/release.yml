@@ -73,7 +73,7 @@ jobs:
               repo:  context.repo.repo,
               tag_name:   "${{ github.event.inputs.version }}",
               name:       "Release ${{ github.event.inputs.version }}",
-              body:       `${{ steps.notes.outputs.notes }}`,
+              body:       ${{ toJSON(steps.notes.outputs.notes) }},
               prerelease: ${{ github.event.inputs.prerelease }},
               draft:      false,
             });
