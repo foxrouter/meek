@@ -1,5 +1,7 @@
 # RF Process Worker (`rf_adapt_intel`)
 
+[![CI](https://github.com/foxrouter/meek/actions/workflows/ci.yml/badge.svg)](https://github.com/foxrouter/meek/actions/workflows/ci.yml)
+
 A C++20 RF signal-processing worker that captures IQ samples via SoapySDR,
 classifies modulation (GMSK/FSK/PSK/QAM/OOK), and persists results to SQLite.
 Deployed as a hardened systemd service on embedded Linux (Raspberry Pi and Ubuntu server).
@@ -37,6 +39,7 @@ and troubleshooting.
 
 ## Table of contents
 
+- [Architecture](#architecture)
 - [Layout](#layout)
 - [Prerequisites](#prerequisites)
 - [Build](#build)
@@ -90,6 +93,50 @@ Key files:
 | `tests/gen_test_signals.py` | Synthetic RRC-shaped IQ vector generator |
 | `tests/test_iq_metrics.py` | Validates C++ `iq_metrics` output against the Python reference |
 | `benchmarks/bench_iq_metrics.py` | Python-vs-C++ throughput benchmark for IQ metrics |
+
+## Architecture
+
+The worker runs a three-stage lock-free pipeline:
+
+```mermaid
+flowchart LR
+    subgraph Capture
+        SDR["SDR hardware\n(SoapySDR)"]
+        cap["cap_thread"]
+        SDR -->|IQ samples| cap
+    end
+
+    subgraph Processing
+        rb1(["SpscRingBuffer\n<SampleBlock, 64>"])
+        proc["proc_thread\nclassify_block()"]
+        rb2(["SpscRingBuffer\n<ClassificationResult, 64>"])
+        cap --> rb1 --> proc --> rb2
+    end
+
+    subgraph Output
+        out["out_thread\noutput_loop()"]
+        db[("SQLite\nrf_adapt_intel.db")]
+        prom["Prometheus\ntextfile metrics"]
+        rb2 --> out
+        out -->|"db.insert_signal\ndb.insert_example"| db
+        out -->|"every 5 s"| prom
+    end
+
+    subgraph Snapshot
+        sq[/"snap_queue\n(deque, max 64)"/]
+        snap["snap_thread\n(std::jthread)"]
+        sq -->|".cf32 IQ files"| snap
+    end
+
+    proc -->|"enqueue SnapTask"| sq
+```
+
+Key design decisions:
+- **Lock-free ring buffers** (`SpscRingBuffer<T, 64>`) decouple capture, processing, and output at runtime.
+- **SQLite writes** happen exclusively on the output thread, preventing contention with the capture thread.
+- **Snapshot worker** (`snap_thread`, `std::jthread`) handles IQ snapshot I/O from a bounded task queue (capped at 64 entries) without blocking the processing thread.
+- **Cooperative shutdown** via the `g_shutdown` atomic flag and `std::stop_token` lets all threads drain cleanly on `SIGINT`/`SIGTERM`.
+- **33 band profiles** (`kUkBands`) provide per-band SNR, bandwidth, and prior-boost parameters for the classifier.
 
 ## Prerequisites
 
@@ -393,6 +440,50 @@ docker build -t rf-adapt-intel:latest .
 
 # Run the full CTest suite inside the container
 docker run --rm rf-adapt-intel:latest ctest --test-dir /build -V
+```
+
+### Running `iq_metrics` inside the container
+
+```bash
+# Analyse IQ snapshot files from the host (mount the directory read-only)
+docker run --rm \
+  -v /var/lib/rf-adapt-intel/snapshots:/snapshots:ro \
+  rf-adapt-intel:latest \
+  /build/iq_metrics /snapshots/snap_*.cf32
+
+# Override sample rate
+docker run --rm \
+  -v /var/lib/rf-adapt-intel/snapshots:/snapshots:ro \
+  rf-adapt-intel:latest \
+  /build/iq_metrics --sample-rate 2048000 /snapshots/snap_*.cf32
+```
+
+### Running `decode_candidates` inside the container
+
+```bash
+# Mount the database and snapshots directory; write the report to a host path
+docker run --rm \
+  -v /var/lib/rf-adapt-intel:/data:rw \
+  rf-adapt-intel:latest \
+  python3 /src/tools/decode_candidates.py \
+    --db /data/rf_adapt_intel.db \
+    --snapshot-dir /data/snapshots \
+    --out /data/audit_report.json
+```
+
+### Runtime configuration via environment variables
+
+Environment variables can be passed to any `docker run` command with `-e`.
+For example, to run `iq_metrics` with a custom confidence threshold:
+
+```bash
+docker run --rm \
+  -e RF_CONF_THRESHOLD=0.7 \
+  -e RF_SNR_MIN_DB=6.0 \
+  -e RF_SNAPSHOT_RETENTION_DAYS=7 \
+  -v /var/lib/rf-adapt-intel/snapshots:/snapshots:ro \
+  rf-adapt-intel:latest \
+  /build/iq_metrics /snapshots/snap_*.cf32
 ```
 
 > **Note:** The Docker image targets the `iq_metrics` tool and Python test
