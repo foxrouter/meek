@@ -34,6 +34,9 @@ CONF_FILE="${CONF_DIR}/thresholds.env"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Path where liquid-dsp installs its .pc file (not searched by default on Ubuntu)
 LIQUID_PKGCFG_DIR="/usr/local/lib/pkgconfig"
+# Pinned liquid-dsp release — update LIQUID_DSP_EXPECTED_COMMIT alongside any version bump.
+LIQUID_DSP_GIT_TAG="v1.7.0"
+LIQUID_DSP_EXPECTED_COMMIT="4dda702cb81cf96155e614299aab6180ff09740e"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -213,8 +216,21 @@ install_liquid_dsp() {
   # shellcheck disable=SC2064
   trap "rm -rf '${src_dir}'" EXIT
 
-  log "Cloning liquid-dsp into ${src_dir}..."
-  run git clone --depth 1 https://github.com/jgaeddert/liquid-dsp.git "${src_dir}"
+  log "Cloning liquid-dsp ${LIQUID_DSP_GIT_TAG} into ${src_dir}..."
+  run git clone --depth 1 --branch "${LIQUID_DSP_GIT_TAG}" https://github.com/jgaeddert/liquid-dsp.git "${src_dir}"
+
+  if ! $DRY_RUN; then
+    log "Verifying liquid-dsp source commit..."
+    local actual_commit
+    actual_commit="$(git -C "${src_dir}" rev-parse HEAD)"
+    if [[ "${actual_commit}" != "${LIQUID_DSP_EXPECTED_COMMIT}" ]]; then
+      echo "[ERROR] liquid-dsp commit hash mismatch!" >&2
+      echo "  Expected: ${LIQUID_DSP_EXPECTED_COMMIT}" >&2
+      echo "  Got:      ${actual_commit}" >&2
+      exit 1
+    fi
+    echo "  Commit verified: ${actual_commit}"
+  fi
 
   log "Building liquid-dsp (this may take several minutes)..."
   run bash -c "cd '${src_dir}' && ./bootstrap.sh && ./configure && make -j\$(nproc)"
