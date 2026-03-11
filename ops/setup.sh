@@ -232,8 +232,10 @@ install_liquid_dsp() {
     echo "  Commit verified: ${actual_commit}"
   fi
 
+  local _liq_cflags=""
+  [[ "$(uname -m)" == "aarch64" ]] && _liq_cflags="CFLAGS=-O2 -ffast-math"
   log "Building liquid-dsp (this may take several minutes)..."
-  run bash -c "cd '${src_dir}' && ./bootstrap.sh && ./configure && make -j\$(nproc)"
+  run bash -c "cd '${src_dir}' && ./bootstrap.sh && ./configure $_liq_cflags && make -j\$(nproc)"
   run bash -c "cd '${src_dir}' && sudo make install"
   run sudo ldconfig
 
