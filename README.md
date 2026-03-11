@@ -116,13 +116,19 @@ flowchart LR
     subgraph Output
         out["out_thread\noutput_loop()"]
         db[("SQLite\nrf_adapt_intel.db")]
-        snap["Snapshot worker\nsnap_thread"]
         prom["Prometheus\ntextfile metrics"]
         rb2 --> out
         out -->|"db.insert_signal\ndb.insert_example"| db
-        out -->|".cf32 IQ files"| snap
         out -->|"every 5 s"| prom
     end
+
+    subgraph Snapshot
+        sq[/"snap_queue\n(deque, max 64)"/]
+        snap["snap_thread\n(std::jthread)"]
+        sq -->|".cf32 IQ files"| snap
+    end
+
+    proc -->|"enqueue SnapTask"| sq
 ```
 
 Key design decisions:
@@ -467,15 +473,17 @@ docker run --rm \
 
 ### Runtime configuration via environment variables
 
-All thresholds and paths can be passed in with `-e`:
+Environment variables can be passed to any `docker run` command with `-e`.
+For example, to run `iq_metrics` with a custom confidence threshold:
 
 ```bash
 docker run --rm \
   -e RF_CONF_THRESHOLD=0.7 \
   -e RF_SNR_MIN_DB=6.0 \
   -e RF_SNAPSHOT_RETENTION_DAYS=7 \
-  -v /var/lib/rf-adapt-intel:/data:rw \
-  rf-adapt-intel:latest
+  -v /var/lib/rf-adapt-intel/snapshots:/snapshots:ro \
+  rf-adapt-intel:latest \
+  /build/iq_metrics /snapshots/snap_*.cf32
 ```
 
 > **Note:** The Docker image targets the `iq_metrics` tool and Python test

@@ -47,7 +47,7 @@ jobs:
         id: notes
         run: |
           VERSION="${{ github.event.inputs.version }}"
-          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^$VERSION$" | head -1)
+          PREV_TAG=$(git tag --sort=-version:refname | grep -vxF "$VERSION" | head -1 || true)
           if [ -n "$PREV_TAG" ]; then
             RANGE="${PREV_TAG}..HEAD"
           else
@@ -60,7 +60,9 @@ jobs:
             git log "$RANGE" --pretty=format:"- %s (%h)" --no-merges
             echo ""
             echo ""
-            echo "**Full diff:** https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${VERSION}"
+            if [ -n "$PREV_TAG" ]; then
+              echo "**Full diff:** https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${VERSION}"
+            fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
