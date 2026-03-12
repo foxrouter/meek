@@ -17,6 +17,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 
 // httplib.h must be included at global scope (outside any namespace) to avoid
@@ -25,7 +26,6 @@
 // "'decode_url' was not declared in this scope".
 #ifdef HAVE_HTTPLIB
 #include <httplib.h>
-#include <sstream>
 #include <thread>
 #include <utility>
 #endif  // HAVE_HTTPLIB
@@ -55,6 +55,47 @@ struct ProcMetrics {
 // Textfile output (for node_exporter textfile collector or canary scripts)
 // ---------------------------------------------------------------------------
 
+/// Returns the Prometheus text exposition format (v0.0.4) body for @p m,
+/// including all # HELP and # TYPE header lines.  Called by both
+/// write_prometheus_textfile() and the HTTP /metrics handler so that both
+/// paths always stay in sync.
+[[nodiscard]] inline std::string render_prometheus_body(const ProcMetrics& m) {
+  const double avg_conf = m.frames_candidate > 0
+                              ? m.conf_sum / static_cast<double>(m.frames_candidate)
+                              : 0.0;
+  std::ostringstream out;
+  out << "# HELP rf_frames_total Total IQ frames processed by classifier\n"
+      << "# TYPE rf_frames_total counter\n"
+      << "rf_frames_total " << m.frames_total << "\n"
+      << "# HELP rf_classifications_total Frames classified by modulation type\n"
+      << "# TYPE rf_classifications_total counter\n"
+      << "rf_classifications_total{class=\"cw_like\"} " << m.class_cw << "\n"
+      << "rf_classifications_total{class=\"fsk_like\"} " << m.class_fsk << "\n"
+      << "rf_classifications_total{class=\"psk_qam_like\"} " << m.class_psk << "\n"
+      << "rf_classifications_total{class=\"ook_am_like\"} " << m.class_ook << "\n"
+      << "# HELP rf_frames_rejected Frames rejected by SNR/BW/power gates\n"
+      << "# TYPE rf_frames_rejected counter\n"
+      << "rf_frames_rejected " << m.frames_rejected << "\n"
+      << "# HELP rf_frames_candidate Frames above confidence threshold\n"
+      << "# TYPE rf_frames_candidate counter\n"
+      << "rf_frames_candidate " << m.frames_candidate << "\n"
+      << "# HELP rf_confidence_avg Average confidence of candidate frames\n"
+      << "# TYPE rf_confidence_avg gauge\n"
+      << "rf_confidence_avg " << avg_conf << "\n"
+      << "# HELP rf_errors_total Total write errors\n"
+      << "# TYPE rf_errors_total counter\n"
+      << "rf_errors_total{type=\"db\"} " << m.db_errors << "\n"
+      << "rf_errors_total{type=\"snapshot\"} " << m.snap_errors << "\n"
+      << "# HELP rf_snapshots_dropped_total Snapshot tasks dropped due to full queue\n"
+      << "# TYPE rf_snapshots_dropped_total counter\n"
+      << "rf_snapshots_dropped_total " << m.snap_dropped << "\n"
+      << "# HELP rf_frames_cap_dropped_total "
+      << "IQ blocks dropped by capture loop under backpressure\n"
+      << "# TYPE rf_frames_cap_dropped_total counter\n"
+      << "rf_frames_cap_dropped_total " << m.frames_cap_dropped << "\n";
+  return out.str();
+}
+
 inline void write_prometheus_textfile(const std::string& path,
                                       const ProcMetrics& m) {
   if (path.empty()) return;
@@ -62,40 +103,7 @@ inline void write_prometheus_textfile(const std::string& path,
     std::filesystem::create_directories(std::filesystem::path(path).parent_path());
     std::ofstream ofs(path, std::ios::out | std::ios::trunc);
     if (!ofs) return;
-
-    const double avg_conf = m.frames_candidate > 0
-                                ? m.conf_sum / static_cast<double>(m.frames_candidate)
-                                : 0.0;
-
-    ofs << "# HELP rf_frames_total Total IQ frames processed by classifier\n"
-        << "# TYPE rf_frames_total counter\n"
-        << "rf_frames_total " << m.frames_total << "\n"
-        << "# HELP rf_classifications_total Frames classified by modulation type\n"
-        << "# TYPE rf_classifications_total counter\n"
-        << "rf_classifications_total{class=\"cw_like\"} " << m.class_cw << "\n"
-        << "rf_classifications_total{class=\"fsk_like\"} " << m.class_fsk << "\n"
-        << "rf_classifications_total{class=\"psk_qam_like\"} " << m.class_psk << "\n"
-        << "rf_classifications_total{class=\"ook_am_like\"} " << m.class_ook << "\n"
-        << "# HELP rf_frames_rejected Frames rejected by SNR/BW/power gates\n"
-        << "# TYPE rf_frames_rejected counter\n"
-        << "rf_frames_rejected " << m.frames_rejected << "\n"
-        << "# HELP rf_frames_candidate Frames above confidence threshold\n"
-        << "# TYPE rf_frames_candidate counter\n"
-        << "rf_frames_candidate " << m.frames_candidate << "\n"
-        << "# HELP rf_confidence_avg Average confidence of candidate frames\n"
-        << "# TYPE rf_confidence_avg gauge\n"
-        << "rf_confidence_avg " << avg_conf << "\n"
-        << "# HELP rf_errors_total Total write errors\n"
-        << "# TYPE rf_errors_total counter\n"
-        << "rf_errors_total{type=\"db\"} " << m.db_errors << "\n"
-        << "rf_errors_total{type=\"snapshot\"} " << m.snap_errors << "\n"
-        << "# HELP rf_snapshots_dropped_total Snapshot tasks dropped due to full queue\n"
-        << "# TYPE rf_snapshots_dropped_total counter\n"
-        << "rf_snapshots_dropped_total " << m.snap_dropped << "\n"
-        << "# HELP rf_frames_cap_dropped_total "
-        << "IQ blocks dropped by capture loop under backpressure\n"
-        << "# TYPE rf_frames_cap_dropped_total counter\n"
-        << "rf_frames_cap_dropped_total " << m.frames_cap_dropped << "\n";
+    ofs << render_prometheus_body(m);
   } catch (...) {
   }
 }
@@ -144,27 +152,7 @@ start_prometheus_http(std::uint16_t port,
       std::lock_guard lk(snapshot->mu);
       snap = snapshot->data;
     }
-    std::ostringstream body;
-    const double avg_conf = snap.frames_candidate > 0
-                                ? snap.conf_sum / static_cast<double>(snap.frames_candidate)
-                                : 0.0;
-    body << "# HELP rf_frames_total Total IQ frames processed by classifier\n"
-         << "# TYPE rf_frames_total counter\n"
-         << "rf_frames_total " << snap.frames_total << "\n"
-         << "# HELP rf_classifications_total Frames classified\n"
-         << "# TYPE rf_classifications_total counter\n"
-         << "rf_classifications_total{class=\"cw_like\"} " << snap.class_cw << "\n"
-         << "rf_classifications_total{class=\"fsk_like\"} " << snap.class_fsk << "\n"
-         << "rf_classifications_total{class=\"psk_qam_like\"} " << snap.class_psk << "\n"
-         << "rf_classifications_total{class=\"ook_am_like\"} " << snap.class_ook << "\n"
-         << "rf_frames_rejected " << snap.frames_rejected << "\n"
-         << "rf_frames_candidate " << snap.frames_candidate << "\n"
-         << "rf_confidence_avg " << avg_conf << "\n"
-         << "rf_errors_total{type=\"db\"} " << snap.db_errors << "\n"
-         << "rf_errors_total{type=\"snapshot\"} " << snap.snap_errors << "\n"
-         << "rf_snapshots_dropped_total " << snap.snap_dropped << "\n"
-         << "rf_frames_cap_dropped_total " << snap.frames_cap_dropped << "\n";
-    res.set_content(body.str(), "text/plain; version=0.0.4; charset=utf-8");
+    res.set_content(render_prometheus_body(snap), "text/plain; version=0.0.4; charset=utf-8");
   });
 
   if (!svr->bind_to_port("0.0.0.0", static_cast<int>(port))) {
