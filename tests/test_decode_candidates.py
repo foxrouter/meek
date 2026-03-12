@@ -632,6 +632,35 @@ class TestBuildReport(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Tests: ACARS-129 / ACARS-130 external decoder dispatch
+# ---------------------------------------------------------------------------
+
+class TestAcarsDispatchTable(unittest.TestCase):
+    """Ensure new ACARS secondary-channel bands are correctly wired up."""
+
+    _ACARSDEC_BANDS = {"ACARS", "ACARS-VHF", "ACARS-129", "ACARS-130", "VDL2"}
+
+    def test_acars_129_in_band_freq_hz(self):
+        self.assertIn("ACARS-129", dc._BAND_FREQ_HZ)
+        self.assertEqual(dc._BAND_FREQ_HZ["ACARS-129"], 129_125_000)
+
+    def test_acars_130_in_band_freq_hz(self):
+        self.assertIn("ACARS-130", dc._BAND_FREQ_HZ)
+        self.assertEqual(dc._BAND_FREQ_HZ["ACARS-130"], 130_025_000)
+
+    def test_acars_bands_route_to_acarsdec(self):
+        """All ACARS/VDL2 band names must be present in the acarsdec dispatch set."""
+        import ast
+        import inspect
+        source = inspect.getsource(dc.decode_candidate)
+        # Find the string literal set used in the acarsdec dispatch condition.
+        # It appears as: band_name in ("ACARS", "ACARS-VHF", "ACARS-129", ...)
+        for band in self._ACARSDEC_BANDS:
+            self.assertIn(f'"{band}"', source,
+                          msg=f'Band "{band}" missing from acarsdec dispatch in decode_candidate()')
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

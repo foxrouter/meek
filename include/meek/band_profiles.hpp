@@ -1,6 +1,6 @@
 // include/meek/band_profiles.hpp — Compile-time UK frequency band profiles.
 //
-// Contains a constexpr array of BandProfile structs covering 33 UK SDR-relevant
+// Contains a constexpr array of BandProfile structs covering 38 UK SDR-relevant
 // frequency allocations.  No runtime JSON/YAML parsing is needed for static data.
 // These are built-in defaults; runtime configuration is handled at a higher level.
 
@@ -35,11 +35,11 @@ struct BandProfile {
 inline constexpr double kBandSnrUseDefault = -999.0;
 
 // ---------------------------------------------------------------------------
-// UK band profile table (33 entries) — compiled in, zero runtime cost
+// UK band profile table (38 entries) — compiled in, zero runtime cost
 // ---------------------------------------------------------------------------
 
 // clang-format off
-inline constexpr std::array<BandProfile, 33> kUkBands = {{
+inline constexpr std::array<BandProfile, 38> kUkBands = {{
   {"ADS-B", "ADS-B 1090 MHz transponders",
    1090e6, 2e6, 1e6, ModClass::OOK_AM_LIKE, 3.0, 0.20,
    "Mode-S/ADS-B squitters at 1090 MHz. Decode with dump1090 or readsb."},
@@ -139,6 +139,27 @@ inline constexpr std::array<BandProfile, 33> kUkBands = {{
   {"CNI-UHF", "Combat Net Radio UHF (225-400 MHz)",
    312.5e6, 87.5e6, 25e3, ModClass::FSK_LIKE, kBandSnrUseDefault, 0.10,
    "UK MoD/NATO Combat Net Radio UHF band. AM/FM/FSK tactical comms."},
+  {"GSM-R-876", "Network Rail GSM-R uplink (876 MHz)",
+   876.0e6, 12e6, 200e3, ModClass::FSK_LIKE, 2.0, 0.15,
+   "GWR mainline + Elizabeth Line. Reading station 2.5 mi. "
+   "Downlink 921 MHz. High burst rate during peak hours."},
+  {"AIRBAND-VHF", "VHF airband AM voice (118-136 MHz)",
+   124.0e6, 18e6, 8e3, ModClass::OOK_AM_LIKE, 1.0, 0.12,
+   "White Waltham (EGLM) 4 mi. Heathrow TMA overhead. "
+   "London Approach 119.725, Farnborough LARS 125.25, "
+   "Thames Radar 132.7, White Waltham Info 119.975."},
+  {"VOLMET", "London VOLMET continuous weather broadcast",
+   126.6e6, 0.05e6, 8e3, ModClass::OOK_AM_LIKE, kBandSnrUseDefault, 0.10,
+   "London VOLMET primary 126.600 MHz (Swanwick NATS). "
+   "Secondary 125.475 MHz. Continuous AM voice, 24/7."},
+  {"ACARS-129", "ACARS secondary frequency B (129.125 MHz)",
+   129.125e6, 0.1e6, 8e3, ModClass::OOK_AM_LIKE, 1.0, 0.15,
+   "Heathrow ACARS B channel (Arinc 129B). "
+   "Higher volume on departure push periods."},
+  {"ACARS-130", "ACARS secondary frequency C (130.025 MHz)",
+   130.025e6, 0.1e6, 8e3, ModClass::OOK_AM_LIKE, 1.0, 0.15,
+   "Heathrow ACARS C channel (Arinc 130). "
+   "Active during arrival and ground movement phases."},
 }};
 // clang-format on
 
