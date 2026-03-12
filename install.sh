@@ -291,6 +291,17 @@ install_config() {
 }
 
 # ---------------------------------------------------------------------------
+# Install logrotate configuration for worker.log
+# ---------------------------------------------------------------------------
+install_logrotate() {
+  local src="${REPO_ROOT}/config/logrotate.d/rf-adapt-intel"
+  local dest="/etc/logrotate.d/rf-adapt-intel"
+  log "Installing logrotate configuration..."
+  run sudo install -m 644 -o root -g root "${src}" "${dest}"
+  info "logrotate config written to ${dest}."
+}
+
+# ---------------------------------------------------------------------------
 # Install shared scripts to /usr/local/share/rf-adapt-intel/scripts/
 # (referenced by iq-transfer-watcher.service and rf-incoming-processor.service)
 # ---------------------------------------------------------------------------
@@ -563,6 +574,7 @@ main() {
   if ! $NO_SERVICE; then
     create_service_user
     install_config
+    install_logrotate
     install_scripts
     if $ALL_DECODERS; then
       install_decoders
