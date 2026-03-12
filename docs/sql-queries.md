@@ -1,6 +1,6 @@
 <!-- meek DB query reference — docs/sql-queries.md
-     DB path: /home/woger/rf_worker/rf_adapt_intel.db  (adjust to your cfg)
-     Open:    sqlite3 /home/woger/rf_worker/rf_adapt_intel.db
+     DB path: set DB_PATH to your rf_adapt_intel.db location before running queries
+     Open:    sqlite3 "$DB_PATH"
      Schema:  signals(id, timestamp, source, notes)
               methods(id, name, params)
               examples(id, signal_id, method_id, confidence, notes, created_at)
@@ -9,8 +9,11 @@
 
 # meek DB query reference
 
-**DB path:** `/home/woger/rf_worker/rf_adapt_intel.db` (adjust to your config)  
-**Open:** `sqlite3 /home/woger/rf_worker/rf_adapt_intel.db`
+**DB path:** Set `DB_PATH` to your database location, e.g.:
+```bash
+export DB_PATH=/var/lib/rf_adapt_intel/rf_adapt_intel.db
+```
+**Open:** `sqlite3 "$DB_PATH"`
 
 **Schema:**
 - `signals(id, timestamp, source, notes)`
@@ -420,31 +423,33 @@ SELECT
 
 ## SECTION 8 — SHELL ONE-LINERS
 
-Paste into bash on Brian as single lines:
+Set `DB_PATH` first, then paste individual commands:
 
 ```bash
+export DB_PATH=/var/lib/rf_adapt_intel/rf_adapt_intel.db
+
 # ADS-B — last 7 days daily count
-sqlite3 /home/woger/rf_worker/rf_adapt_intel.db \
+sqlite3 "$DB_PATH" \
   "SELECT DATE(timestamp) AS day, COUNT(*) AS n FROM signals WHERE notes LIKE '%band=ADS-B%' GROUP BY day ORDER BY day DESC LIMIT 7;"
 
 # ELT-406 — all distress beacon detections
-sqlite3 /home/woger/rf_worker/rf_adapt_intel.db \
+sqlite3 "$DB_PATH" \
   "SELECT timestamp, confidence FROM examples JOIN signals ON signals.id=examples.signal_id WHERE signals.notes LIKE '%band=ELT-406%' ORDER BY timestamp DESC;"
 
 # Signal count in the last hour
-sqlite3 /home/woger/rf_worker/rf_adapt_intel.db \
+sqlite3 "$DB_PATH" \
   "SELECT COUNT(*) FROM signals WHERE timestamp >= DATETIME('now','-1 hour');"
 
 # GSM-R-876 — last 14 days daily burst count (train timetable correlation)
-sqlite3 /home/woger/rf_worker/rf_adapt_intel.db \
+sqlite3 "$DB_PATH" \
   "SELECT DATE(timestamp) AS day, COUNT(*) AS bursts FROM signals WHERE notes LIKE '%band=GSM-R-876%' AND timestamp >= DATE('now','-14 days') GROUP BY day ORDER BY day;"
 
 # ACARS three-frequency combined hourly volume (Heathrow 131.725 / 129.125 / 130.025)
-sqlite3 /home/woger/rf_worker/rf_adapt_intel.db \
+sqlite3 "$DB_PATH" \
   "SELECT CAST(STRFTIME('%H', timestamp) AS INTEGER) AS hour_utc, COUNT(*) AS messages FROM signals WHERE (notes LIKE '%band=ACARS-VHF%' OR notes LIKE '%band=ACARS-129%' OR notes LIKE '%band=ACARS-130%') GROUP BY hour_utc ORDER BY hour_utc;"
 
 # Export last 7 days to CSV
-sqlite3 -csv -header /home/woger/rf_worker/rf_adapt_intel.db \
+sqlite3 -csv -header "$DB_PATH" \
   "SELECT s.timestamp, s.notes, e.confidence FROM signals s JOIN examples e ON e.signal_id=s.id WHERE s.timestamp >= DATE('now','-7 days') ORDER BY s.timestamp;" \
   > ~/meek_week.csv
 ```
