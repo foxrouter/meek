@@ -158,8 +158,19 @@ LIMIT  30;
 
 -- Radiosonde: twice-daily launches — are both 00Z and 12Z being caught?
 SELECT DATE(timestamp) AS day,
-       SUM(CASE WHEN STRFTIME('%H', timestamp) BETWEEN '22' AND '02' THEN 1 ELSE 0 END) AS launch_00z,
-       SUM(CASE WHEN STRFTIME('%H', timestamp) BETWEEN '10' AND '14' THEN 1 ELSE 0 END) AS launch_12z
+       SUM(
+           CASE
+               WHEN (CAST(STRFTIME('%H', timestamp) AS INTEGER) >= 22
+                     OR CAST(STRFTIME('%H', timestamp) AS INTEGER) <= 2)
+               THEN 1 ELSE 0
+           END
+       ) AS launch_00z,
+       SUM(
+           CASE
+               WHEN CAST(STRFTIME('%H', timestamp) AS INTEGER) BETWEEN 10 AND 14
+               THEN 1 ELSE 0
+           END
+       ) AS launch_12z
 FROM   signals
 WHERE  notes LIKE '%band=RADIOSONDE%'
 GROUP  BY day
