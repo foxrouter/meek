@@ -26,6 +26,15 @@ sudo chown root:root /usr/local/bin/rf_adapt_intel || true
 echo "Reloading dynamic linker cache..."
 sudo ldconfig
 
+if [[ -f "${PROJECT_DIR}/config/logrotate.d/rf-adapt-intel" ]]; then
+    echo "Installing logrotate configuration..."
+    sudo install -m 644 -o root -g root \
+        "${PROJECT_DIR}/config/logrotate.d/rf-adapt-intel" \
+        /etc/logrotate.d/rf-adapt-intel
+else
+    echo "Warning: ${PROJECT_DIR}/config/logrotate.d/rf-adapt-intel not found; skipping logrotate configuration install." >&2
+fi
+
 echo "Reloading systemd units and restarting service..."
 sudo systemctl daemon-reload
 sudo systemctl enable --now "$SERVICE"
