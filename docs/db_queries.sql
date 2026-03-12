@@ -1,21 +1,22 @@
 -- =============================================================================
--- meek DB query reference  —  Brian (192.168.4.246), user: woger
--- DB path: /home/woger/rf_worker/rf_adapt_intel.db  (adjust to your cfg)
--- Open:    sqlite3 /home/woger/rf_worker/rf_adapt_intel.db
+-- meek DB query reference
+-- DB path: <db_path>              -- e.g. /opt/rf_worker/rf_adapt_intel.db
+-- Open:    sqlite3 <db_path>
 -- Schema:  signals(id, timestamp, source, notes)
 --          methods(id, name, params)
 --          examples(id, signal_id, method_id, confidence, notes, created_at)
 -- notes / decision_trace contains:  band=<BAND>  snr=<X>dB  -> <mod>@<conf>
+-- Band names are defined in include/meek/band_profiles.hpp (kUkBands array).
 -- =============================================================================
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 0.  HOUSEKEEPING / SQLITE SETTINGS
 -- ─────────────────────────────────────────────────────────────────────────────
 PRAGMA query_only = ON;           -- read-only session (safety net)
-PRAGMA journal_mode = WAL;        -- concurrent readers during live capture
+PRAGMA journal_mode;              -- inspect current journal mode (capture enables WAL)
 .headers on
 .mode column
-.nullvalue —
+.nullvalue NULL
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 1.  OVERVIEW — row counts and date range
@@ -45,11 +46,13 @@ FROM signals;
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- Count per known band, sorted most-active first
+-- Band names come from include/meek/band_profiles.hpp (kUkBands).
 SELECT
     CASE
         WHEN s.notes LIKE '%band=ADS-B%'         THEN 'ADS-B'
-        WHEN s.notes LIKE '%band=ACARS-VHF%'     THEN 'ACARS-VHF'
         WHEN s.notes LIKE '%band=VDL2%'          THEN 'VDL2'
+        WHEN s.notes LIKE '%band=ACARS-VHF%'     THEN 'ACARS-VHF'
+        WHEN s.notes LIKE '%band=ACARS%'         THEN 'ACARS'
         WHEN s.notes LIKE '%band=INMARSAT-AERO%' THEN 'INMARSAT-AERO'
         WHEN s.notes LIKE '%band=AIS-A%'         THEN 'AIS-A'
         WHEN s.notes LIKE '%band=AIS-B%'         THEN 'AIS-B'
@@ -63,6 +66,7 @@ SELECT
         WHEN s.notes LIKE '%band=SMETS2%'        THEN 'SMETS2'
         WHEN s.notes LIKE '%band=TPMS-433%'      THEN 'TPMS-433'
         WHEN s.notes LIKE '%band=ISM-433%'       THEN 'ISM-433'
+        WHEN s.notes LIKE '%band=ISM-169%'       THEN 'ISM-169'
         WHEN s.notes LIKE '%band=LORA-868%'      THEN 'LORA-868'
         WHEN s.notes LIKE '%band=ZIGBEE-868%'    THEN 'ZIGBEE-868'
         WHEN s.notes LIKE '%band=WMBUS-169%'     THEN 'WMBUS-169'
@@ -77,6 +81,7 @@ SELECT
         WHEN s.notes LIKE '%band=FLEX-931%'      THEN 'FLEX-931'
         WHEN s.notes LIKE '%band=DMR%'           THEN 'DMR'
         WHEN s.notes LIKE '%band=DECT%'          THEN 'DECT'
+        WHEN s.notes LIKE '%band=CNI-UHF%'       THEN 'CNI-UHF'
         ELSE                                          'unmatched'
     END                          AS band,
     COUNT(*)                     AS detections,
@@ -126,7 +131,7 @@ SELECT
         ELSE                           'Noise     (<0.30)'
     END           AS confidence_bucket,
     COUNT(*)      AS count,
-    ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM examples), 1) AS pct
+    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct
 FROM examples e
 JOIN signals s ON s.id = e.signal_id
 WHERE s.timestamp >= DATETIME('now', '-30 days')
@@ -136,19 +141,46 @@ ORDER BY MIN(e.confidence) DESC;
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 5.  SNR DISTRIBUTION  (extracted from decision_trace "snr=X.XXXdB")
 --     INSTR/SUBSTR are used because SQLite lacks regex by default.
+--     Covers all band profiles defined in include/meek/band_profiles.hpp.
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- Average / min / max SNR per band over last 7 days
+-- Average SNR per band over last 7 days, sorted strongest first
 SELECT
     CASE
-        WHEN s.notes LIKE '%band=ADS-B%'    THEN 'ADS-B'
-        WHEN s.notes LIKE '%band=TETRA%'    THEN 'TETRA'
-        WHEN s.notes LIKE '%band=APRS%'     THEN 'APRS'
-        WHEN s.notes LIKE '%band=ISM-433%'  THEN 'ISM-433'
-        WHEN s.notes LIKE '%band=LORA-868%' THEN 'LORA-868'
-        WHEN s.notes LIKE '%band=ELT-406%'  THEN 'ELT-406'
-        WHEN s.notes LIKE '%band=DMR%'      THEN 'DMR'
-        ELSE 'other'
+        WHEN s.notes LIKE '%band=ADS-B%'         THEN 'ADS-B'
+        WHEN s.notes LIKE '%band=VDL2%'          THEN 'VDL2'
+        WHEN s.notes LIKE '%band=ACARS-VHF%'     THEN 'ACARS-VHF'
+        WHEN s.notes LIKE '%band=ACARS%'         THEN 'ACARS'
+        WHEN s.notes LIKE '%band=INMARSAT-AERO%' THEN 'INMARSAT-AERO'
+        WHEN s.notes LIKE '%band=AIS-A%'         THEN 'AIS-A'
+        WHEN s.notes LIKE '%band=AIS-B%'         THEN 'AIS-B'
+        WHEN s.notes LIKE '%band=MARINE-CH16%'   THEN 'MARINE-CH16'
+        WHEN s.notes LIKE '%band=MARINE-CH70%'   THEN 'MARINE-CH70'
+        WHEN s.notes LIKE '%band=NOAA-APT%'      THEN 'NOAA-APT'
+        WHEN s.notes LIKE '%band=METEOR-LRPT%'   THEN 'METEOR-LRPT'
+        WHEN s.notes LIKE '%band=RADIOSONDE%'    THEN 'RADIOSONDE'
+        WHEN s.notes LIKE '%band=GPS-L1%'        THEN 'GPS-L1'
+        WHEN s.notes LIKE '%band=IRIDIUM%'       THEN 'IRIDIUM'
+        WHEN s.notes LIKE '%band=SMETS2%'        THEN 'SMETS2'
+        WHEN s.notes LIKE '%band=TPMS-433%'      THEN 'TPMS-433'
+        WHEN s.notes LIKE '%band=ISM-433%'       THEN 'ISM-433'
+        WHEN s.notes LIKE '%band=ISM-169%'       THEN 'ISM-169'
+        WHEN s.notes LIKE '%band=LORA-868%'      THEN 'LORA-868'
+        WHEN s.notes LIKE '%band=ZIGBEE-868%'    THEN 'ZIGBEE-868'
+        WHEN s.notes LIKE '%band=WMBUS-169%'     THEN 'WMBUS-169'
+        WHEN s.notes LIKE '%band=SIGFOX-868%'    THEN 'SIGFOX-868'
+        WHEN s.notes LIKE '%band=ZWAVE-868%'     THEN 'ZWAVE-868'
+        WHEN s.notes LIKE '%band=TETRA%'         THEN 'TETRA'
+        WHEN s.notes LIKE '%band=ELT-406%'       THEN 'ELT-406'
+        WHEN s.notes LIKE '%band=PMR446%'        THEN 'PMR446'
+        WHEN s.notes LIKE '%band=APRS%'          THEN 'APRS'
+        WHEN s.notes LIKE '%band=DAB%'           THEN 'DAB'
+        WHEN s.notes LIKE '%band=POCSAG-153%'    THEN 'POCSAG-153'
+        WHEN s.notes LIKE '%band=FLEX-931%'      THEN 'FLEX-931'
+        WHEN s.notes LIKE '%band=DMR%'           THEN 'DMR'
+        WHEN s.notes LIKE '%band=DECT%'          THEN 'DECT'
+        WHEN s.notes LIKE '%band=CNI-UHF%'       THEN 'CNI-UHF'
+        ELSE                                          'other'
     END                                                          AS band,
     COUNT(*)                                                     AS detections,
     -- Extract numeric SNR: find 'snr=', then locate the 'dB' within that suffix
@@ -166,24 +198,19 @@ GROUP BY band
 ORDER BY avg_snr_db DESC;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 6.  REJECTION ANALYSIS
---     The classifier inserts [REJECT:…] tokens into the decision_trace when
---     a signal is gated out (snr_gate, bw_gate, power_range, papr_max).
+-- 6.  REJECTION / GATE ANALYSIS
+--     NOTE: Rejected frames are NOT inserted into the SQLite DB.
+--     The worker (output_loop in src/main.cpp) only persists detections that
+--     pass the confidence threshold AND the SNR gate, so [REJECT:…] tokens
+--     never appear in signals.notes.
+--
+--     To analyse gate behavior use:
+--       - Prometheus metrics:  rf_frames_rejected, rf_frames_total
+--                              (textfile at /var/lib/rf-adapt-intel/metrics.prom)
+--       - Worker JSON log:     /var/lib/rf-adapt-intel/worker.log
+--         Fields:  decision_trace (contains [REJECT:snr_gate / bw_gate /
+--                  power_range / papr_max]), snr_db, confidence
 -- ─────────────────────────────────────────────────────────────────────────────
-
-SELECT
-    CASE
-        WHEN notes LIKE '%[REJECT:snr_gate%'    THEN 'snr_gate'
-        WHEN notes LIKE '%[REJECT:bw_gate%'     THEN 'bw_gate'
-        WHEN notes LIKE '%[REJECT:power_range%' THEN 'power_range'
-        WHEN notes LIKE '%[REJECT:papr_max%'    THEN 'papr_max'
-        ELSE                                         'accepted'
-    END           AS rejection_reason,
-    COUNT(*)      AS count
-FROM signals
-WHERE timestamp >= DATETIME('now', '-7 days')
-GROUP BY rejection_reason
-ORDER BY count DESC;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 7.  DAILY TREND — detections per day over last 30 days
@@ -213,14 +240,40 @@ ORDER BY hour_utc;
 
 SELECT
     CASE
-        WHEN s.notes LIKE '%band=ADS-B%'    THEN 'ADS-B'
-        WHEN s.notes LIKE '%band=TETRA%'    THEN 'TETRA'
-        WHEN s.notes LIKE '%band=APRS%'     THEN 'APRS'
-        WHEN s.notes LIKE '%band=ISM-433%'  THEN 'ISM-433'
-        WHEN s.notes LIKE '%band=LORA-868%' THEN 'LORA-868'
-        WHEN s.notes LIKE '%band=ELT-406%'  THEN 'ELT-406'
-        WHEN s.notes LIKE '%band=DMR%'      THEN 'DMR'
-        ELSE 'other'
+        WHEN s.notes LIKE '%band=ADS-B%'         THEN 'ADS-B'
+        WHEN s.notes LIKE '%band=VDL2%'          THEN 'VDL2'
+        WHEN s.notes LIKE '%band=ACARS-VHF%'     THEN 'ACARS-VHF'
+        WHEN s.notes LIKE '%band=ACARS%'         THEN 'ACARS'
+        WHEN s.notes LIKE '%band=INMARSAT-AERO%' THEN 'INMARSAT-AERO'
+        WHEN s.notes LIKE '%band=AIS-A%'         THEN 'AIS-A'
+        WHEN s.notes LIKE '%band=AIS-B%'         THEN 'AIS-B'
+        WHEN s.notes LIKE '%band=MARINE-CH16%'   THEN 'MARINE-CH16'
+        WHEN s.notes LIKE '%band=MARINE-CH70%'   THEN 'MARINE-CH70'
+        WHEN s.notes LIKE '%band=NOAA-APT%'      THEN 'NOAA-APT'
+        WHEN s.notes LIKE '%band=METEOR-LRPT%'   THEN 'METEOR-LRPT'
+        WHEN s.notes LIKE '%band=RADIOSONDE%'    THEN 'RADIOSONDE'
+        WHEN s.notes LIKE '%band=GPS-L1%'        THEN 'GPS-L1'
+        WHEN s.notes LIKE '%band=IRIDIUM%'       THEN 'IRIDIUM'
+        WHEN s.notes LIKE '%band=SMETS2%'        THEN 'SMETS2'
+        WHEN s.notes LIKE '%band=TPMS-433%'      THEN 'TPMS-433'
+        WHEN s.notes LIKE '%band=ISM-433%'       THEN 'ISM-433'
+        WHEN s.notes LIKE '%band=ISM-169%'       THEN 'ISM-169'
+        WHEN s.notes LIKE '%band=LORA-868%'      THEN 'LORA-868'
+        WHEN s.notes LIKE '%band=ZIGBEE-868%'    THEN 'ZIGBEE-868'
+        WHEN s.notes LIKE '%band=WMBUS-169%'     THEN 'WMBUS-169'
+        WHEN s.notes LIKE '%band=SIGFOX-868%'    THEN 'SIGFOX-868'
+        WHEN s.notes LIKE '%band=ZWAVE-868%'     THEN 'ZWAVE-868'
+        WHEN s.notes LIKE '%band=TETRA%'         THEN 'TETRA'
+        WHEN s.notes LIKE '%band=ELT-406%'       THEN 'ELT-406'
+        WHEN s.notes LIKE '%band=PMR446%'        THEN 'PMR446'
+        WHEN s.notes LIKE '%band=APRS%'          THEN 'APRS'
+        WHEN s.notes LIKE '%band=DAB%'           THEN 'DAB'
+        WHEN s.notes LIKE '%band=POCSAG-153%'    THEN 'POCSAG-153'
+        WHEN s.notes LIKE '%band=FLEX-931%'      THEN 'FLEX-931'
+        WHEN s.notes LIKE '%band=DMR%'           THEN 'DMR'
+        WHEN s.notes LIKE '%band=DECT%'          THEN 'DECT'
+        WHEN s.notes LIKE '%band=CNI-UHF%'       THEN 'CNI-UHF'
+        ELSE                                          'other'
     END                                      AS band,
     CASE
         WHEN s.notes LIKE '%-> fsk_like@%'     THEN 'FSK'
@@ -294,6 +347,7 @@ SELECT 'Aviation'              AS band_group,
        SUM(CASE WHEN notes LIKE '%band=ADS-B%'
                   OR notes LIKE '%band=VDL2%'
                   OR notes LIKE '%band=ACARS-VHF%'
+                  OR notes LIKE '%band=ACARS%'
                   OR notes LIKE '%band=INMARSAT-AERO%'
                THEN 1 ELSE 0 END) AS detections
 FROM signals WHERE timestamp >= DATETIME('now', '-30 days')
@@ -319,6 +373,7 @@ SELECT 'IoT & Smart Infrastructure',
        SUM(CASE WHEN notes LIKE '%band=SMETS2%'
                   OR notes LIKE '%band=TPMS-433%'
                   OR notes LIKE '%band=ISM-433%'
+                  OR notes LIKE '%band=ISM-169%'
                   OR notes LIKE '%band=LORA-868%'
                   OR notes LIKE '%band=ZIGBEE-868%'
                   OR notes LIKE '%band=WMBUS-169%'
@@ -341,6 +396,11 @@ SELECT 'Broadcasting & Paging',
                   OR notes LIKE '%band=FLEX-931%'
                   OR notes LIKE '%band=DMR%'
                   OR notes LIKE '%band=DECT%'
+               THEN 1 ELSE 0 END)
+FROM signals WHERE timestamp >= DATETIME('now', '-30 days')
+UNION ALL
+SELECT 'Military / Tactical',
+       SUM(CASE WHEN notes LIKE '%band=CNI-UHF%'
                THEN 1 ELSE 0 END)
 FROM signals WHERE timestamp >= DATETIME('now', '-30 days')
 ORDER BY detections DESC;
