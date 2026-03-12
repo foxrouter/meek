@@ -304,9 +304,8 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
       std::this_thread::sleep_for(std::chrono::microseconds(100));
     }
     if (!pushed) {
-      // Block dropped under sustained backpressure; re-assign for next iteration.
+      // Block dropped under sustained backpressure; record the drop.
       cap_dropped.fetch_add(1, std::memory_order_relaxed);
-      blk = SampleBlock{};
     }
   }
 }

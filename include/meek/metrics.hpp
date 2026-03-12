@@ -92,7 +92,8 @@ inline void write_prometheus_textfile(const std::string& path,
         << "# HELP rf_snapshots_dropped_total Snapshot tasks dropped due to full queue\n"
         << "# TYPE rf_snapshots_dropped_total counter\n"
         << "rf_snapshots_dropped_total " << m.snap_dropped << "\n"
-        << "# HELP rf_frames_cap_dropped_total IQ blocks dropped by capture loop under backpressure\n"
+        << "# HELP rf_frames_cap_dropped_total "
+        << "IQ blocks dropped by capture loop under backpressure\n"
         << "# TYPE rf_frames_cap_dropped_total counter\n"
         << "rf_frames_cap_dropped_total " << m.frames_cap_dropped << "\n";
   } catch (...) {
