@@ -16,7 +16,10 @@
 -- Band mapping view — must be created before PRAGMA query_only = ON because
 -- CREATE TEMP VIEW writes to the temp schema.  Reused in sections 2, 5, and 9.
 -- Update this list in sync with include/meek/band_profiles.hpp (kUkBands).
-CREATE TEMP VIEW IF NOT EXISTS v_band AS
+-- DROP first so re-reading this file in the same session always picks up the
+-- latest mapping rather than leaving a stale definition in place.
+DROP VIEW IF EXISTS v_band;
+CREATE TEMP VIEW v_band AS
 SELECT id AS signal_id,
     CASE
         WHEN notes LIKE '%band=ADS-B%'         THEN 'ADS-B'
