@@ -152,7 +152,8 @@ start_prometheus_http(std::uint16_t port,
       std::lock_guard lk(snapshot->mu);
       snap = snapshot->data;
     }
-    res.set_content(render_prometheus_body(snap), "text/plain; version=0.0.4; charset=utf-8");
+    res.set_content(render_prometheus_body(snap),
+                    "text/plain; version=0.0.4; charset=utf-8");
   });
 
   if (!svr->bind_to_port("0.0.0.0", static_cast<int>(port))) {
