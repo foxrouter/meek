@@ -334,10 +334,11 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   std::vector<float> scratch;
   scratch.reserve(cfg.analysis_len);
 
-  while (!st.stop_requested() || !in_buf.empty_approx()) {
+  while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
+         !in_buf.empty_approx()) {
     SampleBlock blk;
     if (!in_buf.pop(blk)) {
-      if (st.stop_requested())
+      if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
         break;
       std::this_thread::sleep_for(std::chrono::microseconds(100));
       continue;
@@ -441,10 +442,11 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   auto last_heartbeat = std::chrono::steady_clock::now();
   auto last_prune = std::chrono::steady_clock::now();
 
-  while (!st.stop_requested() || !in_buf.empty_approx()) {
+  while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
+         !in_buf.empty_approx()) {
     ClassificationResult cr;
     if (!in_buf.pop(cr)) {
-      if (st.stop_requested())
+      if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
         break;
       std::this_thread::sleep_for(std::chrono::microseconds(200));
       continue;
