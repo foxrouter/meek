@@ -48,6 +48,7 @@ struct ProcMetrics {
   std::uint64_t db_errors{0};
   std::uint64_t snap_errors{0};
   std::uint64_t snap_dropped{0};
+  std::uint64_t frames_cap_dropped{0};
 };
 
 // ---------------------------------------------------------------------------
@@ -90,7 +91,11 @@ inline void write_prometheus_textfile(const std::string& path,
         << "rf_errors_total{type=\"snapshot\"} " << m.snap_errors << "\n"
         << "# HELP rf_snapshots_dropped_total Snapshot tasks dropped due to full queue\n"
         << "# TYPE rf_snapshots_dropped_total counter\n"
-        << "rf_snapshots_dropped_total " << m.snap_dropped << "\n";
+        << "rf_snapshots_dropped_total " << m.snap_dropped << "\n"
+        << "# HELP rf_frames_cap_dropped_total "
+        << "IQ blocks dropped by capture loop under backpressure\n"
+        << "# TYPE rf_frames_cap_dropped_total counter\n"
+        << "rf_frames_cap_dropped_total " << m.frames_cap_dropped << "\n";
   } catch (...) {
   }
 }
@@ -157,7 +162,8 @@ start_prometheus_http(std::uint16_t port,
          << "rf_confidence_avg " << avg_conf << "\n"
          << "rf_errors_total{type=\"db\"} " << snap.db_errors << "\n"
          << "rf_errors_total{type=\"snapshot\"} " << snap.snap_errors << "\n"
-         << "rf_snapshots_dropped_total " << snap.snap_dropped << "\n";
+         << "rf_snapshots_dropped_total " << snap.snap_dropped << "\n"
+         << "rf_frames_cap_dropped_total " << snap.frames_cap_dropped << "\n";
     res.set_content(body.str(), "text/plain; version=0.0.4; charset=utf-8");
   });
 

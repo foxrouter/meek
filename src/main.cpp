@@ -268,7 +268,8 @@ struct SnapTask {
 // ---------------------------------------------------------------------------
 
 static void capture_loop(std::stop_token st, ISdrSource& sdr,
-                         SpscRingBuffer<SampleBlock, 64>& out_buf, const Config& cfg) {
+                         SpscRingBuffer<SampleBlock, 64>& out_buf, const Config& cfg,
+                         std::atomic<std::uint64_t>& cap_dropped) {
   std::vector<std::complex<float>> buf(cfg.block_len);
 
   while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
@@ -303,8 +304,8 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
       std::this_thread::sleep_for(std::chrono::microseconds(100));
     }
     if (!pushed) {
-      // Block dropped under sustained backpressure; re-assign for next iteration.
-      blk = SampleBlock{};
+      // Block dropped under sustained backpressure; record the drop.
+      cap_dropped.fetch_add(1, std::memory_order_relaxed);
     }
   }
 }
@@ -429,6 +430,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
 static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult, 64>& in_buf,
                         Database& db, const Config& cfg, std::atomic<std::uint64_t>& snap_errors,
                         std::atomic<std::uint64_t>& snap_dropped,
+                        std::atomic<std::uint64_t>& cap_dropped,
                         std::shared_ptr<MetricsSnapshot> metrics_snapshot) {
   const std::int64_t method_id = db.upsert_method(
       "modulation_classifier",
@@ -506,6 +508,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
       // Sync shared atomic counters (updated by other threads) into metrics.
       metrics.snap_errors = snap_errors.load(std::memory_order_relaxed);
       metrics.snap_dropped = snap_dropped.load(std::memory_order_relaxed);
+      metrics.frames_cap_dropped = cap_dropped.load(std::memory_order_relaxed);
       write_prometheus_textfile(cfg.metrics_file, metrics);
       if (metrics_snapshot) {
         std::lock_guard lk(metrics_snapshot->mu);
@@ -525,6 +528,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
 
   metrics.snap_errors = snap_errors.load(std::memory_order_relaxed);
   metrics.snap_dropped = snap_dropped.load(std::memory_order_relaxed);
+  metrics.frames_cap_dropped = cap_dropped.load(std::memory_order_relaxed);
   write_prometheus_textfile(cfg.metrics_file, metrics);
 }
 
@@ -602,6 +606,7 @@ int main(int argc, char** argv) {
   std::deque<SnapTask> snap_queue;
   std::atomic<std::uint64_t> snap_errors{0};
   std::atomic<std::uint64_t> snap_dropped{0};
+  std::atomic<std::uint64_t> cap_dropped{0};
 
   std::jthread snap_thread([&](std::stop_token st) {
     while (!st.stop_requested()) {
@@ -640,14 +645,17 @@ int main(int argc, char** argv) {
   }
 #endif
 
-  std::jthread cap_thread([&](std::stop_token st) { capture_loop(st, *sdr, cap_to_proc, cfg); });
+  std::jthread cap_thread([&](std::stop_token st) {
+    capture_loop(st, *sdr, cap_to_proc, cfg, cap_dropped);
+  });
 
   std::jthread proc_thread([&](std::stop_token st) {
     proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_mu, snap_queue, snap_dropped);
   });
 
   std::jthread out_thread([&](std::stop_token st) {
-    output_loop(st, proc_to_out, *db, cfg, snap_errors, snap_dropped, metrics_snapshot);
+    output_loop(st, proc_to_out, *db, cfg, snap_errors, snap_dropped, cap_dropped,
+                metrics_snapshot);
   });
 
 #ifdef HAVE_HTTPLIB
