@@ -234,15 +234,15 @@ LIMIT  30;
 
 -- ISM-433 + LoRa-868 + ZigBee combined IoT overview
 SELECT
-    SUBSTR(notes, INSTR(notes,'band='), 20) AS band_tag,
-    COUNT(*)                                AS count,
-    ROUND(AVG(e.confidence), 3)             AS avg_conf
+    SUBSTR(s.notes, INSTR(s.notes,'band='), 20) AS band_tag,
+    COUNT(*)                                     AS count,
+    ROUND(AVG(e.confidence), 3)                  AS avg_conf
 FROM   signals s
 JOIN   examples e ON e.signal_id = s.id
-WHERE  (notes LIKE '%band=ISM-433%'
-     OR notes LIKE '%band=LORA-868%'
-     OR notes LIKE '%band=ZIGBEE-868%'
-     OR notes LIKE '%band=WMBUS-169%')
+WHERE  (s.notes LIKE '%band=ISM-433%'
+     OR s.notes LIKE '%band=LORA-868%'
+     OR s.notes LIKE '%band=ZIGBEE-868%'
+     OR s.notes LIKE '%band=WMBUS-169%')
 GROUP  BY band_tag
 ORDER  BY count DESC;
 ```
@@ -346,44 +346,44 @@ LIMIT  30;
 -- All bands: total detections ranked
 SELECT
     CASE
-        WHEN notes LIKE '%band=ADS-B%'          THEN 'ADS-B'
-        WHEN notes LIKE '%band=VDL2%'            THEN 'VDL2'
-        WHEN notes LIKE '%band=ACARS-VHF%'       THEN 'ACARS-VHF'
-        WHEN notes LIKE '%band=ACARS-129%'       THEN 'ACARS-129'
-        WHEN notes LIKE '%band=ACARS-130%'       THEN 'ACARS-130'
-        WHEN notes LIKE '%band=ACARS%'           THEN 'ACARS'
-        WHEN notes LIKE '%band=AIRBAND-VHF%'     THEN 'AIRBAND-VHF'
-        WHEN notes LIKE '%band=VOLMET%'          THEN 'VOLMET'
-        WHEN notes LIKE '%band=AIS-A%'           THEN 'AIS-A'
-        WHEN notes LIKE '%band=AIS-B%'           THEN 'AIS-B'
-        WHEN notes LIKE '%band=NOAA-APT%'        THEN 'NOAA-APT'
-        WHEN notes LIKE '%band=METEOR-LRPT%'     THEN 'METEOR-LRPT'
-        WHEN notes LIKE '%band=RADIOSONDE%'      THEN 'RADIOSONDE'
-        WHEN notes LIKE '%band=SMETS2%'          THEN 'SMETS2'
-        WHEN notes LIKE '%band=TPMS-433%'        THEN 'TPMS-433'
-        WHEN notes LIKE '%band=ISM-433%'         THEN 'ISM-433'
-        WHEN notes LIKE '%band=ISM-169%'         THEN 'ISM-169'
-        WHEN notes LIKE '%band=LORA-868%'        THEN 'LORA-868'
-        WHEN notes LIKE '%band=TETRA%'           THEN 'TETRA'
-        WHEN notes LIKE '%band=ELT-406%'         THEN 'ELT-406'
-        WHEN notes LIKE '%band=PMR446%'          THEN 'PMR446'
-        WHEN notes LIKE '%band=IRIDIUM%'         THEN 'IRIDIUM'
-        WHEN notes LIKE '%band=INMARSAT-AERO%'   THEN 'INMARSAT-AERO'
-        WHEN notes LIKE '%band=GPS-L1%'          THEN 'GPS-L1'
-        WHEN notes LIKE '%band=APRS%'            THEN 'APRS'
-        WHEN notes LIKE '%band=MARINE-CH16%'     THEN 'MARINE-CH16'
-        WHEN notes LIKE '%band=MARINE-CH70%'     THEN 'MARINE-CH70'
-        WHEN notes LIKE '%band=DMR%'             THEN 'DMR'
-        WHEN notes LIKE '%band=DAB%'             THEN 'DAB'
-        WHEN notes LIKE '%band=POCSAG-153%'      THEN 'POCSAG-153'
-        WHEN notes LIKE '%band=FLEX-931%'        THEN 'FLEX-931'
-        WHEN notes LIKE '%band=DECT%'            THEN 'DECT'
-        WHEN notes LIKE '%band=ZIGBEE-868%'      THEN 'ZIGBEE-868'
-        WHEN notes LIKE '%band=WMBUS-169%'       THEN 'WMBUS-169'
-        WHEN notes LIKE '%band=SIGFOX-868%'      THEN 'SIGFOX-868'
-        WHEN notes LIKE '%band=ZWAVE-868%'       THEN 'ZWAVE-868'
-        WHEN notes LIKE '%band=CNI-UHF%'         THEN 'CNI-UHF'
-        WHEN notes LIKE '%band=GSM-R-876%'       THEN 'GSM-R-876'
+        WHEN s.notes LIKE '%band=ADS-B%'          THEN 'ADS-B'
+        WHEN s.notes LIKE '%band=VDL2%'           THEN 'VDL2'
+        WHEN s.notes LIKE '%band=ACARS-VHF%'      THEN 'ACARS-VHF'
+        WHEN s.notes LIKE '%band=ACARS-129%'      THEN 'ACARS-129'
+        WHEN s.notes LIKE '%band=ACARS-130%'      THEN 'ACARS-130'
+        WHEN s.notes LIKE '%band=ACARS%'          THEN 'ACARS'
+        WHEN s.notes LIKE '%band=AIRBAND-VHF%'    THEN 'AIRBAND-VHF'
+        WHEN s.notes LIKE '%band=VOLMET%'         THEN 'VOLMET'
+        WHEN s.notes LIKE '%band=AIS-A%'          THEN 'AIS-A'
+        WHEN s.notes LIKE '%band=AIS-B%'          THEN 'AIS-B'
+        WHEN s.notes LIKE '%band=NOAA-APT%'       THEN 'NOAA-APT'
+        WHEN s.notes LIKE '%band=METEOR-LRPT%'    THEN 'METEOR-LRPT'
+        WHEN s.notes LIKE '%band=RADIOSONDE%'     THEN 'RADIOSONDE'
+        WHEN s.notes LIKE '%band=SMETS2%'         THEN 'SMETS2'
+        WHEN s.notes LIKE '%band=TPMS-433%'       THEN 'TPMS-433'
+        WHEN s.notes LIKE '%band=ISM-433%'        THEN 'ISM-433'
+        WHEN s.notes LIKE '%band=ISM-169%'        THEN 'ISM-169'
+        WHEN s.notes LIKE '%band=LORA-868%'       THEN 'LORA-868'
+        WHEN s.notes LIKE '%band=TETRA%'          THEN 'TETRA'
+        WHEN s.notes LIKE '%band=ELT-406%'        THEN 'ELT-406'
+        WHEN s.notes LIKE '%band=PMR446%'         THEN 'PMR446'
+        WHEN s.notes LIKE '%band=IRIDIUM%'        THEN 'IRIDIUM'
+        WHEN s.notes LIKE '%band=INMARSAT-AERO%'  THEN 'INMARSAT-AERO'
+        WHEN s.notes LIKE '%band=GPS-L1%'         THEN 'GPS-L1'
+        WHEN s.notes LIKE '%band=APRS%'           THEN 'APRS'
+        WHEN s.notes LIKE '%band=MARINE-CH16%'    THEN 'MARINE-CH16'
+        WHEN s.notes LIKE '%band=MARINE-CH70%'    THEN 'MARINE-CH70'
+        WHEN s.notes LIKE '%band=DMR%'            THEN 'DMR'
+        WHEN s.notes LIKE '%band=DAB%'            THEN 'DAB'
+        WHEN s.notes LIKE '%band=POCSAG-153%'     THEN 'POCSAG-153'
+        WHEN s.notes LIKE '%band=FLEX-931%'       THEN 'FLEX-931'
+        WHEN s.notes LIKE '%band=DECT%'           THEN 'DECT'
+        WHEN s.notes LIKE '%band=ZIGBEE-868%'     THEN 'ZIGBEE-868'
+        WHEN s.notes LIKE '%band=WMBUS-169%'      THEN 'WMBUS-169'
+        WHEN s.notes LIKE '%band=SIGFOX-868%'     THEN 'SIGFOX-868'
+        WHEN s.notes LIKE '%band=ZWAVE-868%'      THEN 'ZWAVE-868'
+        WHEN s.notes LIKE '%band=CNI-UHF%'        THEN 'CNI-UHF'
+        WHEN s.notes LIKE '%band=GSM-R-876%'      THEN 'GSM-R-876'
         ELSE '(no band / unknown)'
     END AS band,
     COUNT(*)                        AS detections,
@@ -538,9 +538,9 @@ FROM signals;
 SELECT CAST(STRFTIME('%H', timestamp) AS INTEGER) AS hour_utc,
        COUNT(*) AS messages
 FROM signals
-WHERE (notes LIKE '%band=ACARS-VHF%'
-    OR notes LIKE '%band=ACARS-129%'
-    OR notes LIKE '%band=ACARS-130%')
+WHERE (notes LIKE '%band=ACARS %'
+    OR notes LIKE '%band=ACARS-129 %'
+    OR notes LIKE '%band=ACARS-130 %')
 GROUP BY hour_utc ORDER BY hour_utc;
 ```
 
