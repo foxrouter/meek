@@ -21,6 +21,9 @@
 DROP VIEW IF EXISTS v_band;
 CREATE TEMP VIEW v_band AS
 SELECT id AS signal_id,
+    timestamp,
+    source,
+    notes,
     CASE
         WHEN notes LIKE '%band=ADS-B%'         THEN 'ADS-B'
         WHEN notes LIKE '%band=VDL2%'          THEN 'VDL2'
@@ -98,11 +101,11 @@ SELECT
     bm.band,
     COUNT(*)                     AS detections,
     ROUND(AVG(e.confidence), 3)  AS avg_confidence,
-    MAX(s.timestamp)             AS last_seen
-FROM signals s
-JOIN examples e ON e.signal_id = s.id
-JOIN v_band bm  ON bm.signal_id = s.id
-WHERE s.timestamp >= DATETIME('now', '-30 days')
+    MAX(bm.timestamp)            AS last_seen
+FROM v_band bm
+JOIN examples e ON e.signal_id = bm.signal_id
+WHERE bm.timestamp >= DATETIME('now', '-30 days')
+  AND bm.band != 'unmatched'
 GROUP BY bm.band
 ORDER BY detections DESC;
 
@@ -164,15 +167,14 @@ SELECT
     -- Extract numeric SNR: find 'snr=', then locate the 'dB' within that suffix
     ROUND(AVG(
         CAST(SUBSTR(
-            s.notes,
-            INSTR(s.notes, 'snr=') + 4,
-            INSTR(SUBSTR(s.notes, INSTR(s.notes, 'snr=') + 4), 'dB') - 1
+            bm.notes,
+            INSTR(bm.notes, 'snr=') + 4,
+            INSTR(SUBSTR(bm.notes, INSTR(bm.notes, 'snr=') + 4), 'dB') - 1
         ) AS REAL)
     ), 2)                                                        AS avg_snr_db
-FROM signals s
-JOIN v_band bm ON bm.signal_id = s.id
-WHERE s.timestamp >= DATETIME('now', '-7 days')
-  AND s.notes LIKE '%snr=%'
+FROM v_band bm
+WHERE bm.timestamp >= DATETIME('now', '-7 days')
+  AND bm.notes LIKE '%snr=%'
 GROUP BY bm.band
 ORDER BY avg_snr_db DESC;
 
@@ -180,18 +182,20 @@ ORDER BY avg_snr_db DESC;
 -- 6.  REJECTION / GATE ANALYSIS
 --     NOTE: Rejected frames are NOT inserted into the SQLite DB.
 --     The worker (output_loop in src/main.cpp) only persists detections that
---     pass the confidence threshold AND the SNR gate, so [REJECT:…] tokens
---     never appear in signals.notes.
+--     pass all gates in classify_block() — confidence threshold, SNR gate,
+--     bandwidth guardrail, power range, and optional PAPR max — so [REJECT:…]
+--     tokens never appear in signals.notes.
 --
 --     To analyse gate behaviour in production use:
 --       - Prometheus metrics:  rf_frames_rejected, rf_frames_total
 --                              (textfile at /var/lib/rf-adapt-intel/metrics.prom)
 --
 --     Implementation note:
---       write_json_log() is only called for frames that pass the gates, so
---       rejected frames and any [REJECT:…] decision_trace tokens do NOT appear
---       in worker.log either.  If per-frame reject traces are required, add a
---       separate logging path in the worker for gated-out frames.
+--       write_json_log() is only called for frames that pass all of the
+--       classify_block() gates, so rejected frames and any [REJECT:…]
+--       decision_trace tokens do NOT appear in worker.log either.  If per-
+--       frame reject traces are required, add a separate logging path in the
+--       worker for gated-out frames.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -224,18 +228,18 @@ ORDER BY hour_utc;
 SELECT
     bm.band,
     CASE
-        WHEN s.notes LIKE '%-> fsk_like@%'     THEN 'FSK'
-        WHEN s.notes LIKE '%-> psk_qam_like@%' THEN 'PSK/QAM'
-        WHEN s.notes LIKE '%-> ook_am_like@%'  THEN 'OOK/AM'
-        WHEN s.notes LIKE '%-> cw_like@%'      THEN 'CW'
+        WHEN bm.notes LIKE '%-> fsk_like@%'     THEN 'FSK'
+        WHEN bm.notes LIKE '%-> psk_qam_like@%' THEN 'PSK/QAM'
+        WHEN bm.notes LIKE '%-> ook_am_like@%'  THEN 'OOK/AM'
+        WHEN bm.notes LIKE '%-> cw_like@%'      THEN 'CW'
         ELSE                                        'other'
     END                                      AS mod_class,
     COUNT(*)                                 AS detections,
     ROUND(AVG(e.confidence), 3)              AS avg_confidence
-FROM signals s
-JOIN examples e ON e.signal_id = s.id
-JOIN v_band bm  ON bm.signal_id = s.id
-WHERE s.timestamp >= DATETIME('now', '-30 days')
+FROM v_band bm
+JOIN examples e ON e.signal_id = bm.signal_id
+WHERE bm.timestamp >= DATETIME('now', '-30 days')
+  AND bm.band != 'unmatched'
 GROUP BY bm.band, mod_class
 ORDER BY bm.band, detections DESC;
 
