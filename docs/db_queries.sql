@@ -1,0 +1,371 @@
+-- =============================================================================
+-- meek DB query reference  —  Brian (192.168.4.246), user: woger
+-- DB path: /home/woger/rf_worker/rf_adapt_intel.db  (adjust to your cfg)
+-- Open:    sqlite3 /home/woger/rf_worker/rf_adapt_intel.db
+-- Schema:  signals(id, timestamp, source, notes)
+--          methods(id, name, params)
+--          examples(id, signal_id, method_id, confidence, notes, created_at)
+-- notes / decision_trace contains:  band=<BAND>  snr=<X>dB  -> <mod>@<conf>
+-- =============================================================================
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 0.  HOUSEKEEPING / SQLITE SETTINGS
+-- ─────────────────────────────────────────────────────────────────────────────
+PRAGMA query_only = ON;           -- read-only session (safety net)
+PRAGMA journal_mode = WAL;        -- concurrent readers during live capture
+.headers on
+.mode column
+.nullvalue —
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 1.  OVERVIEW — row counts and date range
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT 'signals'  AS tbl, COUNT(*) AS total_rows FROM signals
+UNION ALL
+SELECT 'examples', COUNT(*) FROM examples
+UNION ALL
+SELECT 'methods',  COUNT(*) FROM methods;
+
+SELECT MIN(timestamp) AS oldest,
+       MAX(timestamp) AS newest
+FROM signals;
+
+-- Signals captured in the last 24 h / 7 days / 30 days
+SELECT
+    SUM(CASE WHEN timestamp >= DATETIME('now', '-1 day')   THEN 1 ELSE 0 END) AS last_24h,
+    SUM(CASE WHEN timestamp >= DATETIME('now', '-7 days')  THEN 1 ELSE 0 END) AS last_7d,
+    SUM(CASE WHEN timestamp >= DATETIME('now', '-30 days') THEN 1 ELSE 0 END) AS last_30d,
+    COUNT(*)                                                                   AS all_time
+FROM signals;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 2.  ACTIVITY BY BAND  (uses LIKE match on decision_trace stored in notes)
+--     Replace '-30 days' with '-7 days' or '-1 day' as needed.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Count per known band, sorted most-active first
+SELECT
+    CASE
+        WHEN s.notes LIKE '%band=ADS-B%'         THEN 'ADS-B'
+        WHEN s.notes LIKE '%band=ACARS-VHF%'     THEN 'ACARS-VHF'
+        WHEN s.notes LIKE '%band=VDL2%'          THEN 'VDL2'
+        WHEN s.notes LIKE '%band=INMARSAT-AERO%' THEN 'INMARSAT-AERO'
+        WHEN s.notes LIKE '%band=AIS-A%'         THEN 'AIS-A'
+        WHEN s.notes LIKE '%band=AIS-B%'         THEN 'AIS-B'
+        WHEN s.notes LIKE '%band=MARINE-CH16%'   THEN 'MARINE-CH16'
+        WHEN s.notes LIKE '%band=MARINE-CH70%'   THEN 'MARINE-CH70'
+        WHEN s.notes LIKE '%band=NOAA-APT%'      THEN 'NOAA-APT'
+        WHEN s.notes LIKE '%band=METEOR-LRPT%'   THEN 'METEOR-LRPT'
+        WHEN s.notes LIKE '%band=RADIOSONDE%'    THEN 'RADIOSONDE'
+        WHEN s.notes LIKE '%band=GPS-L1%'        THEN 'GPS-L1'
+        WHEN s.notes LIKE '%band=IRIDIUM%'       THEN 'IRIDIUM'
+        WHEN s.notes LIKE '%band=SMETS2%'        THEN 'SMETS2'
+        WHEN s.notes LIKE '%band=TPMS-433%'      THEN 'TPMS-433'
+        WHEN s.notes LIKE '%band=ISM-433%'       THEN 'ISM-433'
+        WHEN s.notes LIKE '%band=LORA-868%'      THEN 'LORA-868'
+        WHEN s.notes LIKE '%band=ZIGBEE-868%'    THEN 'ZIGBEE-868'
+        WHEN s.notes LIKE '%band=WMBUS-169%'     THEN 'WMBUS-169'
+        WHEN s.notes LIKE '%band=SIGFOX-868%'    THEN 'SIGFOX-868'
+        WHEN s.notes LIKE '%band=ZWAVE-868%'     THEN 'ZWAVE-868'
+        WHEN s.notes LIKE '%band=TETRA%'         THEN 'TETRA'
+        WHEN s.notes LIKE '%band=ELT-406%'       THEN 'ELT-406'
+        WHEN s.notes LIKE '%band=PMR446%'        THEN 'PMR446'
+        WHEN s.notes LIKE '%band=APRS%'          THEN 'APRS'
+        WHEN s.notes LIKE '%band=DAB%'           THEN 'DAB'
+        WHEN s.notes LIKE '%band=POCSAG-153%'    THEN 'POCSAG-153'
+        WHEN s.notes LIKE '%band=FLEX-931%'      THEN 'FLEX-931'
+        WHEN s.notes LIKE '%band=DMR%'           THEN 'DMR'
+        WHEN s.notes LIKE '%band=DECT%'          THEN 'DECT'
+        ELSE                                          'unmatched'
+    END                          AS band,
+    COUNT(*)                     AS detections,
+    ROUND(AVG(e.confidence), 3)  AS avg_confidence,
+    MAX(s.timestamp)             AS last_seen
+FROM signals s
+JOIN examples e ON e.signal_id = s.id
+WHERE s.timestamp >= DATETIME('now', '-30 days')
+GROUP BY band
+ORDER BY detections DESC;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 3.  MODULATION-CLASS BREAKDOWN
+--     The decision_trace encodes the winner as "-> <mod>@<conf>".
+--     SQLite LIKE is used to bucket by modulation class.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT
+    CASE
+        WHEN s.notes LIKE '%-> fsk_like@%'     THEN 'FSK'
+        WHEN s.notes LIKE '%-> psk_qam_like@%' THEN 'PSK/QAM'
+        WHEN s.notes LIKE '%-> ook_am_like@%'  THEN 'OOK/AM'
+        WHEN s.notes LIKE '%-> cw_like@%'      THEN 'CW'
+        WHEN s.notes LIKE '%-> unknown@%'      THEN 'unknown'
+        ELSE                                        'other'
+    END                          AS mod_class,
+    COUNT(*)                     AS detections,
+    ROUND(AVG(e.confidence), 3)  AS avg_confidence,
+    ROUND(MIN(e.confidence), 3)  AS min_confidence,
+    ROUND(MAX(e.confidence), 3)  AS max_confidence
+FROM signals s
+JOIN examples e ON e.signal_id = s.id
+WHERE s.timestamp >= DATETIME('now', '-30 days')
+GROUP BY mod_class
+ORDER BY detections DESC;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 4.  CONFIDENCE DISTRIBUTION (bucketed)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT
+    CASE
+        WHEN e.confidence >= 0.90 THEN 'Very High (>=0.90)'
+        WHEN e.confidence >= 0.70 THEN 'High      (0.70-0.89)'
+        WHEN e.confidence >= 0.50 THEN 'Medium    (0.50-0.69)'
+        WHEN e.confidence >= 0.30 THEN 'Low       (0.30-0.49)'
+        ELSE                           'Noise     (<0.30)'
+    END           AS confidence_bucket,
+    COUNT(*)      AS count,
+    ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM examples), 1) AS pct
+FROM examples e
+JOIN signals s ON s.id = e.signal_id
+WHERE s.timestamp >= DATETIME('now', '-30 days')
+GROUP BY confidence_bucket
+ORDER BY MIN(e.confidence) DESC;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 5.  SNR DISTRIBUTION  (extracted from decision_trace "snr=X.XXXdB")
+--     INSTR/SUBSTR are used because SQLite lacks regex by default.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Average / min / max SNR per band over last 7 days
+SELECT
+    CASE
+        WHEN s.notes LIKE '%band=ADS-B%'    THEN 'ADS-B'
+        WHEN s.notes LIKE '%band=TETRA%'    THEN 'TETRA'
+        WHEN s.notes LIKE '%band=APRS%'     THEN 'APRS'
+        WHEN s.notes LIKE '%band=ISM-433%'  THEN 'ISM-433'
+        WHEN s.notes LIKE '%band=LORA-868%' THEN 'LORA-868'
+        WHEN s.notes LIKE '%band=ELT-406%'  THEN 'ELT-406'
+        WHEN s.notes LIKE '%band=DMR%'      THEN 'DMR'
+        ELSE 'other'
+    END                                                          AS band,
+    COUNT(*)                                                     AS detections,
+    -- Extract numeric SNR: find 'snr=', then locate the 'dB' within that suffix
+    ROUND(AVG(
+        CAST(SUBSTR(
+            s.notes,
+            INSTR(s.notes, 'snr=') + 4,
+            INSTR(SUBSTR(s.notes, INSTR(s.notes, 'snr=') + 4), 'dB') - 1
+        ) AS REAL)
+    ), 2)                                                        AS avg_snr_db
+FROM signals s
+WHERE s.timestamp >= DATETIME('now', '-7 days')
+  AND s.notes LIKE '%snr=%'
+GROUP BY band
+ORDER BY avg_snr_db DESC;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 6.  REJECTION ANALYSIS
+--     The classifier inserts [REJECT:…] tokens into the decision_trace when
+--     a signal is gated out (snr_gate, bw_gate, power_range, papr_max).
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT
+    CASE
+        WHEN notes LIKE '%[REJECT:snr_gate%'    THEN 'snr_gate'
+        WHEN notes LIKE '%[REJECT:bw_gate%'     THEN 'bw_gate'
+        WHEN notes LIKE '%[REJECT:power_range%' THEN 'power_range'
+        WHEN notes LIKE '%[REJECT:papr_max%'    THEN 'papr_max'
+        ELSE                                         'accepted'
+    END           AS rejection_reason,
+    COUNT(*)      AS count
+FROM signals
+WHERE timestamp >= DATETIME('now', '-7 days')
+GROUP BY rejection_reason
+ORDER BY count DESC;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 7.  DAILY TREND — detections per day over last 30 days
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT DATE(timestamp) AS day,
+       COUNT(*)        AS detections
+FROM signals
+WHERE timestamp >= DATE('now', '-30 days')
+GROUP BY day
+ORDER BY day DESC;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 8.  HOURLY PATTERN — hour-of-day distribution (UTC) last 7 days
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT CAST(STRFTIME('%H', timestamp) AS INTEGER) AS hour_utc,
+       COUNT(*)                                    AS detections
+FROM signals
+WHERE timestamp >= DATETIME('now', '-7 days')
+GROUP BY hour_utc
+ORDER BY hour_utc;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 9.  BAND × MOD CROSS-TAB  (last 30 days)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT
+    CASE
+        WHEN s.notes LIKE '%band=ADS-B%'    THEN 'ADS-B'
+        WHEN s.notes LIKE '%band=TETRA%'    THEN 'TETRA'
+        WHEN s.notes LIKE '%band=APRS%'     THEN 'APRS'
+        WHEN s.notes LIKE '%band=ISM-433%'  THEN 'ISM-433'
+        WHEN s.notes LIKE '%band=LORA-868%' THEN 'LORA-868'
+        WHEN s.notes LIKE '%band=ELT-406%'  THEN 'ELT-406'
+        WHEN s.notes LIKE '%band=DMR%'      THEN 'DMR'
+        ELSE 'other'
+    END                                      AS band,
+    CASE
+        WHEN s.notes LIKE '%-> fsk_like@%'     THEN 'FSK'
+        WHEN s.notes LIKE '%-> psk_qam_like@%' THEN 'PSK/QAM'
+        WHEN s.notes LIKE '%-> ook_am_like@%'  THEN 'OOK/AM'
+        WHEN s.notes LIKE '%-> cw_like@%'      THEN 'CW'
+        ELSE                                        'other'
+    END                                      AS mod_class,
+    COUNT(*)                                 AS detections,
+    ROUND(AVG(e.confidence), 3)              AS avg_confidence
+FROM signals s
+JOIN examples e ON e.signal_id = s.id
+WHERE s.timestamp >= DATETIME('now', '-30 days')
+GROUP BY band, mod_class
+ORDER BY band, detections DESC;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 10. ELT / DISTRESS BEACON ALERTS  (safety-critical — always check)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT s.id,
+       s.timestamp,
+       ROUND(e.confidence, 3)          AS confidence,
+       SUBSTR(s.notes, 1, 200)         AS trace_excerpt
+FROM signals s
+JOIN examples e ON e.signal_id = s.id
+WHERE s.notes LIKE '%band=ELT-406%'
+ORDER BY s.timestamp DESC
+LIMIT 50;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 11. HIGH-CONFIDENCE RECENT DETECTIONS  (conf >= 0.85, last 24 h)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT s.timestamp,
+       ROUND(e.confidence, 3)          AS confidence,
+       SUBSTR(s.notes, 1, 200)         AS trace_excerpt
+FROM signals s
+JOIN examples e ON e.signal_id = s.id
+WHERE e.confidence >= 0.85
+  AND s.timestamp >= DATETIME('now', '-1 day')
+ORDER BY e.confidence DESC, s.timestamp DESC
+LIMIT 100;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 12. LOW-CONFIDENCE / NOISY OBSERVATIONS  (conf < 0.30, last 7 days)
+--     Useful for diagnosing antenna/SDR noise floor issues.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT s.timestamp,
+       ROUND(e.confidence, 3)          AS confidence,
+       SUBSTR(s.notes, 1, 200)         AS trace_excerpt
+FROM signals s
+JOIN examples e ON e.signal_id = s.id
+WHERE e.confidence < 0.30
+  AND s.timestamp >= DATETIME('now', '-7 days')
+ORDER BY s.timestamp DESC
+LIMIT 50;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 13. METHODS TABLE — registered classifiers and their parameters
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT id, name, params FROM methods ORDER BY id;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 14. BAND GROUP TOTALS (last 30 days)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT 'Aviation'              AS band_group,
+       SUM(CASE WHEN notes LIKE '%band=ADS-B%'
+                  OR notes LIKE '%band=VDL2%'
+                  OR notes LIKE '%band=ACARS-VHF%'
+                  OR notes LIKE '%band=INMARSAT-AERO%'
+               THEN 1 ELSE 0 END) AS detections
+FROM signals WHERE timestamp >= DATETIME('now', '-30 days')
+UNION ALL
+SELECT 'Maritime',
+       SUM(CASE WHEN notes LIKE '%band=AIS-A%'
+                  OR notes LIKE '%band=AIS-B%'
+                  OR notes LIKE '%band=MARINE-CH16%'
+                  OR notes LIKE '%band=MARINE-CH70%'
+               THEN 1 ELSE 0 END)
+FROM signals WHERE timestamp >= DATETIME('now', '-30 days')
+UNION ALL
+SELECT 'Weather & Satellite',
+       SUM(CASE WHEN notes LIKE '%band=NOAA-APT%'
+                  OR notes LIKE '%band=METEOR-LRPT%'
+                  OR notes LIKE '%band=RADIOSONDE%'
+                  OR notes LIKE '%band=GPS-L1%'
+                  OR notes LIKE '%band=IRIDIUM%'
+               THEN 1 ELSE 0 END)
+FROM signals WHERE timestamp >= DATETIME('now', '-30 days')
+UNION ALL
+SELECT 'IoT & Smart Infrastructure',
+       SUM(CASE WHEN notes LIKE '%band=SMETS2%'
+                  OR notes LIKE '%band=TPMS-433%'
+                  OR notes LIKE '%band=ISM-433%'
+                  OR notes LIKE '%band=LORA-868%'
+                  OR notes LIKE '%band=ZIGBEE-868%'
+                  OR notes LIKE '%band=WMBUS-169%'
+                  OR notes LIKE '%band=SIGFOX-868%'
+                  OR notes LIKE '%band=ZWAVE-868%'
+               THEN 1 ELSE 0 END)
+FROM signals WHERE timestamp >= DATETIME('now', '-30 days')
+UNION ALL
+SELECT 'Emergency & Public Safety',
+       SUM(CASE WHEN notes LIKE '%band=TETRA%'
+                  OR notes LIKE '%band=ELT-406%'
+                  OR notes LIKE '%band=PMR446%'
+                  OR notes LIKE '%band=APRS%'
+               THEN 1 ELSE 0 END)
+FROM signals WHERE timestamp >= DATETIME('now', '-30 days')
+UNION ALL
+SELECT 'Broadcasting & Paging',
+       SUM(CASE WHEN notes LIKE '%band=DAB%'
+                  OR notes LIKE '%band=POCSAG-153%'
+                  OR notes LIKE '%band=FLEX-931%'
+                  OR notes LIKE '%band=DMR%'
+                  OR notes LIKE '%band=DECT%'
+               THEN 1 ELSE 0 END)
+FROM signals WHERE timestamp >= DATETIME('now', '-30 days')
+ORDER BY detections DESC;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 15. SIGNAL RATE — per-hour burst rate (last 24 h, for spotting RFI spikes)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT STRFTIME('%Y-%m-%d %H:00', timestamp) AS hour_slot,
+       COUNT(*)                               AS detections
+FROM signals
+WHERE timestamp >= DATETIME('now', '-1 day')
+GROUP BY hour_slot
+ORDER BY hour_slot DESC;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 16. RAW TAIL — most recent 20 signal rows (for quick live inspection)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+SELECT s.id,
+       s.timestamp,
+       s.source,
+       ROUND(e.confidence, 3) AS confidence,
+       SUBSTR(s.notes, 1, 160) AS trace_excerpt
+FROM signals s
+JOIN examples e ON e.signal_id = s.id
+ORDER BY s.id DESC
+LIMIT 20;
