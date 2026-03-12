@@ -73,15 +73,15 @@ SELECT s.timestamp, e.confidence,
        SUBSTR(s.notes, INSTR(s.notes,'band='), 20) AS band_hint
 FROM   signals s
 JOIN   examples e ON e.signal_id = s.id
-WHERE  ((s.notes LIKE '%band=ACARS-VHF%' OR s.notes LIKE '%band=ACARS%')
-        OR s.notes LIKE '%band=VDL2%')
+WHERE  ((s.notes LIKE '%band=ACARS-VHF %' OR s.notes LIKE '%band=ACARS %')
+        OR s.notes LIKE '%band=VDL2 %')
 ORDER  BY s.timestamp DESC
 LIMIT  40;
 
 -- ACARS vs VDL2 — comparative volume
 SELECT
-    SUM(CASE WHEN notes LIKE '%band=ACARS-VHF%' OR notes LIKE '%band=ACARS%' THEN 1 ELSE 0 END) AS acars,
-    SUM(CASE WHEN notes LIKE '%band=VDL2%'      THEN 1 ELSE 0 END) AS vdl2
+    SUM(CASE WHEN notes LIKE '%band=ACARS-VHF %' OR notes LIKE '%band=ACARS %' THEN 1 ELSE 0 END) AS acars,
+    SUM(CASE WHEN notes LIKE '%band=VDL2 %'      THEN 1 ELSE 0 END) AS vdl2
 FROM signals;
 
 -- Inmarsat Aero: satellite aviation messages
@@ -396,11 +396,15 @@ ORDER  BY detections DESC;
 
 -- Last 24 hours — what has meek seen today?
 SELECT s.timestamp,
-       SUBSTR(
-           s.notes,
-           INSTR(s.notes, 'band='),
-           INSTR(SUBSTR(s.notes || ' ', INSTR(s.notes, 'band=')), ' ') - 1
-       ) AS band_hint,
+       CASE
+           WHEN INSTR(s.notes, 'band=') > 0 THEN
+               SUBSTR(
+                   s.notes,
+                   INSTR(s.notes, 'band='),
+                   INSTR(SUBSTR(s.notes || ' ', INSTR(s.notes, 'band=')), ' ') - 1
+               )
+           ELSE '(no band)'
+       END AS band_hint,
        ROUND(e.confidence, 3) AS conf
 FROM   signals s
 JOIN   examples e ON e.signal_id = s.id
@@ -525,7 +529,7 @@ GROUP BY day ORDER BY day DESC LIMIT 30;
 
 -- ACARS all three Heathrow frequencies combined
 SELECT
-  SUM(CASE WHEN notes LIKE '%band=ACARS-VHF%' THEN 1 ELSE 0 END) AS acars_131,
+  SUM(CASE WHEN notes LIKE '%band=ACARS %'    THEN 1 ELSE 0 END) AS acars_131,
   SUM(CASE WHEN notes LIKE '%band=ACARS-129%' THEN 1 ELSE 0 END) AS acars_129,
   SUM(CASE WHEN notes LIKE '%band=ACARS-130%' THEN 1 ELSE 0 END) AS acars_130
 FROM signals;

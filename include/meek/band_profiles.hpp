@@ -152,7 +152,7 @@ inline constexpr std::array<BandProfile, 38> kUkBands = {{
    126.6e6, 0.05e6, 8e3, ModClass::OOK_AM_LIKE, kBandSnrUseDefault, 0.10,
    "London VOLMET primary 126.600 MHz (Swanwick NATS). "
    "Secondary 125.475 MHz. Continuous AM voice, 24/7."},
-  {"ACARS-129", "ACARS secondary frequency A (129.125 MHz)",
+  {"ACARS-129", "ACARS secondary frequency B (129.125 MHz)",
    129.125e6, 0.1e6, 8e3, ModClass::OOK_AM_LIKE, 1.0, 0.15,
    "Heathrow ACARS B channel (Arinc 129B). "
    "Higher volume on departure push periods."},

@@ -33,7 +33,7 @@ BAND_GROUPS = {
         ("ADS-B",        "ADS-B 1090 MHz transponders"),
         ("VDL2",         "VHF Data Link Mode 2"),
         ("ACARS-VHF",    "ACARS aviation data 136.900 MHz"),
-        ("ACARS-129",    "ACARS secondary A 129.125 MHz"),
+        ("ACARS-129",    "ACARS secondary B 129.125 MHz"),
         ("ACARS-130",    "ACARS secondary C 130.025 MHz"),
         ("AIRBAND-VHF",  "VHF airband AM voice 118-136 MHz"),
         ("VOLMET",       "London VOLMET weather broadcast"),
