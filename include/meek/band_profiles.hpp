@@ -1,6 +1,6 @@
 // include/meek/band_profiles.hpp — Compile-time UK frequency band profiles.
 //
-// Contains a constexpr array of BandProfile structs covering 33 UK SDR-relevant
+// Contains a constexpr array of BandProfile structs covering 38 UK SDR-relevant
 // frequency allocations.  No runtime JSON/YAML parsing is needed for static data.
 // These are built-in defaults; runtime configuration is handled at a higher level.
 
@@ -35,7 +35,7 @@ struct BandProfile {
 inline constexpr double kBandSnrUseDefault = -999.0;
 
 // ---------------------------------------------------------------------------
-// UK band profile table (33 entries) — compiled in, zero runtime cost
+// UK band profile table (38 entries) — compiled in, zero runtime cost
 // ---------------------------------------------------------------------------
 
 // clang-format off

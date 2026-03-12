@@ -461,7 +461,7 @@ sqlite3 "$DB_PATH" \
 
 # ACARS three-frequency combined hourly volume (Heathrow 131.725 / 129.125 / 130.025)
 sqlite3 "$DB_PATH" \
-  "SELECT CAST(STRFTIME('%H', timestamp) AS INTEGER) AS hour_utc, COUNT(*) AS messages FROM signals WHERE (notes LIKE '%band=ACARS-VHF%' OR notes LIKE '%band=ACARS-129%' OR notes LIKE '%band=ACARS-130%') GROUP BY hour_utc ORDER BY hour_utc;"
+  "SELECT CAST(STRFTIME('%H', timestamp) AS INTEGER) AS hour_utc, COUNT(*) AS messages FROM signals WHERE (notes LIKE '%band=ACARS%' OR notes LIKE '%band=ACARS-129%' OR notes LIKE '%band=ACARS-130%') GROUP BY hour_utc ORDER BY hour_utc;"
 
 # Export last 7 days to CSV
 sqlite3 -csv -header "$DB_PATH" \
