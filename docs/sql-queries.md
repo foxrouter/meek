@@ -394,7 +394,11 @@ ORDER  BY detections DESC;
 
 -- Last 24 hours — what has meek seen today?
 SELECT s.timestamp,
-       SUBSTR(s.notes, INSTR(s.notes,'band='), 15) AS band_hint,
+       SUBSTR(
+           s.notes,
+           INSTR(s.notes, 'band='),
+           INSTR(s.notes || ' ', ' ', INSTR(s.notes, 'band=')) - INSTR(s.notes, 'band=')
+       ) AS band_hint,
        ROUND(e.confidence, 3) AS conf
 FROM   signals s
 JOIN   examples e ON e.signal_id = s.id
