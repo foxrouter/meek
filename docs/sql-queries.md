@@ -73,13 +73,14 @@ SELECT s.timestamp, e.confidence,
        SUBSTR(s.notes, INSTR(s.notes,'band='), 20) AS band_hint
 FROM   signals s
 JOIN   examples e ON e.signal_id = s.id
-WHERE  (s.notes LIKE '%band=ACARS-VHF%' OR s.notes LIKE '%band=VDL2%')
+WHERE  ((s.notes LIKE '%band=ACARS-VHF%' OR s.notes LIKE '%band=ACARS%')
+        OR s.notes LIKE '%band=VDL2%')
 ORDER  BY s.timestamp DESC
 LIMIT  40;
 
 -- ACARS vs VDL2 — comparative volume
 SELECT
-    SUM(CASE WHEN notes LIKE '%band=ACARS-VHF%' THEN 1 ELSE 0 END) AS acars,
+    SUM(CASE WHEN notes LIKE '%band=ACARS-VHF%' OR notes LIKE '%band=ACARS%' THEN 1 ELSE 0 END) AS acars,
     SUM(CASE WHEN notes LIKE '%band=VDL2%'      THEN 1 ELSE 0 END) AS vdl2
 FROM signals;
 
@@ -350,6 +351,7 @@ SELECT
         WHEN notes LIKE '%band=ACARS-VHF%'       THEN 'ACARS-VHF'
         WHEN notes LIKE '%band=ACARS-129%'       THEN 'ACARS-129'
         WHEN notes LIKE '%band=ACARS-130%'       THEN 'ACARS-130'
+        WHEN notes LIKE '%band=ACARS%'           THEN 'ACARS'
         WHEN notes LIKE '%band=AIRBAND-VHF%'     THEN 'AIRBAND-VHF'
         WHEN notes LIKE '%band=VOLMET%'          THEN 'VOLMET'
         WHEN notes LIKE '%band=AIS-A%'           THEN 'AIS-A'
@@ -397,7 +399,7 @@ SELECT s.timestamp,
        SUBSTR(
            s.notes,
            INSTR(s.notes, 'band='),
-           INSTR(s.notes || ' ', ' ', INSTR(s.notes, 'band=')) - INSTR(s.notes, 'band=')
+           INSTR(SUBSTR(s.notes || ' ', INSTR(s.notes, 'band=')), ' ') - 1
        ) AS band_hint,
        ROUND(e.confidence, 3) AS conf
 FROM   signals s
@@ -461,7 +463,7 @@ sqlite3 "$DB_PATH" \
 
 # ACARS three-frequency combined hourly volume (Heathrow 131.725 / 129.125 / 130.025)
 sqlite3 "$DB_PATH" \
-  "SELECT CAST(STRFTIME('%H', timestamp) AS INTEGER) AS hour_utc, COUNT(*) AS messages FROM signals WHERE (notes LIKE '%band=ACARS%' OR notes LIKE '%band=ACARS-129%' OR notes LIKE '%band=ACARS-130%') GROUP BY hour_utc ORDER BY hour_utc;"
+  "SELECT CAST(STRFTIME('%H', timestamp) AS INTEGER) AS hour_utc, COUNT(*) AS messages FROM signals WHERE (notes LIKE '%band=ACARS %' OR notes LIKE '%band=ACARS-129 %' OR notes LIKE '%band=ACARS-130 %') GROUP BY hour_utc ORDER BY hour_utc;"
 
 # Export last 7 days to CSV
 sqlite3 -csv -header "$DB_PATH" \

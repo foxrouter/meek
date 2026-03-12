@@ -518,6 +518,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   }
   .badge-aviation  { background: rgba(0,136,255,0.15); color: #60b0ff; }
   .badge-maritime  { background: rgba(0,200,160,0.15); color: var(--accent); }
+  .badge-railway   { background: rgba(255,140,0,0.15); color: #ffa040; }
   .badge-weather   { background: rgba(150,100,255,0.15); color: #b090ff; }
   .badge-iot       { background: rgba(255,184,0,0.15);  color: var(--warn); }
   .badge-emergency { background: rgba(255,68,68,0.15);  color: var(--danger); }
@@ -956,7 +957,7 @@ const DATA = %%JSON_DATA%%;
 pieChart('groupPie',
   Object.keys(DATA.group_totals),
   Object.values(DATA.group_totals),
-  [ACCENT2, ACCENT, PURPLE, WARN, DANGER, '#888']
+  [ACCENT2, ACCENT, '#ffa040', PURPLE, WARN, DANGER, '#888']
 );
 
 // Confidence distribution
@@ -1071,6 +1072,7 @@ BAND_CATEGORY_MAP = {}
 CATEGORY_BADGE = {
     "Aviation":                  "aviation",
     "Maritime":                  "maritime",
+    "Railway":                   "railway",
     "Weather & Satellite":       "weather",
     "IoT & Smart Infrastructure":"iot",
     "Emergency & Public Safety": "emergency",

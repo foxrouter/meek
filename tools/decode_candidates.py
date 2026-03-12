@@ -1139,7 +1139,7 @@ def decode_candidate(
         # Band-specialist decoders (highest priority)
         if ext_result is None and band_name == "APRS":
             ext_result = try_direwolf(snap["path"], fs=fs)
-        if ext_result is None and band_name in ("ACARS", "ACARS-VHF", "VDL2"):
+        if ext_result is None and band_name in ("ACARS", "ACARS-VHF", "ACARS-129", "ACARS-130", "VDL2"):
             ext_result = try_acarsdec(snap["path"], center_freq_hz=center_freq, fs=fs)
         if ext_result is None and band_name in ("AIS-A", "AIS-B"):
             ext_result = try_rtl_ais(snap["path"], center_freq_hz=center_freq, fs=fs)
