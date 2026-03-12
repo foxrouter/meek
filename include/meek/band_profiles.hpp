@@ -144,14 +144,14 @@ inline constexpr std::array<BandProfile, 38> kUkBands = {{
    "GWR mainline + Elizabeth Line. Reading station 2.5 mi. "
    "Downlink 921 MHz. High burst rate during peak hours."},
   {"AIRBAND-VHF", "VHF airband AM voice (118-136 MHz)",
-   124.0e6, 18e6, 8e3, ModClass::OOK_AM_LIKE, 1.0, 0.12,
+   127.0e6, 9e6, 8e3, ModClass::OOK_AM_LIKE, 1.0, 0.12,
    "White Waltham (EGLM) 4 mi. Heathrow TMA overhead. "
    "London Approach 119.725, Farnborough LARS 125.25, "
    "Thames Radar 132.7, White Waltham Info 119.975."},
   {"VOLMET", "London VOLMET continuous weather broadcast",
    126.6e6, 0.05e6, 8e3, ModClass::OOK_AM_LIKE, kBandSnrUseDefault, 0.10,
    "London VOLMET primary 126.600 MHz (Swanwick NATS). "
-   "Secondary 125.475 MHz. Continuous AM voice, 24/7."},
+   "Continuous AM voice, 24/7."},
   {"ACARS-129", "ACARS secondary frequency B (129.125 MHz)",
    129.125e6, 0.1e6, 8e3, ModClass::OOK_AM_LIKE, 1.0, 0.15,
    "Heathrow ACARS B channel (Arinc 129B). "
