@@ -55,7 +55,12 @@ static std::vector<std::complex<float>> read_cf32(const std::string& path,
     std::cerr << "rf_audit: cannot open '" << path << "'\n";
     return {};
   }
-  const auto bytes = static_cast<std::size_t>(f.tellg());
+  const std::streampos end_pos = f.tellg();
+  if (end_pos == std::streampos(-1)) {
+    std::cerr << "rf_audit: cannot determine file size for '" << path << "'\n";
+    return {};
+  }
+  const auto bytes = static_cast<std::size_t>(end_pos);
   if (bytes % 8 != 0) {
     std::cerr << "rf_audit: file size not a multiple of 8 bytes: '" << path
               << "'\n";
