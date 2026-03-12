@@ -296,9 +296,13 @@ install_config() {
 install_logrotate() {
   local src="${REPO_ROOT}/config/logrotate.d/rf-adapt-intel"
   local dest="/etc/logrotate.d/rf-adapt-intel"
-  log "Installing logrotate configuration..."
-  run sudo install -m 644 -o root -g root "${src}" "${dest}"
-  info "logrotate config written to ${dest}."
+  if [[ -f "${src}" ]]; then
+    log "Installing logrotate configuration..."
+    run sudo install -m 644 -o root -g root "${src}" "${dest}"
+    info "logrotate config written to ${dest}."
+  else
+    log "WARNING: logrotate config source not found at ${src}; skipping logrotate installation."
+  fi
 }
 
 # ---------------------------------------------------------------------------
