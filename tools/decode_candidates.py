@@ -93,6 +93,12 @@ _BAND_FREQ_HZ: Dict[str, int] = {
     "ISM-169":       169_406_000,
     "IRIDIUM":     1_621_250_000,
     "INMARSAT-AERO": 1_545_000_000,
+    "CNI-UHF":       312_500_000,
+    "GSM-R-876":     876_000_000,
+    "AIRBAND-VHF":   124_000_000,
+    "VOLMET":        126_600_000,
+    "ACARS-129":     129_125_000,
+    "ACARS-130":     130_025_000,
 }
 
 # ---------------------------------------------------------------------------
@@ -1133,7 +1139,7 @@ def decode_candidate(
         # Band-specialist decoders (highest priority)
         if ext_result is None and band_name == "APRS":
             ext_result = try_direwolf(snap["path"], fs=fs)
-        if ext_result is None and band_name in ("ACARS", "ACARS-VHF", "VDL2"):
+        if ext_result is None and band_name in ("ACARS", "ACARS-VHF", "ACARS-129", "ACARS-130", "VDL2"):
             ext_result = try_acarsdec(snap["path"], center_freq_hz=center_freq, fs=fs)
         if ext_result is None and band_name in ("AIS-A", "AIS-B"):
             ext_result = try_rtl_ais(snap["path"], center_freq_hz=center_freq, fs=fs)
