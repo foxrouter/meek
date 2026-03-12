@@ -32,7 +32,11 @@ BAND_GROUPS = {
     "Aviation": [
         ("ADS-B",        "ADS-B 1090 MHz transponders"),
         ("VDL2",         "VHF Data Link Mode 2"),
-        ("ACARS-VHF",    "ACARS aviation data"),
+        ("ACARS-VHF",    "ACARS aviation data 131.725 MHz"),
+        ("ACARS-129",    "ACARS secondary A 129.125 MHz"),
+        ("ACARS-130",    "ACARS secondary C 130.025 MHz"),
+        ("AIRBAND-VHF",  "VHF airband AM voice 118-136 MHz"),
+        ("VOLMET",       "London VOLMET weather broadcast"),
         ("INMARSAT-AERO","Inmarsat Aero L-band"),
     ],
     "Maritime": [
@@ -40,6 +44,9 @@ BAND_GROUPS = {
         ("AIS-B",        "AIS channel B 162.025 MHz"),
         ("MARINE-CH16",  "Marine VHF channel 16"),
         ("MARINE-CH70",  "Marine DSC channel 70"),
+    ],
+    "Railway": [
+        ("GSM-R-876",    "Network Rail GSM-R uplink 876 MHz"),
     ],
     "Weather & Satellite": [
         ("NOAA-APT",     "NOAA weather satellite APT"),
@@ -52,6 +59,7 @@ BAND_GROUPS = {
         ("SMETS2",       "UK SMETS2 smart meters"),
         ("TPMS-433",     "Tyre pressure sensors"),
         ("ISM-433",      "ISM 433 MHz devices"),
+        ("ISM-169",      "ISM 169 MHz sub-GHz IoT"),
         ("LORA-868",     "LoRaWAN 868 MHz"),
         ("ZIGBEE-868",   "ZigBee 868 MHz"),
         ("WMBUS-169",    "Wireless M-Bus 169 MHz"),
@@ -63,13 +71,14 @@ BAND_GROUPS = {
         ("ELT-406",      "ELT/EPIRB distress beacons 406 MHz"),
         ("PMR446",       "PMR446 licence-free radio"),
         ("APRS",         "APRS packet radio 144.800 MHz"),
+        ("POCSAG-153",   "POCSAG paging 153 MHz"),
+        ("FLEX-931",     "FLEX high-speed paging 931 MHz"),
     ],
     "Broadcasting & Paging": [
         ("DAB",          "DAB/DAB+ digital radio"),
-        ("POCSAG-153",   "POCSAG paging 153 MHz"),
-        ("FLEX-931",     "FLEX high-speed paging 931 MHz"),
         ("DMR",          "DMR digital voice"),
         ("DECT",         "DECT cordless phones"),
+        ("CNI-UHF",      "Combat Net Radio UHF"),
     ],
 }
 
