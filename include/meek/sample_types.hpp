@@ -44,6 +44,35 @@ enum class ModClass : std::uint8_t {
 }
 
 // ---------------------------------------------------------------------------
+// Demodulation status — closed set of outcomes for a demod attempt
+// ---------------------------------------------------------------------------
+
+enum class DemodStatus : std::uint8_t {
+  UNKNOWN = 0,   // demod not attempted / status not set
+  SKIPPED,       // demod was intentionally skipped (e.g. mod_class == ModClass::UNKNOWN)
+  OK,            // demod succeeded
+  CRC_FAIL,      // demod ran but CRC check failed
+  LOCK_FAIL,     // carrier/timing lock was not achieved
+};
+
+[[nodiscard]] constexpr const char* demod_status_name(DemodStatus s) noexcept {
+  switch (s) {
+    case DemodStatus::UNKNOWN:
+      return "unknown";
+    case DemodStatus::SKIPPED:
+      return "skipped";
+    case DemodStatus::OK:
+      return "ok";
+    case DemodStatus::CRC_FAIL:
+      return "crc_fail";
+    case DemodStatus::LOCK_FAIL:
+      return "lock_fail";
+    default:
+      return "unknown";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SampleBlock — one capture window from the SDR device
 // ---------------------------------------------------------------------------
 
@@ -86,6 +115,17 @@ struct ClassificationResult {
   std::string band_name;
   std::string band_notes;
   std::string decision_trace;
+
+  // ── Demodulation results ─────────────────────────────────────────────────
+  // demod_status is the single source of truth for demod outcome.
+  // UNKNOWN = not attempted; SKIPPED = intentionally skipped; all other
+  // values indicate demod was run.  demod_cfo_hz, demod_phase_error, and
+  // demod_lock_ms are populated only when demod_status is OK, CRC_FAIL, or
+  // LOCK_FAIL.  All fields default to zero/UNKNOWN when demod was not run.
+  DemodStatus demod_status{DemodStatus::UNKNOWN};
+  float       demod_cfo_hz{0.0f};       // carrier frequency offset (Hz)
+  float       demod_phase_error{0.0f};  // RMS phase error (radians)
+  int         demod_lock_ms{0};         // time to carrier lock (ms); 0 = not locked
 };
 
 // Minimum number of IQ samples required for a meaningful block classification.
