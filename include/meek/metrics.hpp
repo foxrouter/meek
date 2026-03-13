@@ -50,6 +50,11 @@ struct ProcMetrics {
   std::uint64_t snap_dropped{0};
   std::uint64_t frames_cap_dropped{0};
   std::uint64_t frames_proc_dropped{0};
+  // Demodulation outcome counters (zero until demod_chains.hpp is integrated)
+  std::uint64_t demod_ok{0};
+  std::uint64_t demod_crc_ok{0};
+  std::uint64_t demod_crc_fail{0};
+  std::uint64_t demod_lock_fail{0};
 };
 
 // ---------------------------------------------------------------------------
@@ -97,7 +102,16 @@ struct ProcMetrics {
       << "# HELP rf_frames_proc_dropped_total "
       << "Classification results dropped by proc_loop under output backpressure\n"
       << "# TYPE rf_frames_proc_dropped_total counter\n"
-      << "rf_frames_proc_dropped_total " << m.frames_proc_dropped << "\n";
+      << "rf_frames_proc_dropped_total " << m.frames_proc_dropped << "\n"
+      << "# HELP rf_demod_total Demodulation attempts by result; "
+      << "labels are mutually exclusive per attempt: "
+      << "lock_ok=no-CRC success, crc_ok=CRC passed, "
+      << "crc_fail=CRC failed, lock_fail=lock failed\n"
+      << "# TYPE rf_demod_total counter\n"
+      << "rf_demod_total{result=\"lock_ok\"}   " << m.demod_ok        << "\n"
+      << "rf_demod_total{result=\"crc_ok\"}    " << m.demod_crc_ok    << "\n"
+      << "rf_demod_total{result=\"crc_fail\"}  " << m.demod_crc_fail  << "\n"
+      << "rf_demod_total{result=\"lock_fail\"} " << m.demod_lock_fail << "\n";
   return out.str();
 }
 
