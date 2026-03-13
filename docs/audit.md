@@ -22,15 +22,15 @@ Key file sizes:
 
 | File | Lines | Language | Role |
 |------|------:|----------|------|
-| `src/main.cpp` | ~700 | C++20 | Core capture → classify → DB persist loop |
-| `tools/decode_candidates.py` | 838 | Python 3 | Offline signal audit / decode report |
+| `src/main.cpp` | ~770 | C++20 | Core capture → classify → DB persist loop |
+| `tools/decode_candidates.py` | ~1300 | Python 3 | Offline signal audit / decode report |
 | `tools/autotune_thresholds.py` | 551 | Python 3 | Threshold optimisation from IQ snapshots |
 | `tools/soapy_read_test.cpp` | ~75 | C++20 | SoapySDR stream diagnostic |
-| `CMakeLists.txt` | ~239 | CMake | Build system for C++ targets + CTest |
-| `install.sh` | ~569 | Bash | One-shot installer (Bookworm / Noble) |
-| `ops/deploy.sh` | ~136 | Bash | Systemd deployment + firewall hardening |
+| `CMakeLists.txt` | ~245 | CMake | Build system for C++ targets + CTest |
+| `install.sh` | ~610 | Bash | One-shot installer (Bookworm / Noble) |
+| `ops/deploy.sh` | ~140 | Bash | Systemd deployment + firewall hardening |
 | `ops/canary.sh` | ~328 | Bash | Canary rollout / promotion / rollback |
-| `ops/setup.sh` | ~417 | Bash | Optional decoder setup (multimon-ng, rtl_433, liquid-dsp) |
+| `ops/setup.sh` | ~435 | Bash | Optional decoder setup (multimon-ng, rtl_433, liquid-dsp) |
 
 ---
 
