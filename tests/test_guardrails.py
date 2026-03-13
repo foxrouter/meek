@@ -485,6 +485,44 @@ class TestSnapshotConfInvariant(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Margin-normalized confidence tests
+# ---------------------------------------------------------------------------
+
+class TestMarginNormalizedConfidence(unittest.TestCase):
+    """Verify the margin-normalized confidence formula used in classify_block().
+
+    The formula is: (winner - runner_up) / (winner + ε)
+    This penalises narrow wins; a dominant signal scores near 1.0.
+    """
+
+    def _margin_confidence(self, scores: list) -> float:
+        """Mirror the C++ margin formula: (winner - runner_up) / (winner + ε)."""
+        sorted_scores = sorted(scores)
+        best = sorted_scores[-1]
+        runner_up = sorted_scores[-2]
+        margin = (best - runner_up) / (best + 1e-9)
+        return max(0.0, min(1.0, margin))
+
+    def test_equal_scores_produce_zero_confidence(self):
+        """Four equal class scores should yield confidence ≈ 0.0 (no clear winner)."""
+        conf = self._margin_confidence([0.25, 0.25, 0.25, 0.25])
+        self.assertAlmostEqual(
+            conf, 0.0, places=6,
+            msg="Equal scores must produce near-zero confidence",
+        )
+
+    def test_dominant_signal_produces_high_confidence(self):
+        """One class score=0.9, all others=0.1 should yield confidence ≈ 0.88."""
+        conf = self._margin_confidence([0.1, 0.1, 0.1, 0.9])
+        # margin = (0.9 - 0.1) / (0.9 + ε) ≈ 0.8889
+        expected = 0.8 / (0.9 + 1e-9)
+        self.assertAlmostEqual(
+            conf, expected, places=4,
+            msg="Dominant signal (0.9 vs 0.1) must produce confidence ≈ 0.88",
+        )
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 

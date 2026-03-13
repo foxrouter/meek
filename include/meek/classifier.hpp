@@ -323,12 +323,21 @@ struct ClassifyOptions {
     best = ook_score;
     r.mod_class = ModClass::OOK_AM_LIKE;
   }
-  r.confidence = static_cast<float>(best);
+  // Margin-normalized confidence: (winner - runner_up) / (winner + ε)
+  // Penalises narrow wins; a dominant signal scores near 1.0.
+  const double runner_up = [&] {
+    double scores[4] = {cw_score, fsk_score, psk_score, ook_score};
+    std::sort(scores, scores + 4);
+    return scores[2];  // second highest (index 2 of ascending sort)
+  }();
+  const double margin = (best - runner_up) / (best + 1e-9);
+  r.confidence = static_cast<float>(std::clamp(margin, 0.0, 1.0));
 
   dt.precision(3);
   dt << std::fixed << " scores(cw=" << cw_score << ",fsk=" << fsk_score
      << ",psk=" << psk_score << ",ook=" << ook_score << ") -> "
-     << mod_class_name(r.mod_class) << "@" << best;
+     << mod_class_name(r.mod_class) << "@" << best
+     << " margin=" << r.confidence;
   r.decision_trace = dt.str();
   return r;
 }
