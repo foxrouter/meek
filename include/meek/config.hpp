@@ -40,9 +40,9 @@ struct Config {
   ModClass mod_hint{ModClass::UNKNOWN};
 
   // Classifier thresholds
-  double conf_threshold{0.6};
+  double conf_threshold{0.35};
   double console_conf{0.8};
-  double snapshot_conf{0.6};
+  double snapshot_conf{0.35};
 
   // Demodulation hints — reserved for future liquid-dsp demodulation;
   // not currently read by classify_block() or any processing path.
@@ -151,7 +151,7 @@ inline std::string env_str(const char* name, const char* def) {
   cfg.papr_max_db = detail::env_d("PAPR_MAX", 0.0);
 
   // Classifier
-  cfg.conf_threshold = detail::env_d("RF_CONF_THRESHOLD", 0.6);
+  cfg.conf_threshold = detail::env_d("RF_CONF_THRESHOLD", 0.35);
   cfg.console_conf = detail::env_d("RF_CONSOLE_CONF", 0.8);
   // Default snapshot_conf to conf_threshold so every signal persisted to DB
   // also receives an IQ snapshot.  If RF_SNAPSHOT_CONF is set explicitly above

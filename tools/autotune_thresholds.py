@@ -104,10 +104,25 @@ def estimate_bandwidth_hz(s: np.ndarray, sample_rate: float = _SAMPLE_RATE) -> f
     return est_bw_frac * sample_rate
 
 
+def _margin_confidence(scores: List[float]) -> float:
+    """Return margin-normalized confidence matching the C++ classify_block formula.
+
+    margin = (winner - runner_up) / (winner + ε), clamped to [0, 1].
+    """
+    if len(scores) < 2:
+        return 0.0
+    sorted_scores = sorted(scores)
+    best = sorted_scores[-1]
+    runner_up = sorted_scores[-2]
+    margin = (best - runner_up) / (best + 1e-9)
+    return max(0.0, min(1.0, margin))
+
+
 def heuristic_confidence(s: np.ndarray) -> float:
     """
     Compute a classifier confidence score in [0, 1] mirroring the C++
-    heuristic in classify_block.  Returns the top score across all classes.
+    heuristic in classify_block.  Returns the margin-normalized confidence:
+    (winner - runner_up) / (winner + ε), matching the C++ formula.
     """
     if len(s) < 32:
         return 0.0
@@ -152,7 +167,7 @@ def heuristic_confidence(s: np.ndarray) -> float:
         + 0.20 * max(0.0, min(1.0, 1.0 - flat))
     )
 
-    return max(cw_score, fsk_score, psk_score, ook_score)
+    return _margin_confidence([cw_score, fsk_score, psk_score, ook_score])
 
 
 # ---------------------------------------------------------------------------

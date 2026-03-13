@@ -104,6 +104,36 @@ class TestSignalMetrics(unittest.TestCase):
         s = np.zeros(10, dtype=np.complex64)
         self.assertEqual(at.heuristic_confidence(s), 0.0)
 
+    def test_heuristic_confidence_is_margin_normalized(self):
+        """heuristic_confidence() must delegate to _margin_confidence().
+
+        Patching _margin_confidence confirms it is actually invoked, ensuring
+        the function does not silently regress to returning the raw max score.
+        """
+        from unittest.mock import patch
+        s = _awgn(_fsk2(), snr_db=10.0)
+        with patch.object(at, '_margin_confidence', wraps=at._margin_confidence) as mock_mc:
+            c = at.heuristic_confidence(s)
+            mock_mc.assert_called_once()
+            # Result must match what _margin_confidence returned
+            args = mock_mc.call_args[0][0]
+            self.assertAlmostEqual(c, at._margin_confidence(args), places=9)
+
+    def test_margin_confidence_formula(self):
+        """_margin_confidence() formula: (winner - runner_up) / (winner + ε).
+
+        Equal class scores → near 0.0; one dominant score → > 0.8.
+        """
+        # Four equal scores: (best - runner_up) / (best + ε) ≈ 0
+        conf_tie = at._margin_confidence([0.25, 0.25, 0.25, 0.25])
+        self.assertAlmostEqual(conf_tie, 0.0, places=6,
+                               msg="Equal scores must yield near-zero confidence")
+
+        # One dominant score: margin = (0.9 - 0.1) / (0.9 + ε) ≈ 0.889
+        conf_dominant = at._margin_confidence([0.1, 0.1, 0.1, 0.9])
+        self.assertGreater(conf_dominant, 0.8,
+                           msg="Dominant score must yield high confidence (>0.8)")
+
 
 # ---------------------------------------------------------------------------
 # Recommendation tests
