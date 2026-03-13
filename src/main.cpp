@@ -282,7 +282,11 @@ struct JsonLog {
       std::filesystem::rename(path_, backup);
       bytes_written_ = 0;
       open_append();
-      std::cerr << "[LOG] Rotated worker log -> " << backup << "\n";
+      if (!failed_ && ofs_) {
+        std::cerr << "[LOG] Rotated worker log -> " << backup << "\n";
+      } else {
+        std::cerr << "[LOG] Rotation reopen failed for: " << path_ << "\n";
+      }
     } catch (const std::exception& e) {
       std::cerr << "[LOG] Rotation failed: " << e.what() << "\n";
       failed_ = true;
