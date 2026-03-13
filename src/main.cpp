@@ -29,9 +29,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <complex>
 #include <csignal>
+#include <cstring>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -554,8 +556,19 @@ int main(int argc, char** argv) {
     }
   }();
 
-  std::signal(SIGINT, handle_term);
-  std::signal(SIGTERM, handle_term);
+  {
+    struct sigaction sa{};
+    sa.sa_handler = handle_term;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    if (sigaction(SIGINT, &sa, nullptr) != 0 ||
+        sigaction(SIGTERM, &sa, nullptr) != 0) {
+      std::cerr << "[WARN] sigaction failed: " << std::strerror(errno)
+                << "; falling back to std::signal\n";
+      std::signal(SIGINT, handle_term);
+      std::signal(SIGTERM, handle_term);
+    }
+  }
 
   std::cout << "rf_adapt_intel v3 (C++20)\n"
             << "  center=" << cfg.center_freq << " Hz" << "  rate=" << cfg.sample_rate << " Sps"
