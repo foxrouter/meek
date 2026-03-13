@@ -224,36 +224,34 @@ static void prune_old_snapshots(const std::string& dir, int retention_days) {
 // JSON log helper
 // ---------------------------------------------------------------------------
 
-static void write_json_log(const std::string& path, const ClassificationResult& cr) {
-  if (path.empty())
-    return;
-  try {
-    std::filesystem::create_directories(std::filesystem::path(path).parent_path());
-    std::ofstream ofs(path, std::ios::app);
-    if (!ofs)
-      return;
-    json j;
-    j["schema_version"] = "2";
-    j["ts_ns"] = cr.timestamp_ns;
-    j["mod"] = mod_class_name(cr.mod_class);
-    j["confidence"] = cr.confidence;
-    j["snr_db"] = cr.snr_db;
-    j["avg_power"] = cr.avg_power;
-    j["papr_db"] = cr.papr_db;
-    j["spectral_flatness"] = cr.spectral_flatness;
-    j["time_occupancy"] = cr.time_occupancy;
-    j["avg_abs_phase"] = cr.avg_abs_phase;
-    j["trans_ratio"] = cr.trans_ratio;
-    j["p50"] = cr.p50;
-    j["p90"] = cr.p90;
-    j["snr_gate_pass"] = cr.snr_gate_pass;
-    j["bw_gate_pass"] = cr.bw_gate_pass;
-    j["band"] = cr.band_name;
-    j["decision_trace"] = cr.decision_trace;
-    ofs << j.dump() << "\n";
-  } catch (...) {
+struct JsonLog {
+  explicit JsonLog(const std::string& path) {
+    if (path.empty()) return;
+    try {
+      std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+      ofs_.open(path, std::ios::app);
+      if (!ofs_) {
+        std::cerr << "[LOG] Failed to open worker log: " << path << "\n";
+        failed_ = true;
+      }
+    } catch (...) {
+      failed_ = true;
+    }
   }
-}
+
+  void write(const json& j) {
+    if (failed_ || !ofs_) return;
+    ofs_ << j.dump() << "\n";
+  }
+
+  void flush() {
+    if (ofs_) ofs_.flush();
+  }
+
+ private:
+  std::ofstream ofs_;
+  bool failed_{false};
+};
 
 // ---------------------------------------------------------------------------
 // Snapshot task queue — separate jthread
@@ -455,6 +453,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   auto last_metrics_write = std::chrono::steady_clock::now();
   auto last_heartbeat = std::chrono::steady_clock::now();
   auto last_prune = std::chrono::steady_clock::now();
+  JsonLog jlog(cfg.worker_log);
 
   while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
          !in_buf.empty_approx()) {
@@ -506,7 +505,27 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
         ++metrics.db_errors;
       }
 
-      write_json_log(cfg.worker_log, cr);
+      {
+        json j;
+        j["schema_version"] = "2";
+        j["ts_ns"]          = cr.timestamp_ns;
+        j["mod"]            = mod_class_name(cr.mod_class);
+        j["confidence"]     = cr.confidence;
+        j["snr_db"]         = cr.snr_db;
+        j["avg_power"]      = cr.avg_power;
+        j["papr_db"]        = cr.papr_db;
+        j["spectral_flatness"] = cr.spectral_flatness;
+        j["time_occupancy"] = cr.time_occupancy;
+        j["avg_abs_phase"]  = cr.avg_abs_phase;
+        j["trans_ratio"]    = cr.trans_ratio;
+        j["p50"]            = cr.p50;
+        j["p90"]            = cr.p90;
+        j["snr_gate_pass"]  = cr.snr_gate_pass;
+        j["bw_gate_pass"]   = cr.bw_gate_pass;
+        j["band"]           = cr.band_name;
+        j["decision_trace"] = cr.decision_trace;
+        jlog.write(j);
+      }
 
       if (cr.confidence >= cfg.console_conf) {
         std::cout << "[DETECT] band=" << (cr.band_name.empty() ? "<none>" : cr.band_name)
@@ -526,6 +545,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
         std::lock_guard lk(metrics_snapshot->mu);
         metrics_snapshot->data = metrics;
       }
+      jlog.flush();
       last_metrics_write = now;
     }
     if (now - last_heartbeat >= std::chrono::seconds(30)) {
