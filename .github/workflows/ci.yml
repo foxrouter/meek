@@ -22,7 +22,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   python-tests:
     name: Python lint + tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -75,7 +75,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   cpp-iq-metrics:
     name: C++ iq_metrics (build + test + sanitizer)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -85,12 +85,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            ninja-build clang-14 clang-format-14 clang-tidy-14 \
+            ninja-build cmake clang-18 clang-format-18 clang-tidy-18 \
             pkg-config python3 python3-pip libsqlite3-dev libsoapysdr-dev
-          sudo ln -sf /usr/bin/clang-format-14 /usr/local/bin/clang-format
-          sudo ln -sf /usr/bin/clang-tidy-14   /usr/local/bin/clang-tidy
-          # Ensure cmake >= 3.25 (Ubuntu 22.04 ships 3.22 via apt)
-          pip install --upgrade "cmake==3.31.6"
+          sudo ln -sf /usr/bin/clang-format-18 /usr/local/bin/clang-format
+          sudo ln -sf /usr/bin/clang-tidy-18   /usr/local/bin/clang-tidy
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
@@ -119,21 +117,21 @@ jobs:
           TIDY_FAIL=0
 
           # tools/iq_metrics.cpp (C++17, no hardware deps)
-          clang-tidy-14 tools/iq_metrics.cpp \
+          clang-tidy-18 tools/iq_metrics.cpp \
             --checks="$TIDY_CHECKS" \
             -- -std=c++17 $COMMON_INCLUDES \
             2>&1 | tee /tmp/clang-tidy-iq_metrics.log || true
           grep -qE "error:" /tmp/clang-tidy-iq_metrics.log && TIDY_FAIL=1 || true
 
           # src/rf_audit.cpp (C++20, no hardware deps)
-          clang-tidy-14 src/rf_audit.cpp \
+          clang-tidy-18 src/rf_audit.cpp \
             --checks="$TIDY_CHECKS" \
             -- -std=c++20 $COMMON_INCLUDES \
             2>&1 | tee /tmp/clang-tidy-rf_audit.log || true
           grep -qE "error:" /tmp/clang-tidy-rf_audit.log && TIDY_FAIL=1 || true
 
           # src/main.cpp (C++20, SoapySDR hardware abstraction)
-          clang-tidy-14 src/main.cpp \
+          clang-tidy-18 src/main.cpp \
             --checks="$TIDY_CHECKS" \
             -- -std=c++20 $COMMON_INCLUDES -DHAVE_SOAPY \
             2>&1 | tee /tmp/clang-tidy-main.log || true
@@ -162,7 +160,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   sanitizer:
     name: C++ sanitizer build (ASAN + UBSAN)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     env:
@@ -176,10 +174,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            ninja-build clang-14 pkg-config python3 python3-pip libsqlite3-dev
-          sudo update-alternatives --install /usr/bin/cc  cc  /usr/bin/clang-14 100
-          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-14 100
-          pip install --upgrade "cmake==3.31.6"
+            ninja-build clang-18 pkg-config python3 python3-pip libsqlite3-dev
+          sudo update-alternatives --install /usr/bin/cc  cc  /usr/bin/clang-18 100
+          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 100
+          pip install --upgrade "cmake>=3.28"
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
@@ -189,8 +187,8 @@ jobs:
           cmake -S . -B build-san \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_COMPILER=clang-14 \
-            -DCMAKE_CXX_COMPILER=clang++-14 \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
             -DBUILD_HARDWARE_TARGETS=OFF \
             -DENABLE_SANITIZERS=ON
 
@@ -205,7 +203,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   security-scan:
     name: Dependency vulnerability scan
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -238,7 +236,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   docker:
     name: Container image build
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:

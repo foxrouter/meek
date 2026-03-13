@@ -6,7 +6,7 @@
 # Run tests:
 #   docker run --rm rf-adapt-intel:latest ctest --test-dir /build -V
 
-FROM ubuntu:22.04 AS base
+FROM ubuntu:24.04 AS base
 LABEL maintainer="foxrouter"
 LABEL description="rf_adapt_intel build and test environment"
 
@@ -17,10 +17,11 @@ ENV TZ=UTC
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ninja-build \
+    cmake \
     pkg-config \
-    clang \
-    clang-format-14 \
-    clang-tidy-14 \
+    clang-18 \
+    clang-format-18 \
+    clang-tidy-18 \
     python3 \
     python3-pip \
     python3-numpy \
@@ -30,12 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Symlink clang-format/tidy versioned binaries to unversioned names
-RUN ln -sf /usr/bin/clang-format-14 /usr/local/bin/clang-format && \
-    ln -sf /usr/bin/clang-tidy-14   /usr/local/bin/clang-tidy
-
-# Install cmake >= 3.25 via pip (Ubuntu 22.04 ships 3.22 which is too old).
-# Pin to an exact version for reproducible builds.
-RUN pip3 install --no-cache-dir "cmake==3.31.6"
+RUN ln -sf /usr/bin/clang-format-18 /usr/local/bin/clang-format && \
+    ln -sf /usr/bin/clang-tidy-18   /usr/local/bin/clang-tidy
 
 # ── Source copy ─────────────────────────────────────────────────────────────
 WORKDIR /src
