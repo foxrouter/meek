@@ -39,6 +39,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <condition_variable>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <span>
