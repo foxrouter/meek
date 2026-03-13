@@ -86,6 +86,16 @@ struct ClassificationResult {
   std::string band_name;
   std::string band_notes;
   std::string decision_trace;
+
+  // ── Demodulation results ─────────────────────────────────────────────────
+  // Populated only when HAVE_LIQUID is defined and mod_class != UNKNOWN.
+  // All fields are zero/false/empty when demod was not attempted.
+  bool        demod_attempted{false};
+  bool        demod_crc_ok{false};
+  float       demod_cfo_hz{0.0f};       // carrier frequency offset (Hz)
+  float       demod_phase_error{0.0f};  // RMS phase error (radians)
+  int         demod_lock_ms{0};         // time to carrier lock (ms); 0 = not locked
+  std::string demod_status;             // "ok"|"crc_fail"|"lock_fail"|"skipped"|""
 };
 
 // Minimum number of IQ samples required for a meaningful block classification.
