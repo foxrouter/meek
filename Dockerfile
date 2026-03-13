@@ -23,12 +23,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     clang-format-18 \
     clang-tidy-18 \
     python3 \
-    python3-pip \
-    python3-numpy \
+    python3-venv \
     libsqlite3-dev \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Create an isolated virtual environment so pip installs don't touch the system Python
+RUN python3 -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
 
 # Symlink clang-format/tidy versioned binaries to unversioned names
 RUN ln -sf /usr/bin/clang-format-18 /usr/local/bin/clang-format && \
@@ -39,7 +42,7 @@ WORKDIR /src
 COPY . .
 
 # ── Python deps ─────────────────────────────────────────────────────────────
-RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Build iq_metrics and rf_audit (no SoapySDR needed) ──────────────────────
 RUN cmake -S /src -B /build \
