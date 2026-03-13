@@ -44,6 +44,39 @@ enum class ModClass : std::uint8_t {
 }
 
 // ---------------------------------------------------------------------------
+// Demodulation status — closed set of outcomes for a demod attempt
+// ---------------------------------------------------------------------------
+
+enum class DemodStatus : std::uint8_t {
+  NONE = 0,      // demod not attempted
+  OK,            // demod succeeded
+  CRC_FAIL,      // demod ran but CRC check failed
+  LOCK_FAIL,     // carrier/timing lock was not achieved
+  SKIPPED,       // demod was intentionally skipped (e.g. mod_class == UNKNOWN)
+};
+
+[[nodiscard]] constexpr const char* demod_status_name(DemodStatus s) noexcept {
+  switch (s) {
+    case DemodStatus::OK:
+      return "ok";
+    case DemodStatus::CRC_FAIL:
+      return "crc_fail";
+    case DemodStatus::LOCK_FAIL:
+      return "lock_fail";
+    case DemodStatus::SKIPPED:
+      return "skipped";
+    default:
+      return "";
+  }
+}
+
+// Canonical string constants for demod_status (use these when setting the field).
+inline constexpr const char* kDemodStatusOk       = "ok";
+inline constexpr const char* kDemodStatusCrcFail  = "crc_fail";
+inline constexpr const char* kDemodStatusLockFail = "lock_fail";
+inline constexpr const char* kDemodStatusSkipped  = "skipped";
+
+// ---------------------------------------------------------------------------
 // SampleBlock — one capture window from the SDR device
 // ---------------------------------------------------------------------------
 
@@ -88,7 +121,7 @@ struct ClassificationResult {
   std::string decision_trace;
 
   // ── Demodulation results ─────────────────────────────────────────────────
-  // Populated only when HAVE_LIQUID is defined and mod_class != UNKNOWN.
+  // Populated only when HAVE_LIQUID is defined and mod_class != ModClass::UNKNOWN.
   // All fields are zero/false/empty when demod was not attempted.
   bool        demod_attempted{false};
   bool        demod_crc_ok{false};
