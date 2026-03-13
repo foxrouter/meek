@@ -58,7 +58,7 @@ enum class DemodStatus : std::uint8_t {
 [[nodiscard]] constexpr const char* demod_status_name(DemodStatus s) noexcept {
   switch (s) {
     case DemodStatus::UNKNOWN:
-      return "";
+      return "unknown";
     case DemodStatus::SKIPPED:
       return "skipped";
     case DemodStatus::OK:
@@ -68,7 +68,7 @@ enum class DemodStatus : std::uint8_t {
     case DemodStatus::LOCK_FAIL:
       return "lock_fail";
     default:
-      return "";
+      return "unknown";
   }
 }
 
