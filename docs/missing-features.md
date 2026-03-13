@@ -11,30 +11,30 @@ Items marked ⬜ are outstanding.
 
 ## 1. Demod pipelines (`src/main.cpp` — requires liquid-dsp / `HAVE_LIQUID`)
 
-### 1a. FSK / GMSK demod chain ✅
+### 1a. FSK / GMSK demod chain ⬜
 
-- ✅ DC removal before demod (IIR high-pass, `apply_dc_block`).
-- ✅ Coarse CFO estimate via mean phase increment (`estimate_cfo_hz`).
-- ✅ Fine PLL for CFO tracking (`nco_crcf`).
-- ✅ liquid-dsp `fskdem` object configured with explicit `k/sps/BT`.
-- ✅ Bit-stream output piped to CRC32 checker (`check_crc32_bits`).
-- ✅ **Integration point:** after `classify_block()` returns `FSK_LIKE`.
+- ⬜ DC removal before demod (IIR high-pass, `apply_dc_block`).
+- ⬜ Coarse CFO estimate via mean phase increment (`estimate_cfo_hz`).
+- ⬜ Fine PLL for CFO tracking (`nco_crcf`).
+- ⬜ liquid-dsp `fskdem` object configured with explicit `k/sps/BT`.
+- ⬜ Bit-stream output piped to CRC32 checker (`check_crc32_bits`).
+- ⬜ **Integration point:** after `classify_block()` returns `FSK_LIKE`.
 
-### 1b. PSK / QAM demod chain ✅
+### 1b. PSK / QAM demod chain ⬜
 
-- ✅ Symbol timing synchronisation: liquid-dsp `symsync_crcf` (RRC matched filter).
-- ✅ Costas-loop carrier recovery (`nco_crcf` + `modemcf_get_demodulator_phase_error`).
-- ✅ Carrier-lock watchdog: re-init with wider PLL BW on high phase error.
-- ✅ Downshift fallback: QPSK → BPSK on persistent high phase error.
-- ✅ Support for BPSK, QPSK, 8PSK.
-- ✅ **Integration point:** after `classify_block()` returns `PSK_QAM_LIKE`.
+- ⬜ Symbol timing synchronisation: liquid-dsp `symsync_crcf` (RRC matched filter).
+- ⬜ Costas-loop carrier recovery (`nco_crcf` + `modemcf_get_demodulator_phase_error`).
+- ⬜ Carrier-lock watchdog: re-init with wider PLL BW on high phase error.
+- ⬜ Downshift fallback: QPSK → BPSK on persistent high phase error.
+- ⬜ Support for BPSK, QPSK, 8PSK.
+- ⬜ **Integration point:** after `classify_block()` returns `PSK_QAM_LIKE`.
 
-### 1c. OOK / AM envelope demod ✅
+### 1c. OOK / AM envelope demod ⬜
 
-- ✅ Envelope detection (`|z|`) + Median Absolute Deviation threshold.
-- ✅ Duty-cycle consistency check to avoid CW mis-classification.
-- ✅ OOK bit recovery at expected symbol rate (`RSYM`).
-- ✅ **Integration point:** after `classify_block()` returns `OOK_AM_LIKE`.
+- ⬜ Envelope detection (`|z|`) + Median Absolute Deviation threshold.
+- ⬜ Duty-cycle consistency check to avoid CW mis-classification.
+- ⬜ OOK bit recovery at expected symbol rate (`RSYM`).
+- ⬜ **Integration point:** after `classify_block()` returns `OOK_AM_LIKE`.
 
 ---
 
@@ -74,9 +74,9 @@ Items marked ⬜ are outstanding.
 
 | Item | File(s) | Status |
 |---|---|---|
-| FSK demod chain (liquid-dsp) | `src/main.cpp` | ✅ Done |
-| PSK/QAM demod chain (liquid-dsp) | `src/main.cpp` | ✅ Done |
-| OOK/AM demod chain (liquid-dsp) | `src/main.cpp` | ✅ Done |
+| FSK demod chain (liquid-dsp) | `src/main.cpp` | ⬜ Pending |
+| PSK/QAM demod chain (liquid-dsp) | `src/main.cpp` | ⬜ Pending |
+| OOK/AM demod chain (liquid-dsp) | `src/main.cpp` | ⬜ Pending |
 | `PAPR_MAX` enforcement | `src/main.cpp` | ✅ Done |
 | `MOD_HINT` prior bias in classifier | `src/main.cpp` | ✅ Done |
 | File-replay mode for `process_incoming` | `scripts/process_incoming.sh` | ✅ Done |
