@@ -26,6 +26,7 @@
 // "'decode_url' was not declared in this scope".
 #ifdef HAVE_HTTPLIB
 #include <httplib.h>
+
 #include <thread>
 #include <utility>
 #endif  // HAVE_HTTPLIB
@@ -50,6 +51,11 @@ struct ProcMetrics {
   std::uint64_t snap_dropped{0};
   std::uint64_t frames_cap_dropped{0};
   std::uint64_t frames_proc_dropped{0};
+  // Demodulation outcome counters (zero until demod_chains.hpp is integrated)
+  std::uint64_t demod_ok{0};
+  std::uint64_t demod_crc_ok{0};
+  std::uint64_t demod_crc_fail{0};
+  std::uint64_t demod_lock_fail{0};
 };
 
 // ---------------------------------------------------------------------------
@@ -61,9 +67,8 @@ struct ProcMetrics {
 /// write_prometheus_textfile() and the HTTP /metrics handler so that both
 /// paths always stay in sync.
 [[nodiscard]] inline std::string render_prometheus_body(const ProcMetrics& m) {
-  const double avg_conf = m.frames_candidate > 0
-                              ? m.conf_sum / static_cast<double>(m.frames_candidate)
-                              : 0.0;
+  const double avg_conf =
+      m.frames_candidate > 0 ? m.conf_sum / static_cast<double>(m.frames_candidate) : 0.0;
   std::ostringstream out;
   out << "# HELP rf_frames_total Total IQ frames processed by classifier\n"
       << "# TYPE rf_frames_total counter\n"
@@ -97,17 +102,24 @@ struct ProcMetrics {
       << "# HELP rf_frames_proc_dropped_total "
       << "Classification results dropped by proc_loop under output backpressure\n"
       << "# TYPE rf_frames_proc_dropped_total counter\n"
-      << "rf_frames_proc_dropped_total " << m.frames_proc_dropped << "\n";
+      << "rf_frames_proc_dropped_total " << m.frames_proc_dropped << "\n"
+      << "# HELP rf_demod_total Demodulation attempts by result\n"
+      << "# TYPE rf_demod_total counter\n"
+      << "rf_demod_total{result=\"ok\"}        " << m.demod_ok << "\n"
+      << "rf_demod_total{result=\"crc_ok\"}    " << m.demod_crc_ok << "\n"
+      << "rf_demod_total{result=\"crc_fail\"}  " << m.demod_crc_fail << "\n"
+      << "rf_demod_total{result=\"lock_fail\"} " << m.demod_lock_fail << "\n";
   return out.str();
 }
 
-inline void write_prometheus_textfile(const std::string& path,
-                                      const ProcMetrics& m) {
-  if (path.empty()) return;
+inline void write_prometheus_textfile(const std::string& path, const ProcMetrics& m) {
+  if (path.empty())
+    return;
   try {
     std::filesystem::create_directories(std::filesystem::path(path).parent_path());
     std::ofstream ofs(path, std::ios::out | std::ios::trunc);
-    if (!ofs) return;
+    if (!ofs)
+      return;
     ofs << render_prometheus_body(m);
   } catch (...) {
   }
@@ -118,11 +130,13 @@ inline void write_prometheus_textfile(const std::string& path,
 // ---------------------------------------------------------------------------
 
 inline void write_heartbeat(const std::string& path) {
-  if (path.empty()) return;
+  if (path.empty())
+    return;
   try {
     std::filesystem::create_directories(std::filesystem::path(path).parent_path());
     std::ofstream ofs(path, std::ios::out | std::ios::trunc);
-    if (!ofs) return;
+    if (!ofs)
+      return;
     const auto t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     ofs << "ok " << t << "\n";
   } catch (...) {
@@ -147,9 +161,8 @@ struct MetricsSnapshot {
 /// Starts a background HTTP server on the given port serving GET /metrics.
 /// Binds the port synchronously; listening runs on a background std::thread.
 /// Returns {server, thread} on success or {nullptr, thread{}} if bind fails.
-[[nodiscard]] inline std::pair<std::unique_ptr<httplib::Server>, std::thread>
-start_prometheus_http(std::uint16_t port,
-                      std::shared_ptr<MetricsSnapshot> snapshot) {
+[[nodiscard]] inline std::pair<std::unique_ptr<httplib::Server>, std::thread> start_prometheus_http(
+    std::uint16_t port, std::shared_ptr<MetricsSnapshot> snapshot) {
   auto svr = std::make_unique<httplib::Server>();
   svr->Get("/metrics", [snapshot](const httplib::Request&, httplib::Response& res) {
     ProcMetrics snap;
@@ -157,8 +170,7 @@ start_prometheus_http(std::uint16_t port,
       std::lock_guard lk(snapshot->mu);
       snap = snapshot->data;
     }
-    res.set_content(render_prometheus_body(snap),
-                    "text/plain; version=0.0.4; charset=utf-8");
+    res.set_content(render_prometheus_body(snap), "text/plain; version=0.0.4; charset=utf-8");
   });
 
   if (!svr->bind_to_port("0.0.0.0", static_cast<int>(port))) {
