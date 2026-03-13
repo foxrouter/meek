@@ -121,10 +121,10 @@ jobs:
           COMMON_INCLUDES="-I include -I build/_deps/nlohmann_json-src/include"
           TIDY_FAIL=0
 
-          # tools/iq_metrics.cpp (C++20, no hardware deps)
+          # tools/iq_metrics.cpp (C++23, no hardware deps)
           clang-tidy-18 tools/iq_metrics.cpp \
             --checks="$TIDY_CHECKS" \
-            -- -std=c++20 $COMMON_INCLUDES \
+            -- -std=c++23 $COMMON_INCLUDES \
             2>&1 | tee /tmp/clang-tidy-iq_metrics.log || true
           grep -qE "error:" /tmp/clang-tidy-iq_metrics.log && TIDY_FAIL=1 || true
 
