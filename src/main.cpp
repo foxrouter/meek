@@ -43,6 +43,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <condition_variable>
 #include <nlohmann/json.hpp>
 #include <span>
 #include <sstream>
@@ -618,6 +619,7 @@ int main(int argc, char** argv) {
   // pop_front() instead of std::vector::erase(begin()) which is O(n).
   // Queue is capped at 64 entries in proc_loop to bound memory use.
   std::mutex snap_mu;
+  std::condition_variable snap_cv;
   std::deque<SnapTask> snap_queue;
   std::atomic<std::uint64_t> snap_errors{0};
   std::atomic<std::uint64_t> snap_dropped{0};
