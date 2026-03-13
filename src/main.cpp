@@ -243,6 +243,11 @@ struct JsonLog {
     if (failed_ || !ofs_) return;
     const std::string line = j.dump() + "\n";
     ofs_ << line;
+    if (!ofs_.good()) {
+      std::cerr << "[LOG] Write failed for worker log: " << path_ << "\n";
+      failed_ = true;
+      return;
+    }
     bytes_written_ += line.size();
     if (max_bytes_ > 0 && bytes_written_ >= max_bytes_) {
       rotate();
@@ -278,9 +283,20 @@ struct JsonLog {
     try {
       ofs_.close();
       const std::string backup = path_ + ".1";
-      // Overwrite any existing .1 backup unconditionally.
-      std::filesystem::rename(path_, backup);
-      bytes_written_ = 0;
+      // Use error_code overload to avoid throwing from a noexcept function.
+      std::error_code ec;
+      std::filesystem::rename(path_, backup, ec);
+      if (ec) {
+        std::cerr << "[LOG] Rotation rename failed (" << ec.message()
+                  << "); reopening original log: " << path_ << "\n";
+        // Fall back: reopen the original log so writes can continue.
+        open_append();
+        if (!ofs_) {
+          failed_ = true;
+          std::cerr << "[LOG] Fallback reopen failed for: " << path_ << "\n";
+        }
+        return;
+      }
       open_append();
       if (!failed_ && ofs_) {
         std::cerr << "[LOG] Rotated worker log -> " << backup << "\n";
@@ -289,6 +305,9 @@ struct JsonLog {
       }
     } catch (const std::exception& e) {
       std::cerr << "[LOG] Rotation failed: " << e.what() << "\n";
+      failed_ = true;
+    } catch (...) {
+      std::cerr << "[LOG] Rotation failed: unknown exception\n";
       failed_ = true;
     }
   }
