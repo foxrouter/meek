@@ -42,6 +42,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <condition_variable>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <span>
@@ -319,7 +320,8 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
 
 static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_buf,
                       SpscRingBuffer<ClassificationResult, 64>& out_buf, const Config& cfg,
-                      std::mutex& snap_mu, std::deque<SnapTask>& snap_queue,
+                      std::mutex& snap_mu, std::condition_variable& snap_cv,
+                      std::deque<SnapTask>& snap_queue,
                       std::atomic<std::uint64_t>& snap_dropped) {
   const BandProfile* band = find_band(cfg.center_freq);
   if (band) {
@@ -392,20 +394,27 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     // unbounded memory growth.  Save only the best analysis window so the
     // snapshot contains the actual signal, not surrounding noise.
     if (cr.confidence >= cfg.snapshot_conf && cr.snr_gate_pass) {
-      std::lock_guard lk(snap_mu);
-      if (snap_queue.size() < 64) {
-        SnapTask task;
-        const auto snap_begin =
-            blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
-        const auto snap_end = snap_begin + static_cast<std::ptrdiff_t>(best_len);
-        task.samples.assign(snap_begin, snap_end);
-        task.dir = cfg.snapshot_dir;
-        task.conf = cr.confidence;
-        task.ts_ns = cr.timestamp_ns;
-        task.band_name = cr.band_name;
-        snap_queue.push_back(std::move(task));
-      } else {
-        snap_dropped.fetch_add(1, std::memory_order_relaxed);
+      bool enqueued = false;
+      {
+        std::lock_guard lk(snap_mu);
+        if (snap_queue.size() < 64) {
+          SnapTask task;
+          const auto snap_begin =
+              blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
+          const auto snap_end = snap_begin + static_cast<std::ptrdiff_t>(best_len);
+          task.samples.assign(snap_begin, snap_end);
+          task.dir = cfg.snapshot_dir;
+          task.conf = cr.confidence;
+          task.ts_ns = cr.timestamp_ns;
+          task.band_name = cr.band_name;
+          snap_queue.push_back(std::move(task));
+          enqueued = true;
+        } else {
+          snap_dropped.fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+      if (enqueued) {
+        snap_cv.notify_one();
       }
     }
 
@@ -618,6 +627,7 @@ int main(int argc, char** argv) {
   // pop_front() instead of std::vector::erase(begin()) which is O(n).
   // Queue is capped at 64 entries in proc_loop to bound memory use.
   std::mutex snap_mu;
+  std::condition_variable snap_cv;
   std::deque<SnapTask> snap_queue;
   std::atomic<std::uint64_t> snap_errors{0};
   std::atomic<std::uint64_t> snap_dropped{0};
@@ -627,17 +637,14 @@ int main(int argc, char** argv) {
     while (!st.stop_requested()) {
       SnapTask task;
       {
-        std::lock_guard lk(snap_mu);
-        if (!snap_queue.empty()) {
-          task = std::move(snap_queue.front());
-          snap_queue.pop_front();
-        }
+        std::unique_lock<std::mutex> lk(snap_mu);
+        snap_cv.wait(lk, [&] { return !snap_queue.empty() || st.stop_requested(); });
+        if (snap_queue.empty()) break;
+        task = std::move(snap_queue.front());
+        snap_queue.pop_front();
       }
-      if (!task.samples.empty()) {
-        write_snapshot(task.dir, std::span{task.samples}, task.conf, task.ts_ns, task.band_name, snap_errors);
-      } else {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-      }
+      write_snapshot(task.dir, std::span{task.samples}, task.conf, task.ts_ns, task.band_name,
+                     snap_errors);
     }
     // Drain remaining tasks: move the queue out under the lock, then
     // release it before writing so proc_loop is never blocked on I/O.
@@ -665,7 +672,7 @@ int main(int argc, char** argv) {
   });
 
   std::jthread proc_thread([&](std::stop_token st) {
-    proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_mu, snap_queue, snap_dropped);
+    proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_mu, snap_cv, snap_queue, snap_dropped);
   });
 
   std::jthread out_thread([&](std::stop_token st) {
@@ -718,6 +725,7 @@ int main(int argc, char** argv) {
   proc_thread.request_stop();
   out_thread.request_stop();
   snap_thread.request_stop();
+  snap_cv.notify_all();
   // jthreads join at scope exit
 
 #ifdef HAVE_HTTPLIB
