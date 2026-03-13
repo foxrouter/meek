@@ -564,7 +564,8 @@ int main(int argc, char** argv) {
     sa.sa_flags = SA_RESTART;
     if (sigaction(SIGINT, &sa, nullptr) != 0 ||
         sigaction(SIGTERM, &sa, nullptr) != 0) {
-      std::cerr << "[WARN] sigaction failed: " << std::strerror(errno)
+      const int saved_errno = errno;
+      std::cerr << "[WARN] sigaction failed: " << std::strerror(saved_errno)
                 << "; falling back to std::signal\n";
       std::signal(SIGINT, handle_term);
       std::signal(SIGTERM, handle_term);
