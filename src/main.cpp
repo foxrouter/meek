@@ -390,21 +390,27 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     // unbounded memory growth.  Save only the best analysis window so the
     // snapshot contains the actual signal, not surrounding noise.
     if (cr.confidence >= cfg.snapshot_conf && cr.snr_gate_pass) {
-      std::lock_guard lk(snap_mu);
-      if (snap_queue.size() < 64) {
-        SnapTask task;
-        const auto snap_begin =
-            blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
-        const auto snap_end = snap_begin + static_cast<std::ptrdiff_t>(best_len);
-        task.samples.assign(snap_begin, snap_end);
-        task.dir = cfg.snapshot_dir;
-        task.conf = cr.confidence;
-        task.ts_ns = cr.timestamp_ns;
-        task.band_name = cr.band_name;
-        snap_queue.push_back(std::move(task));
+      bool enqueued = false;
+      {
+        std::lock_guard lk(snap_mu);
+        if (snap_queue.size() < 64) {
+          SnapTask task;
+          const auto snap_begin =
+              blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
+          const auto snap_end = snap_begin + static_cast<std::ptrdiff_t>(best_len);
+          task.samples.assign(snap_begin, snap_end);
+          task.dir = cfg.snapshot_dir;
+          task.conf = cr.confidence;
+          task.ts_ns = cr.timestamp_ns;
+          task.band_name = cr.band_name;
+          snap_queue.push_back(std::move(task));
+          enqueued = true;
+        } else {
+          snap_dropped.fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+      if (enqueued) {
         snap_cv.notify_one();
-      } else {
-        snap_dropped.fetch_add(1, std::memory_order_relaxed);
       }
     }
 
