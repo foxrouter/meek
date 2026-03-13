@@ -136,7 +136,7 @@ Key design decisions:
 - **SQLite writes** happen exclusively on the output thread, preventing contention with the capture thread.
 - **Snapshot worker** (`snap_thread`, `std::jthread`) handles IQ snapshot I/O from a bounded task queue (capped at 64 entries) without blocking the processing thread.
 - **Cooperative shutdown** via the `g_shutdown` atomic flag and `std::stop_token` lets all threads drain cleanly on `SIGINT`/`SIGTERM`.
-- **33 band profiles** (`kUkBands`) provide per-band SNR, bandwidth, and prior-boost parameters for the classifier.
+- **38 band profiles** (`kUkBands`) provide per-band SNR, bandwidth, and prior-boost parameters for the classifier.
 
 ## Prerequisites
 
@@ -379,11 +379,11 @@ rsync with retries, bandwidth limiting, and logging.
 
 ```bash
 # One-shot transfer of all files in the snapshot directory
-IQ_DEST=brian@192.168.1.10:/var/lib/rf-adapt-intel/incoming/ \
+IQ_DEST=rf_worker@192.168.1.10:/var/lib/rf-adapt-intel/incoming/ \
   bash scripts/transfer_iq.sh
 
 # Continuous watcher: transfer new files as they arrive (requires inotify-tools)
-IQ_DEST=brian@192.168.1.10:/var/lib/rf-adapt-intel/incoming/ \
+IQ_DEST=rf_worker@192.168.1.10:/var/lib/rf-adapt-intel/incoming/ \
   bash scripts/transfer_iq.sh --watch
 
 # Limit bandwidth to 512 kbps and use 5 retries
