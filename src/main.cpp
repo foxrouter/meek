@@ -1,5 +1,5 @@
 /*
-  rf_adapt_intel — C++20 SDR capture / classification daemon
+  rf_adapt_intel — C++23 SDR capture / classification daemon
   ─────────────────────────────────────────────────────────────
   Three std::jthread pipeline:
     capture_thread  → SpscRingBuffer<SampleBlock, 64>
@@ -666,7 +666,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  std::cout << "rf_adapt_intel v3 (C++20)\n"
+  std::cout << "rf_adapt_intel v3 (C++23)\n"
             << "  center=" << cfg.center_freq << " Hz" << "  rate=" << cfg.sample_rate << " Sps"
             << "  gain=" << cfg.gain << "\n"
             << "  block_len=" << cfg.block_len << "  analysis_len=" << cfg.analysis_len
