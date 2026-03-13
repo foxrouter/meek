@@ -225,15 +225,15 @@ static void prune_old_snapshots(const std::string& dir, int retention_days) {
 // ---------------------------------------------------------------------------
 
 struct JsonLog {
-  explicit JsonLog(const std::string& path) {
-    if (path.empty()) return;
+  // max_bytes: rotate when log file reaches this size (0 = disabled).
+  explicit JsonLog(const std::string& path,
+                   std::uintmax_t max_bytes = 50ULL * 1024 * 1024)
+      : path_(path), max_bytes_(max_bytes) {
+    if (path_.empty()) return;
     try {
-      std::filesystem::create_directories(std::filesystem::path(path).parent_path());
-      ofs_.open(path, std::ios::app);
-      if (!ofs_) {
-        std::cerr << "[LOG] Failed to open worker log: " << path << "\n";
-        failed_ = true;
-      }
+      std::filesystem::create_directories(
+          std::filesystem::path(path_).parent_path());
+      open_append();
     } catch (...) {
       failed_ = true;
     }
@@ -241,7 +241,17 @@ struct JsonLog {
 
   void write(const json& j) {
     if (failed_ || !ofs_) return;
-    ofs_ << j.dump() << "\n";
+    const std::string line = j.dump() + "\n";
+    ofs_ << line;
+    if (!ofs_.good()) {
+      std::cerr << "[LOG] Write failed for worker log: " << path_ << "\n";
+      failed_ = true;
+      return;
+    }
+    bytes_written_ += line.size();
+    if (max_bytes_ > 0 && bytes_written_ >= max_bytes_) {
+      rotate();
+    }
   }
 
   void flush() {
@@ -249,8 +259,58 @@ struct JsonLog {
   }
 
  private:
+  std::string path_;
   std::ofstream ofs_;
+  std::uintmax_t max_bytes_{0};
+  std::uintmax_t bytes_written_{0};
   bool failed_{false};
+
+  void open_append() {
+    ofs_.open(path_, std::ios::app);
+    if (!ofs_) {
+      std::cerr << "[LOG] Failed to open worker log: " << path_ << "\n";
+      failed_ = true;
+      return;
+    }
+    // Track how many bytes already in the file so rotation triggers
+    // correctly even on a restart mid-file.
+    std::error_code ec;
+    const auto sz = std::filesystem::file_size(path_, ec);
+    bytes_written_ = ec ? 0 : sz;
+  }
+
+  void rotate() noexcept {
+    try {
+      ofs_.close();
+      const std::string backup = path_ + ".1";
+      // Use error_code overload to avoid throwing from a noexcept function.
+      std::error_code ec;
+      std::filesystem::rename(path_, backup, ec);
+      if (ec) {
+        std::cerr << "[LOG] Rotation rename failed (" << ec.message()
+                  << "); reopening original log: " << path_ << "\n";
+        // Fall back: reopen the original log so writes can continue.
+        open_append();
+        if (!ofs_) {
+          failed_ = true;
+          std::cerr << "[LOG] Fallback reopen failed for: " << path_ << "\n";
+        }
+        return;
+      }
+      open_append();
+      if (!failed_ && ofs_) {
+        std::cerr << "[LOG] Rotated worker log -> " << backup << "\n";
+      } else {
+        std::cerr << "[LOG] Rotation reopen failed for: " << path_ << "\n";
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "[LOG] Rotation failed: " << e.what() << "\n";
+      failed_ = true;
+    } catch (...) {
+      std::cerr << "[LOG] Rotation failed: unknown exception\n";
+      failed_ = true;
+    }
+  }
 };
 
 // ---------------------------------------------------------------------------
