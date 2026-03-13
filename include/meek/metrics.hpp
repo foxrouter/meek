@@ -49,6 +49,7 @@ struct ProcMetrics {
   std::uint64_t snap_errors{0};
   std::uint64_t snap_dropped{0};
   std::uint64_t frames_cap_dropped{0};
+  std::uint64_t frames_proc_dropped{0};
 };
 
 // ---------------------------------------------------------------------------
@@ -92,7 +93,11 @@ struct ProcMetrics {
       << "# HELP rf_frames_cap_dropped_total "
       << "IQ blocks dropped by capture loop under backpressure\n"
       << "# TYPE rf_frames_cap_dropped_total counter\n"
-      << "rf_frames_cap_dropped_total " << m.frames_cap_dropped << "\n";
+      << "rf_frames_cap_dropped_total " << m.frames_cap_dropped << "\n"
+      << "# HELP rf_frames_proc_dropped_total "
+      << "Classification results dropped by proc_loop under output backpressure\n"
+      << "# TYPE rf_frames_proc_dropped_total counter\n"
+      << "rf_frames_proc_dropped_total " << m.frames_proc_dropped << "\n";
   return out.str();
 }
 
