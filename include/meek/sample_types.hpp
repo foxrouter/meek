@@ -48,33 +48,29 @@ enum class ModClass : std::uint8_t {
 // ---------------------------------------------------------------------------
 
 enum class DemodStatus : std::uint8_t {
-  NONE = 0,      // demod not attempted
+  UNKNOWN = 0,   // demod not attempted / status not set
+  SKIPPED,       // demod was intentionally skipped (e.g. mod_class == ModClass::UNKNOWN)
   OK,            // demod succeeded
   CRC_FAIL,      // demod ran but CRC check failed
   LOCK_FAIL,     // carrier/timing lock was not achieved
-  SKIPPED,       // demod was intentionally skipped (e.g. mod_class == UNKNOWN)
 };
 
 [[nodiscard]] constexpr const char* demod_status_name(DemodStatus s) noexcept {
   switch (s) {
+    case DemodStatus::UNKNOWN:
+      return "";
+    case DemodStatus::SKIPPED:
+      return "skipped";
     case DemodStatus::OK:
       return "ok";
     case DemodStatus::CRC_FAIL:
       return "crc_fail";
     case DemodStatus::LOCK_FAIL:
       return "lock_fail";
-    case DemodStatus::SKIPPED:
-      return "skipped";
     default:
       return "";
   }
 }
-
-// Canonical string constants for demod_status (use these when setting the field).
-inline constexpr const char* kDemodStatusOk       = "ok";
-inline constexpr const char* kDemodStatusCrcFail  = "crc_fail";
-inline constexpr const char* kDemodStatusLockFail = "lock_fail";
-inline constexpr const char* kDemodStatusSkipped  = "skipped";
 
 // ---------------------------------------------------------------------------
 // SampleBlock — one capture window from the SDR device
@@ -121,14 +117,15 @@ struct ClassificationResult {
   std::string decision_trace;
 
   // ── Demodulation results ─────────────────────────────────────────────────
-  // Populated only when HAVE_LIQUID is defined and mod_class != ModClass::UNKNOWN.
-  // All fields are zero/false/empty when demod was not attempted.
-  bool        demod_attempted{false};
-  bool        demod_crc_ok{false};
+  // demod_status is the single source of truth for demod outcome.
+  // UNKNOWN = not attempted; SKIPPED = intentionally skipped; all other
+  // values indicate demod was run.  demod_cfo_hz, demod_phase_error, and
+  // demod_lock_ms are populated only when demod_status is OK, CRC_FAIL, or
+  // LOCK_FAIL.  All fields default to zero/UNKNOWN when demod was not run.
+  DemodStatus demod_status{DemodStatus::UNKNOWN};
   float       demod_cfo_hz{0.0f};       // carrier frequency offset (Hz)
   float       demod_phase_error{0.0f};  // RMS phase error (radians)
   int         demod_lock_ms{0};         // time to carrier lock (ms); 0 = not locked
-  std::string demod_status;             // "ok"|"crc_fail"|"lock_fail"|"skipped"|""
 };
 
 // Minimum number of IQ samples required for a meaningful block classification.
