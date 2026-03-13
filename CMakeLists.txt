@@ -239,7 +239,7 @@ endif()
 if(BASH_EXECUTABLE)
   add_test(
     NAME test_setup_sh
-    COMMAND ${BASH_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_setup.sh
+    COMMAND ${BASH_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_setup.sh -v
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
   )
 endif()
