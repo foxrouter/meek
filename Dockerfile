@@ -39,7 +39,7 @@ WORKDIR /src
 COPY . .
 
 # ── Python deps ─────────────────────────────────────────────────────────────
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
 # ── Build iq_metrics and rf_audit (no SoapySDR needed) ──────────────────────
 RUN cmake -S /src -B /build \
