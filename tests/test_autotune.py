@@ -105,10 +105,24 @@ class TestSignalMetrics(unittest.TestCase):
         self.assertEqual(at.heuristic_confidence(s), 0.0)
 
     def test_heuristic_confidence_is_margin_normalized(self):
-        """heuristic_confidence must reflect margin, not raw top score.
+        """heuristic_confidence() must delegate to _margin_confidence().
 
-        Equal class scores → confidence near 0.0 (four-way tie).
-        A dominant class score → confidence near 1.0.
+        Patching _margin_confidence confirms it is actually invoked, ensuring
+        the function does not silently regress to returning the raw max score.
+        """
+        from unittest.mock import patch
+        s = _awgn(_fsk2(), snr_db=10.0)
+        with patch.object(at, '_margin_confidence', wraps=at._margin_confidence) as mock_mc:
+            c = at.heuristic_confidence(s)
+            mock_mc.assert_called_once()
+            # Result must match what _margin_confidence returned
+            args = mock_mc.call_args[0][0]
+            self.assertAlmostEqual(c, at._margin_confidence(args), places=9)
+
+    def test_margin_confidence_formula(self):
+        """_margin_confidence() formula: (winner - runner_up) / (winner + ε).
+
+        Equal class scores → near 0.0; one dominant score → > 0.8.
         """
         # Four equal scores: (best - runner_up) / (best + ε) ≈ 0
         conf_tie = at._margin_confidence([0.25, 0.25, 0.25, 0.25])

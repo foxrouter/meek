@@ -104,7 +104,7 @@ def estimate_bandwidth_hz(s: np.ndarray, sample_rate: float = _SAMPLE_RATE) -> f
     return est_bw_frac * sample_rate
 
 
-def _margin_confidence(scores: list) -> float:
+def _margin_confidence(scores: List[float]) -> float:
     """Return margin-normalized confidence matching the C++ classify_block formula.
 
     margin = (winner - runner_up) / (winner + ε), clamped to [0, 1].
