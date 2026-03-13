@@ -104,6 +104,22 @@ class TestSignalMetrics(unittest.TestCase):
         s = np.zeros(10, dtype=np.complex64)
         self.assertEqual(at.heuristic_confidence(s), 0.0)
 
+    def test_heuristic_confidence_is_margin_normalized(self):
+        """heuristic_confidence must reflect margin, not raw top score.
+
+        Equal class scores → confidence near 0.0 (four-way tie).
+        A dominant class score → confidence near 1.0.
+        """
+        # Four equal scores: (best - runner_up) / (best + ε) ≈ 0
+        conf_tie = at._margin_confidence([0.25, 0.25, 0.25, 0.25])
+        self.assertAlmostEqual(conf_tie, 0.0, places=6,
+                               msg="Equal scores must yield near-zero confidence")
+
+        # One dominant score: margin = (0.9 - 0.1) / (0.9 + ε) ≈ 0.889
+        conf_dominant = at._margin_confidence([0.1, 0.1, 0.1, 0.9])
+        self.assertGreater(conf_dominant, 0.8,
+                           msg="Dominant score must yield high confidence (>0.8)")
+
 
 # ---------------------------------------------------------------------------
 # Recommendation tests

@@ -336,8 +336,8 @@ struct ClassifyOptions {
   dt.precision(3);
   dt << std::fixed << " scores(cw=" << cw_score << ",fsk=" << fsk_score
      << ",psk=" << psk_score << ",ook=" << ook_score << ") -> "
-     << mod_class_name(r.mod_class) << "@" << best
-     << " margin=" << r.confidence;
+     << mod_class_name(r.mod_class) << "@" << r.confidence
+     << " best=" << best;
   r.decision_trace = dt.str();
   return r;
 }
