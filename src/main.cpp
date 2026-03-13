@@ -33,6 +33,7 @@
 #include <chrono>
 #include <complex>
 #include <csignal>
+#include <signal.h>
 #include <cstring>
 #include <cstdint>
 #include <deque>
