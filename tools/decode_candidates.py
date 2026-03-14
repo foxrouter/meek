@@ -323,14 +323,24 @@ def resample_iq(samples: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
     n_out = int(round(len(samples) * fs_out / fs_in))
     if n_out < 1:
         return np.empty(0, dtype=np.complex64)
-    ratio = Fraction(int(fs_out), int(fs_in)).limit_denominator(1_000)
+    ratio = Fraction(int(round(fs_out)), int(round(fs_in))).limit_denominator(1_000)
     up    = ratio.numerator
     down  = ratio.denominator
     if _HAVE_SCIPY:
-        return _resample_poly(samples, up, down).astype(np.complex64)
-    # Numpy fallback: linear interpolation on I and Q channels separately
-    t_in = np.arange(len(samples), dtype=np.float64)
-    t_out = np.arange(n_out) * (len(samples) / n_out)
+        out = _resample_poly(samples, up, down).astype(np.complex64)
+        # Trim or zero-pad to n_out so both backends return the same length.
+        if len(out) > n_out:
+            return out[:n_out]
+        if len(out) < n_out:
+            return np.concatenate(
+                [out, np.zeros(n_out - len(out), dtype=np.complex64)]
+            )
+        return out
+    # Numpy fallback: linear interpolation on I and Q channels separately.
+    # linspace spans the full input index range [0, len-1] so no time-axis
+    # compression occurs regardless of the resampling ratio.
+    t_in  = np.arange(len(samples), dtype=np.float64)
+    t_out = np.linspace(0, len(samples) - 1, n_out)
     i_out = np.interp(t_out, t_in, samples.real).astype(np.float32)
     q_out = np.interp(t_out, t_in, samples.imag).astype(np.float32)
     return (i_out + 1j * q_out).astype(np.complex64)

@@ -731,6 +731,35 @@ class TestResampleIq(unittest.TestCase):
         finally:
             dc._HAVE_SCIPY = orig
 
+    def test_numpy_fallback_spans_full_range(self):
+        """numpy fallback must not compress the time axis (linspace, not arange)."""
+        orig = dc._HAVE_SCIPY
+        try:
+            dc._HAVE_SCIPY = False
+            # Use a simple ramp so we can check first/last values
+            n = 100
+            ramp = np.arange(n, dtype=np.float32) + 1j * np.arange(n, dtype=np.float32)
+            out = dc.resample_iq(ramp, float(n), float(n // 4))
+            # First sample should be ~0+0j, last should be ~(n-1)+(n-1)j
+            self.assertAlmostEqual(out[0].real, 0.0, places=3)
+            self.assertAlmostEqual(out[-1].real, float(n - 1), places=1)
+        finally:
+            dc._HAVE_SCIPY = orig
+
+    def test_scipy_and_numpy_same_length(self):
+        """Both scipy and numpy backends must return the same output length."""
+        if not dc._HAVE_SCIPY:
+            self.skipTest("scipy not installed")
+        fs_out = FS // 3
+        out_scipy = dc.resample_iq(self._samples, FS, fs_out)
+        orig = dc._HAVE_SCIPY
+        try:
+            dc._HAVE_SCIPY = False
+            out_numpy = dc.resample_iq(self._samples, FS, fs_out)
+        finally:
+            dc._HAVE_SCIPY = orig
+        self.assertEqual(len(out_scipy), len(out_numpy))
+
     def test_decode_candidate_resamples_at_non_default_fs(self):
         """decode_candidate() resamples snapshots not at _DECODER_FS."""
         np.random.seed(42)
