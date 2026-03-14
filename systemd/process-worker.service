@@ -14,9 +14,10 @@ WatchdogSec=30s
 # Heartbeat is sent every 2 s, but only while both capture and proc threads
 # have updated their progress atomics within the stale window
 # (max(3 × RF_READ_TIMEOUT_US, 10 s)).  After a hang heartbeats stop within
-# that window, and systemd kills/restarts up to ~40 s after the hang
-# (≤stale window + WatchdogSec=30 s).  RF_READ_TIMEOUT_US defaults to 500 ms,
-# giving a 10 s stale window; raising it scales the window proportionally.
+# that window; systemd then kills/restarts after (stale window + WatchdogSec).
+# With the default RF_READ_TIMEOUT_US=500 ms (stale window=10 s) this gives a
+# total restart window of ≤10 s + 30 s = ~40 s; raising RF_READ_TIMEOUT_US
+# scales the stale window and therefore the total restart latency proportionally.
 # Restart=always is intentional: a fatal SDR read error triggers g_shutdown and
 # main() exits cleanly (status 0), which Restart=on-failure would not restart.
 Restart=always
