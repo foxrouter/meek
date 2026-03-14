@@ -879,9 +879,12 @@ int main(int argc, char** argv) {
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch())
             .count());
+    const auto cap_last  = cap_progress.load(std::memory_order_relaxed);
+    const auto proc_last = proc_progress.load(std::memory_order_relaxed);
+    // Use addition rather than subtraction to avoid unsigned underflow when a
+    // thread updates its timestamp between the now_ns capture and the load.
     const bool threads_healthy =
-        (now_ns - cap_progress.load(std::memory_order_relaxed) < kStaleNs) &&
-        (now_ns - proc_progress.load(std::memory_order_relaxed) < kStaleNs);
+        (cap_last + kStaleNs > now_ns) && (proc_last + kStaleNs > now_ns);
     if (threads_healthy) {
       sd_notify(0, "WATCHDOG=1");
     }

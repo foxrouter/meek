@@ -11,7 +11,9 @@ Type=notify
 # Override via ExecStart= in a drop-in (processor.conf) for different bands.
 ExecStart=/usr/local/bin/rf_adapt_intel 433920000 2048000 30
 WatchdogSec=30s
-# Heartbeat is sent every 2 s from the main poll loop (15x safety margin).
+# Heartbeat is sent every 2 s, but only while both capture and proc threads
+# have updated their progress atomics within the last 10 s.  A hang stops
+# heartbeats after ≤10 s; systemd then kills and restarts within WatchdogSec=30 s.
 Restart=on-failure
 RestartSec=10s
 User=rf_worker
