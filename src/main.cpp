@@ -54,8 +54,10 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
       (sa.sun_path[0] == '\0' ? plen : plen + 1));
   const ssize_t r = ::sendto(fd, state, std::strlen(state), MSG_NOSIGNAL,
                              reinterpret_cast<const struct sockaddr*>(&sa), addrlen);
+  // Save errno before close() which may overwrite it.
+  const int saved_errno = (r < 0) ? errno : 0;
   ::close(fd);
-  return r < 0 ? -errno : 1;
+  return r < 0 ? -saved_errno : 1;
 }
 #endif  // HAVE_SYSTEMD
 #include <fcntl.h>
@@ -444,23 +446,31 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   std::vector<float> scratch;
   scratch.reserve(cfg.analysis_len);
 
+  // Idle-path progress throttle: update the watchdog timestamp at most every
+  // ~250ms (2500 × 100µs) to avoid a steady_clock::now() call at 10 kHz.
+  std::uint32_t idle_count = 0;
+
   while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
          !in_buf.empty_approx()) {
     SampleBlock blk;
     if (!in_buf.pop(blk)) {
       if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
         break;
-      // Update progress even when the queue is momentarily empty; this proves
-      // the thread is spinning and not deadlocked.
-      proc_progress.store(
-          static_cast<std::uint64_t>(
-              std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  std::chrono::steady_clock::now().time_since_epoch())
-                  .count()),
-          std::memory_order_relaxed);
+      // Update progress every ~250ms in the idle path; this proves the thread
+      // is spinning and not deadlocked without burning CPU on clock reads.
+      if (++idle_count >= 2500) {
+        idle_count = 0;
+        proc_progress.store(
+            static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count()),
+            std::memory_order_relaxed);
+      }
       std::this_thread::sleep_for(std::chrono::microseconds(100));
       continue;
     }
+    idle_count = 0;
     proc_progress.store(
         static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(

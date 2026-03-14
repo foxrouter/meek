@@ -14,7 +14,7 @@ WatchdogSec=30s
 # Heartbeat is sent every 2 s, but only while both capture and proc threads
 # have updated their progress atomics within the last 10 s.  A hang stops
 # heartbeats after ≤10 s; systemd then kills and restarts within WatchdogSec=30 s.
-Restart=on-failure
+Restart=always
 RestartSec=10s
 User=rf_worker
 Group=rf_worker
