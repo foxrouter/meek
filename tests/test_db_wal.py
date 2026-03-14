@@ -127,7 +127,9 @@ class TestWalMode(unittest.TestCase):
         rows_per_thread = 50
         # Barrier ensures both threads enter the write loop simultaneously,
         # maximizing lock contention and ensuring the busy-timeout path is exercised.
-        barrier = threading.Barrier(2)
+        # 10 s barrier timeout prevents an indefinite hang if one thread
+        # fails before reaching barrier.wait() (e.g., connect or PRAGMA error).
+        barrier = threading.Barrier(2, timeout=10)
 
         def _writer(label):
             # timeout=5.0 is the Python sqlite3 equivalent of the C++
@@ -154,9 +156,18 @@ class TestWalMode(unittest.TestCase):
         t1.join()
         t2.join()
 
-        self.assertTrue(
-            errors.empty(),
-            f"Expected zero SQLITE_BUSY errors, got: {list(errors.queue)}",
+        # Drain the queue into a list for inspection; avoids relying on the
+        # internal Queue.queue attribute which is an implementation detail.
+        collected_errors = []
+        while not errors.empty():
+            try:
+                collected_errors.append(errors.get_nowait())
+            except queue.Empty:
+                break
+        self.assertEqual(
+            collected_errors,
+            [],
+            f"Expected zero SQLITE_BUSY errors, got: {collected_errors}",
         )
 
         # Verify all rows were written.

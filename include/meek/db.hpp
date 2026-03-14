@@ -113,8 +113,8 @@ inline std::unique_ptr<Database> Database::open(const std::string& path) {
   {
     const int bt_rc = sqlite3_busy_timeout(raw, 5000);
     if (bt_rc != SQLITE_OK) {
-      std::cerr << "[DB] sqlite3_busy_timeout failed: " << sqlite3_errmsg(raw)
-                << " - SQLITE_BUSY errors may reach callers immediately\n";
+      std::cerr << "[DB] sqlite3_busy_timeout failed: " << sqlite3_errstr(bt_rc)
+                << " (rc=" << bt_rc << ") - SQLITE_BUSY errors may reach callers immediately\n";
     }
   }
   // Increase page cache to reduce write stalls under burst classification.
