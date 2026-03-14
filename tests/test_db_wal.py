@@ -19,6 +19,7 @@ or via pytest:
 
 import sqlite3
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -105,6 +106,64 @@ class TestWalMode(unittest.TestCase):
         mode = conn.execute("PRAGMA journal_mode = WAL;").fetchone()[0]
         self.assertEqual(mode, "wal")
         conn.close()
+
+    def test_concurrent_write_no_busy_errors(self):
+        """Two connections writing concurrently under WAL + busy_timeout must
+        produce zero SQLITE_BUSY errors returned to callers.
+
+        Mirrors the C++ fix: sqlite3_busy_timeout(raw, 5000) is set on the
+        writer connection so that SQLite retries internally instead of
+        immediately surfacing SQLITE_BUSY to the application.
+        """
+        conn_setup = self._open_wal()
+        conn_setup.execute(
+            "CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY, v TEXT);"
+        )
+        conn_setup.commit()
+        conn_setup.close()
+
+        errors = []
+        rows_per_thread = 50
+
+        def _writer(label):
+            # timeout=5.0 is the Python sqlite3 equivalent of the C++
+            # sqlite3_busy_timeout(raw, 5000) call added to Database::open().
+            # Both instruct the SQLite library to retry internally for up to
+            # 5 seconds on SQLITE_BUSY before surfacing an error to the caller.
+            conn = sqlite3.connect(self._db_path, timeout=5.0)
+            conn.execute("PRAGMA journal_mode = WAL;")
+            conn.execute("PRAGMA synchronous = NORMAL;")
+            try:
+                for i in range(rows_per_thread):
+                    conn.execute("INSERT INTO t(v) VALUES (?);", (f"{label}-{i}",))
+                    conn.commit()
+            except sqlite3.OperationalError as exc:
+                errors.append(exc)
+            finally:
+                conn.close()
+
+        t1 = threading.Thread(target=_writer, args=("a",))
+        t2 = threading.Thread(target=_writer, args=("b",))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        self.assertEqual(
+            errors,
+            [],
+            f"Expected zero SQLITE_BUSY errors, got: {errors}",
+        )
+
+        # Verify all rows were written.
+        conn_check = sqlite3.connect(self._db_path)
+        count = conn_check.execute("SELECT COUNT(*) FROM t;").fetchone()[0]
+        conn_check.close()
+        self.assertEqual(
+            count,
+            rows_per_thread * 2,
+            f"Expected {rows_per_thread * 2} rows, got {count}",
+        )
 
 
 if __name__ == "__main__":

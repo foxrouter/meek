@@ -107,6 +107,13 @@ inline std::unique_ptr<Database> Database::open(const std::string& path) {
     }
   }
   sqlite3_exec(raw, "PRAGMA synchronous = NORMAL;", nullptr, nullptr, nullptr);
+  // Retry SQLITE_BUSY for up to 5 seconds before propagating the error.
+  // Required in WAL mode when decode_candidates.py or admin tools hold read
+  // transactions concurrently with the daemon's write path.
+  sqlite3_busy_timeout(raw, 5000);
+  // Increase page cache to reduce write stalls under burst classification.
+  sqlite3_exec(raw, "PRAGMA cache_size = -8000;",
+               nullptr, nullptr, nullptr);  // 8 MiB
 
   if (!db->apply_schema() || !db->prepare_statements()) {
     return nullptr;
