@@ -75,6 +75,7 @@ int main() {
   std::jthread t([](std::stop_token) {});
   int arr[4]{};
   std::span<int> s(arr);
+  (void)t; (void)s;
   return 0;
 }
 ]=] _STDCXX_FEATURES_AVAILABLE)
