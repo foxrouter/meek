@@ -24,6 +24,9 @@
 #include <SoapySDR/Formats.h>
 #include <SoapySDR/Version.h>
 #endif  // HAVE_SOAPY
+#ifdef HAVE_SYSTEMD
+#include <systemd/sd-daemon.h>
+#endif
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
@@ -695,6 +698,9 @@ int main(int argc, char** argv) {
     sdr = std::make_unique<SoapySdrSource>(cfg.center_freq, cfg.sample_rate, cfg.gain,
                                            cfg.read_timeout_us);
     std::cout << "[SDR] " << sdr->description() << " opened\n";
+#ifdef HAVE_SYSTEMD
+    sd_notify(0, "READY=1\nSTATUS=SDR device open, capturing");
+#endif
   } catch (const std::exception& e) {
     std::cerr << "Failed to open SDR device: " << e.what() << "\n";
     return 1;
@@ -803,6 +809,9 @@ int main(int argc, char** argv) {
 
   while (!g_shutdown.load(std::memory_order_relaxed)) {
     std::this_thread::sleep_for(std::chrono::seconds(2));
+#ifdef HAVE_SYSTEMD
+    sd_notify(0, "WATCHDOG=1");
+#endif
     std::cout << "[STATUS] cap_queue=" << cap_to_proc.size_approx()
               << " out_queue=" << proc_to_out.size_approx() << "\n";
   }

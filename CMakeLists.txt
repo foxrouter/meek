@@ -154,6 +154,15 @@ int main() {
     target_link_libraries(rf_adapt_intel PRIVATE ${LIQUID_PKG_LIBRARIES})
   endif()
 
+  # Optional: libsystemd for sd_notify watchdog integration
+  pkg_check_modules(LIBSYSTEMD QUIET libsystemd)
+  if(LIBSYSTEMD_FOUND)
+    message(STATUS "libsystemd found — watchdog integration enabled")
+    target_compile_definitions(rf_adapt_intel PRIVATE HAVE_SYSTEMD)
+    target_link_libraries(rf_adapt_intel PRIVATE ${LIBSYSTEMD_LIBRARIES})
+    target_include_directories(rf_adapt_intel PRIVATE ${LIBSYSTEMD_INCLUDE_DIRS})
+  endif()
+
   target_compile_options(rf_adapt_intel PRIVATE
     -Wall -Wextra -Wno-unused-parameter)
   # HAVE_SOAPY enables the SoapySdrSource implementation in isdr_source.hpp

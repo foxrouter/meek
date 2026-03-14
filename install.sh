@@ -162,7 +162,7 @@ install_deps() {
     info "Decode-only mode (--no-sdr): skipping build tools and RTL-SDR hardware packages."
   else
     # Build tools — only needed on nodes that compile rf_adapt_intel
-    pkgs+=(build-essential cmake pkg-config libsqlite3-dev)
+    pkgs+=(build-essential cmake pkg-config libsqlite3-dev libsystemd-dev)
     # GCC 13 is required for C++23 stdlib features on Bookworm (default is GCC 12)
     if [[ "${PLATFORM}" == "bookworm" ]]; then
       pkgs+=(gcc-13 g++-13)
