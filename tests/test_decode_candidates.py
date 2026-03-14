@@ -691,6 +691,23 @@ class TestResampleIq(unittest.TestCase):
         out = dc.resample_iq(self._samples, FS, FS // 2)
         self.assertEqual(out.dtype, np.complex64)
 
+    def test_invalid_rate_zero_raises(self):
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, 0, FS)
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, FS, 0)
+
+    def test_invalid_rate_negative_raises(self):
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, -FS, FS)
+
+    def test_extreme_decimation_returns_empty(self):
+        """A single sample decimated by a large factor yields an empty array."""
+        tiny = self._samples[:1]
+        out = dc.resample_iq(tiny, FS * 1_000, FS)
+        self.assertEqual(len(out), 0)
+        self.assertEqual(out.dtype, np.complex64)
+
     def test_scipy_path(self):
         """scipy backend produces the correct output length."""
         if not dc._HAVE_SCIPY:
@@ -713,6 +730,37 @@ class TestResampleIq(unittest.TestCase):
             self.assertEqual(out.dtype, np.complex64)
         finally:
             dc._HAVE_SCIPY = orig
+
+    def test_decode_candidate_resamples_at_non_default_fs(self):
+        """decode_candidate() resamples snapshots not at _DECODER_FS."""
+        np.random.seed(42)
+        # Generate FSK at 2× the decoder rate so decode_candidate must downsample
+        fs_capture = dc._DECODER_FS * 2
+        samples_hi = make_fsk2(n_syms=400, sps=16, fs=fs_capture)
+        tmp = tempfile.mkdtemp()
+        try:
+            snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")
+            with open(snap_path, "wb") as fh:
+                fh.write(cf32_bytes(samples_hi))
+            candidate = {
+                "signal_id": 1, "example_id": 1,
+                "db_timestamp": "2023-11-15T00:00:00",
+                "source": "test",
+                "confidence": 0.81,
+                "decision_trace": (
+                    "snr=20dB band=ISM-433 scores(fsk_like=0.81,ook_am_like=0.1)"
+                    " -> fsk_like@0.81"
+                ),
+            }
+            snap = {
+                "path": snap_path,
+                "filename": os.path.basename(snap_path),
+                "size_bytes": os.path.getsize(snap_path),
+            }
+            result = dc.decode_candidate(candidate, snap, fs_capture, use_external=False)
+            self.assertTrue(result["decoded"], msg=f"decode failed after resample: {result}")
+        finally:
+            shutil.rmtree(tmp)
 
 
 # ---------------------------------------------------------------------------

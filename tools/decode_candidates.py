@@ -48,6 +48,7 @@ import sys
 import tempfile
 import traceback
 from datetime import datetime, timezone
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -61,6 +62,10 @@ except ImportError:  # pragma: no cover
 
 # Audit report format version (increment when report schema changes)
 _VERSION = "1.0.0"
+
+# Canonical analysis sample rate fed to built-in decoders.  Snapshots that
+# were captured at a different rate are resampled to this value before decoding.
+_DECODER_FS = 2_048_000
 
 # ---------------------------------------------------------------------------
 # Band name -> centre frequency (Hz) table, mirrors UK_BANDS in main.cpp
@@ -304,16 +309,26 @@ def resample_iq(samples: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
 
     Uses scipy.signal.resample_poly when available (polyphase FIR, lower
     aliasing); falls back to numpy linear interpolation otherwise.
+
+    Raises ``ValueError`` if either sample rate is non-positive.
+    Returns an empty complex64 array when the output would contain zero
+    samples (extreme decimation applied to very short inputs).
     """
+    if fs_in <= 0 or fs_out <= 0:
+        raise ValueError(
+            f"Sample rates must be positive; got fs_in={fs_in}, fs_out={fs_out}"
+        )
     if fs_in == fs_out:
         return samples
-    g = math.gcd(int(fs_out), int(fs_in))
-    up = int(fs_out) // g
-    down = int(fs_in) // g
+    n_out = int(round(len(samples) * fs_out / fs_in))
+    if n_out < 1:
+        return np.empty(0, dtype=np.complex64)
+    ratio = Fraction(int(fs_out), int(fs_in)).limit_denominator(1_000)
+    up    = ratio.numerator
+    down  = ratio.denominator
     if _HAVE_SCIPY:
         return _resample_poly(samples, up, down).astype(np.complex64)
     # Numpy fallback: linear interpolation on I and Q channels separately
-    n_out = int(round(len(samples) * fs_out / fs_in))
     t_in = np.arange(len(samples), dtype=np.float64)
     t_out = np.arange(n_out) * (len(samples) / n_out)
     i_out = np.interp(t_out, t_in, samples.real).astype(np.float32)
@@ -1153,7 +1168,14 @@ def decode_candidate(
         # Fallback: try FSK (most common), but mark method accordingly
         decoder_fn = decode_fsk
 
-    result = decoder_fn(samples, fs=fs)
+    # Normalise to the canonical analysis rate so that built-in decoders
+    # receive the expected samples-per-symbol regardless of capture rate.
+    fs_decode = fs
+    if fs != _DECODER_FS:
+        samples   = resample_iq(samples, fs, _DECODER_FS)
+        fs_decode = _DECODER_FS
+
+    result = decoder_fn(samples, fs=fs_decode)
     entry["decode_result"] = result
     entry["decoded"]       = result.get("decoded", False)
     entry["decoder_used"]  = result.get("method", "built_in_unknown")
