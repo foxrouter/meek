@@ -35,7 +35,9 @@ jobs:
           cache: "pip"
 
       - name: Install Python dependencies
-        run: pip install --upgrade pip && pip install -r requirements.txt
+        run: |
+          pip install --upgrade pip && pip install -r requirements.txt
+          python3 -c "import scipy; print('scipy', scipy.__version__)"
 
       - name: Lint with pycodestyle (new files only)
         run: |
