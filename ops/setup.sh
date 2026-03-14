@@ -34,11 +34,9 @@ CONF_FILE="${CONF_DIR}/thresholds.env"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Path where liquid-dsp installs its .pc file (not searched by default on Ubuntu)
 LIQUID_PKGCFG_DIR="/usr/local/lib/pkgconfig"
-# Pinned liquid-dsp release — update LIQUID_DSP_SHA256 alongside any version bump.
+# Pinned liquid-dsp release — update LIQUID_DSP_EXPECTED_COMMIT alongside any version bump.
 LIQUID_DSP_GIT_TAG="v1.7.0"
-# SHA256 of the upstream GitHub source tarball for LIQUID_DSP_GIT_TAG.
-# Recompute with: curl -fsSL <tarball-url> | sha256sum
-LIQUID_DSP_SHA256="${LIQUID_DSP_SHA256:-33c42ebc2e6088570421e282c6332e899705d42b4f73ebd1212e6a11da714dd4}"
+LIQUID_DSP_EXPECTED_COMMIT="4dda702cb81cf96155e614299aab6180ff09740e"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -211,32 +209,27 @@ install_rtl_433() {
 
 install_liquid_dsp() {
   log "Installing liquid-dsp build dependencies..."
-  # curl is used instead of git to download a verifiable tarball (SHA256-pinned).
-  run sudo apt-get install -y build-essential pkg-config libfftw3-dev autoconf automake libtool curl
+  run sudo apt-get install -y build-essential pkg-config libfftw3-dev autoconf automake libtool git
 
   local src_dir
   src_dir="$(mktemp -d /tmp/liquid-dsp-build.XXXXXX)"
   # shellcheck disable=SC2064
   trap "rm -rf '${src_dir}'" EXIT
 
-  local tarball="${src_dir}/liquid-dsp.tar.gz"
-  local tarball_url="https://github.com/jgaeddert/liquid-dsp/archive/refs/tags/${LIQUID_DSP_GIT_TAG}.tar.gz"
-
-  log "Downloading liquid-dsp ${LIQUID_DSP_GIT_TAG} tarball..."
-  run curl -fsSL -o "${tarball}" "${tarball_url}"
+  log "Cloning liquid-dsp ${LIQUID_DSP_GIT_TAG} into ${src_dir}..."
+  run git clone --depth 1 --branch "${LIQUID_DSP_GIT_TAG}" https://github.com/jgaeddert/liquid-dsp.git "${src_dir}"
 
   if ! $DRY_RUN; then
-    log "Verifying liquid-dsp tarball SHA256..."
-    local actual_sha256
-    actual_sha256="$(sha256sum "${tarball}" | awk '{print $1}')"
-    if [[ "${actual_sha256}" != "${LIQUID_DSP_SHA256}" ]]; then
-      echo "[ERROR] liquid-dsp tarball SHA256 mismatch!" >&2
-      echo "  Expected: ${LIQUID_DSP_SHA256}" >&2
-      echo "  Got:      ${actual_sha256}" >&2
+    log "Verifying liquid-dsp source commit..."
+    local actual_commit
+    actual_commit="$(git -C "${src_dir}" rev-parse HEAD)"
+    if [[ "${actual_commit}" != "${LIQUID_DSP_EXPECTED_COMMIT}" ]]; then
+      echo "[ERROR] liquid-dsp commit hash mismatch!" >&2
+      echo "  Expected: ${LIQUID_DSP_EXPECTED_COMMIT}" >&2
+      echo "  Got:      ${actual_commit}" >&2
       exit 1
     fi
-    echo "  SHA256 verified: ${actual_sha256}"
-    tar -xzf "${tarball}" -C "${src_dir}" --strip-components=1
+    echo "  Commit verified: ${actual_commit}"
   fi
 
   local _liq_cflags=""
