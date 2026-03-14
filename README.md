@@ -144,14 +144,35 @@ Key design decisions:
 
 | Component | Minimum version | Notes |
 |---|---|---|
-| GCC or Clang | C++23 capable | GCC 13+, Clang 17+ |
+| GCC or Clang | C++23 capable | see [Compiler requirements](#compiler-requirements) |
 | CMake | 3.25 | Build system |
 | SoapySDR | any | `libsoapysdr-dev` on Debian/Ubuntu |
 | SQLite 3 | any | `libsqlite3-dev` |
 | Python 3 | 3.8+ | For tests and tools (`numpy` required) |
 | liquid-dsp | optional | Advanced demodulation — see [Optional decoder setup](#optional-decoder-setup-opssetupsh) |
 
-On Debian/Ubuntu (Bookworm or Noble):
+### Compiler requirements
+- GCC ≥ 13 or Clang ≥ 17 (C++23 stdlib required)
+- On Raspberry Pi OS Bookworm: `sudo apt install gcc-13 g++-13`
+- Pass `-DCMAKE_CXX_COMPILER=g++-13` to cmake on Bookworm nodes
+
+On Raspberry Pi OS Bookworm (installs GCC 13 alongside the default GCC 12):
+
+```bash
+sudo apt install -y build-essential cmake pkg-config gcc-13 g++-13 \
+    libsoapysdr-dev soapysdr-tools soapysdr-module-rtlsdr \
+    libsqlite3-dev python3 python3-numpy \
+    rtl-sdr librtlsdr-dev inotify-tools rsync
+```
+
+Then configure with the GCC 13 compiler explicitly:
+
+```bash
+rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-13
+cmake --build build -- -j$(nproc)
+```
+
+On Ubuntu Noble (24.04) or later (default GCC is already ≥ 13):
 
 ```bash
 sudo apt install -y build-essential cmake pkg-config \
@@ -161,6 +182,10 @@ sudo apt install -y build-essential cmake pkg-config \
 ```
 
 ## Build
+
+> **Raspberry Pi OS Bookworm:** the default compiler is GCC 12 and will be
+> rejected by the feature probe. Follow the [Compiler requirements](#compiler-requirements)
+> steps above to install GCC 13 and pass `-DCMAKE_CXX_COMPILER=g++-13`.
 
 ```bash
 mkdir build && cd build

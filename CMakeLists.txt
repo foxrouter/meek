@@ -56,6 +56,58 @@ set(MEEK_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/include")
 # ── Hardware-dependent targets ────────────────────────────────────────────────
 if(BUILD_HARDWARE_TARGETS)
 
+  # Probe for the C++20/23 library features used only by rf_adapt_intel.
+  # cmake_push_check_state(RESET) clears only CMAKE_REQUIRED_* variables;
+  # CMAKE_CXX_STANDARD is inherited so the try-compile uses the same standard
+  # (-std=c++23 on GCC/Clang, /std:c++latest on MSVC) without hard-coding a
+  # compiler-specific flag.  This catches mismatched compiler+stdlib combos
+  # (e.g. GCC 12 or Clang with an old libstdc++) regardless of compiler family.
+  include(CMakePushCheckState)
+  include(CheckCXXSourceCompiles)
+  find_package(Threads REQUIRED)
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_LIBRARIES Threads::Threads)
+  check_cxx_source_compiles([=[
+#include <stop_token>
+#include <thread>
+#include <span>
+int main() {
+  std::jthread t([](std::stop_token) {});
+  int arr[4]{};
+  std::span<int> s(arr);
+  (void)t; (void)s;
+  return 0;
+}
+]=] _STDCXX_FEATURES_AVAILABLE)
+  cmake_pop_check_state()
+  if(NOT _STDCXX_FEATURES_AVAILABLE)
+    # Provide targeted guidance for the most common failure: GCC 12 on Bookworm.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+       AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13.0")
+      message(FATAL_ERROR
+        "C++${CMAKE_CXX_STANDARD} feature check failed: "
+        "GCC ${CMAKE_CXX_COMPILER_VERSION} does not fully support the required "
+        "standard library (std::jthread, std::stop_token, std::span in C++${CMAKE_CXX_STANDARD} mode).\n"
+        "GCC ≥ 13 is required.\n"
+        "On Bookworm: sudo apt install gcc-13 g++-13\n"
+        "Then recreate the build directory:\n"
+        "  rm -rf build && cmake -S . -B build -DCMAKE_CXX_COMPILER=g++-13\n"
+        "If you only need the analysis tools (rf_audit, iq_metrics), you can skip the\n"
+        "hardware targets entirely:\n"
+        "  cmake -S . -B build -DBUILD_HARDWARE_TARGETS=OFF")
+    else()
+      message(FATAL_ERROR
+        "C++${CMAKE_CXX_STANDARD} feature check failed "
+        "(compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}).\n"
+        "The probe tests std::jthread, std::stop_token, and std::span — "
+        "all required by the hardware targets.\n"
+        "Ensure your compiler and standard library support C++${CMAKE_CXX_STANDARD} "
+        "(GCC ≥ 13 with libstdc++ ≥ 13, or Clang ≥ 17 with a compatible libc++).\n"
+        "If you only need the analysis tools (rf_audit, iq_metrics), configure with:\n"
+        "  -DBUILD_HARDWARE_TARGETS=OFF")
+    endif()
+  endif()
+
   pkg_check_modules(SOAPY_PKG QUIET SoapySDR)
   if(NOT SOAPY_PKG_FOUND)
     message(FATAL_ERROR
@@ -86,7 +138,7 @@ if(BUILD_HARDWARE_TARGETS)
   target_link_libraries(rf_adapt_intel PRIVATE
     ${SOAPY_PKG_LIBRARIES}
     ${SQLITE3_LIBRARIES}
-    pthread
+    Threads::Threads
     nlohmann_json::nlohmann_json
   )
 
@@ -110,7 +162,7 @@ if(BUILD_HARDWARE_TARGETS)
   # ── soapy_read_test ───────────────────────────────────────────────────────
   add_executable(soapy_read_test tools/soapy_read_test.cpp)
   target_include_directories(soapy_read_test PRIVATE ${SOAPY_PKG_INCLUDE_DIRS})
-  target_link_libraries(soapy_read_test PRIVATE ${SOAPY_PKG_LIBRARIES} pthread)
+  target_link_libraries(soapy_read_test PRIVATE ${SOAPY_PKG_LIBRARIES} Threads::Threads)
   target_compile_options(soapy_read_test PRIVATE
     -Wall -Wextra -Wno-unused-parameter)
 
