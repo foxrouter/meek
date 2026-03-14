@@ -447,8 +447,10 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   scratch.reserve(cfg.analysis_len);
 
   // Idle-path progress throttle: update the watchdog timestamp at most every
-  // ~250ms (2500 × 100µs) to avoid a steady_clock::now() call at 10 kHz.
-  std::uint32_t idle_count = 0;
+  // 250 ms (wall-clock) to avoid a steady_clock::now() call at 10 kHz.
+  // Using elapsed time rather than an iteration count avoids false-stale
+  // signals when sleep_for oversleeps significantly under system load.
+  auto last_idle_progress = std::chrono::steady_clock::now();
 
   while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
          !in_buf.empty_approx()) {
@@ -456,27 +458,31 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     if (!in_buf.pop(blk)) {
       if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
         break;
-      // Update progress every ~250ms in the idle path; this proves the thread
-      // is spinning and not deadlocked without burning CPU on clock reads.
-      if (++idle_count >= 2500) {
-        idle_count = 0;
+      // Update progress every 250 ms in the idle path; this proves the thread
+      // is alive without burning CPU on clock reads at 10 kHz.
+      const auto now = std::chrono::steady_clock::now();
+      if (now - last_idle_progress >= std::chrono::milliseconds(250)) {
+        last_idle_progress = now;
         proc_progress.store(
             static_cast<std::uint64_t>(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch())
+                    now.time_since_epoch())
                     .count()),
             std::memory_order_relaxed);
       }
       std::this_thread::sleep_for(std::chrono::microseconds(100));
       continue;
     }
-    idle_count = 0;
-    proc_progress.store(
-        static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now().time_since_epoch())
-                .count()),
-        std::memory_order_relaxed);
+    {
+      const auto now = std::chrono::steady_clock::now();
+      last_idle_progress = now;
+      proc_progress.store(
+          static_cast<std::uint64_t>(
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  now.time_since_epoch())
+                  .count()),
+          std::memory_order_relaxed);
+    }
 
     // Sub-window classification: slide through blk.samples in analysis_len
     // steps and keep the highest-confidence window.  When block_len ==
@@ -880,11 +886,21 @@ int main(int argc, char** argv) {
   }
 #endif
 
+  // Stale threshold: max(3 × read_timeout_us, 10 s) in nanoseconds.
+  // Using 3× the configured SDR read timeout (1 µs × 1000 = 1 ns, × 3)
+  // ensures the window stays valid even when RF_READ_TIMEOUT_US is set well
+  // above its 500 ms default; the 10 s floor guards against very short values.
+  constexpr std::uint64_t kUsToNs = 1'000ULL;   // µs → ns
+  constexpr std::uint64_t kStaleMultiplier = 3;   // stale = 3 × read_timeout
+  constexpr std::uint64_t kStaleMinNs = 10'000'000'000ULL;  // 10 s floor
+  const std::uint64_t kStaleNs =
+      std::max(static_cast<std::uint64_t>(cfg.read_timeout_us) * kUsToNs * kStaleMultiplier,
+               kStaleMinNs);
+
   while (!g_shutdown.load(std::memory_order_relaxed)) {
     std::this_thread::sleep_for(std::chrono::seconds(2));
     // Only pet the watchdog when both pipeline threads have made recent
-    // progress; 10 s stale threshold keeps well within WatchdogSec=30 s.
-    constexpr std::uint64_t kStaleNs = 10'000'000'000ULL;  // 10 s
+    // progress (within kStaleNs) so a genuinely hung thread stops heartbeats.
     const auto now_ns = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch())
