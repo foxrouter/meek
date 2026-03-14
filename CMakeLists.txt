@@ -91,7 +91,10 @@ int main() {
         "GCC ≥ 13 is required.\n"
         "On Bookworm: sudo apt install gcc-13 g++-13\n"
         "Then recreate the build directory:\n"
-        "  rm -rf build && cmake -S . -B build -DCMAKE_CXX_COMPILER=g++-13")
+        "  rm -rf build && cmake -S . -B build -DCMAKE_CXX_COMPILER=g++-13\n"
+        "If you only need the analysis tools (rf_audit, iq_metrics), you can skip the\n"
+        "hardware targets entirely:\n"
+        "  cmake -S . -B build -DBUILD_HARDWARE_TARGETS=OFF")
     else()
       message(FATAL_ERROR
         "C++${CMAKE_CXX_STANDARD} feature check failed "
@@ -99,7 +102,9 @@ int main() {
         "The probe tests std::jthread, std::stop_token, and std::span — "
         "all required by the hardware targets.\n"
         "Ensure your compiler and standard library support C++${CMAKE_CXX_STANDARD} "
-        "(GCC ≥ 13 with libstdc++ ≥ 13, or Clang ≥ 17 with a compatible libc++).")
+        "(GCC ≥ 13 with libstdc++ ≥ 13, or Clang ≥ 17 with a compatible libc++).\n"
+        "If you only need the analysis tools (rf_audit, iq_metrics), configure with:\n"
+        "  -DBUILD_HARDWARE_TARGETS=OFF")
     endif()
   endif()
 
