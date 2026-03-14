@@ -19,30 +19,32 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
     "This project uses std::jthread, std::stop_token, and std::span "
     "compiled in C++23 mode, which requires GCC ≥ 13.\n"
     "On Bookworm: sudo apt install gcc-13 g++-13\n"
-    "Then re-run cmake: cmake -DCMAKE_CXX_COMPILER=g++-13 .")
-endif()
-
-# For Clang the standard library version matters more than the compiler
-# version alone (libstdc++ vs libc++).  Use a compile test to catch
-# mismatches that a bare version check would miss.
-include(CMakePushCheckState)
-include(CheckCXXSourceCompiles)
-cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_FLAGS "-std=c++20")
-check_cxx_source_compiles(
-  "#include <stop_token>\n#include <thread>\nint main(){return 0;}"
-  _CXX20_STOP_TOKEN_AVAILABLE)
-cmake_pop_check_state()
-if(NOT _CXX20_STOP_TOKEN_AVAILABLE)
-  message(FATAL_ERROR
-    "Required C++20 header <stop_token> could not be compiled.\n"
-    "Ensure your compiler and standard library support C++20 "
-    "(GCC ≥ 13 with libstdc++ ≥ 13, or Clang ≥ 17 with a compatible libc++).")
+    "Then recreate the build directory and re-run cmake:\n"
+    "  rm -rf build && cmake -S . -B build -DCMAKE_CXX_COMPILER=g++-13")
 endif()
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# For Clang the standard library version matters more than the compiler
+# version alone (libstdc++ vs libc++).  Use a compile test against the
+# same standard the project targets to catch mismatches a bare version
+# check would miss.
+include(CMakePushCheckState)
+include(CheckCXXSourceCompiles)
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_FLAGS "-std=c++${CMAKE_CXX_STANDARD}")
+check_cxx_source_compiles(
+  "#include <stop_token>\n#include <thread>\nint main(){return 0;}"
+  _STDCXX_STOP_TOKEN_AVAILABLE)
+cmake_pop_check_state()
+if(NOT _STDCXX_STOP_TOKEN_AVAILABLE)
+  message(FATAL_ERROR
+    "Required C++${CMAKE_CXX_STANDARD} header <stop_token> could not be compiled.\n"
+    "Ensure your compiler and standard library support C++${CMAKE_CXX_STANDARD} "
+    "(GCC ≥ 13 with libstdc++ ≥ 13, or Clang ≥ 17 with a compatible libc++).")
+endif()
 
 # ── Build options ─────────────────────────────────────────────────────────────
 option(BUILD_HARDWARE_TARGETS
