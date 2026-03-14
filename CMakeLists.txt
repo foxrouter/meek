@@ -19,8 +19,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # (e.g. GCC 12 or Clang with an old libstdc++) regardless of compiler family.
 include(CMakePushCheckState)
 include(CheckCXXSourceCompiles)
+find_package(Threads REQUIRED)
 cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_LIBRARIES pthread)
+set(CMAKE_REQUIRED_LIBRARIES Threads::Threads)
 check_cxx_source_compiles([=[
 #include <stop_token>
 #include <thread>
