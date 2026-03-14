@@ -661,6 +661,61 @@ class TestAcarsDispatchTable(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Tests: resample_iq (scipy / numpy backends)
+# ---------------------------------------------------------------------------
+
+class TestResampleIq(unittest.TestCase):
+    """Tests for dc.resample_iq() covering both scipy and numpy code paths."""
+
+    def setUp(self):
+        np.random.seed(0)
+        self._samples = make_fsk2(n_syms=200, sps=8, fs=FS)  # 1600 samples
+
+    def test_passthrough_same_rate(self):
+        out = dc.resample_iq(self._samples, FS, FS)
+        np.testing.assert_array_equal(out, self._samples)
+
+    def test_decimation_length(self):
+        fs_out = FS // 4  # 512 000 Hz
+        out = dc.resample_iq(self._samples, FS, fs_out)
+        expected = int(round(len(self._samples) * fs_out / FS))
+        self.assertEqual(len(out), expected)
+
+    def test_upsampling_length(self):
+        fs_out = FS * 2  # 4 096 000 Hz
+        out = dc.resample_iq(self._samples, FS, fs_out)
+        expected = int(round(len(self._samples) * fs_out / FS))
+        self.assertEqual(len(out), expected)
+
+    def test_output_dtype(self):
+        out = dc.resample_iq(self._samples, FS, FS // 2)
+        self.assertEqual(out.dtype, np.complex64)
+
+    def test_scipy_path(self):
+        """scipy backend produces the correct output length."""
+        if not dc._HAVE_SCIPY:
+            self.skipTest("scipy not installed")
+        fs_out = FS // 4
+        out = dc.resample_iq(self._samples, FS, fs_out)
+        expected = int(round(len(self._samples) * fs_out / FS))
+        self.assertEqual(len(out), expected)
+        self.assertEqual(out.dtype, np.complex64)
+
+    def test_numpy_fallback_path(self):
+        """numpy fallback produces the correct output length when scipy is absent."""
+        orig = dc._HAVE_SCIPY
+        try:
+            dc._HAVE_SCIPY = False
+            fs_out = FS // 4
+            out = dc.resample_iq(self._samples, FS, fs_out)
+            expected = int(round(len(self._samples) * fs_out / FS))
+            self.assertEqual(len(out), expected)
+            self.assertEqual(out.dtype, np.complex64)
+        finally:
+            dc._HAVE_SCIPY = orig
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

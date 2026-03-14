@@ -53,6 +53,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+try:
+    from scipy.signal import resample_poly as _resample_poly
+    _HAVE_SCIPY = True
+except ImportError:  # pragma: no cover
+    _HAVE_SCIPY = False
+
 # Audit report format version (increment when report schema changes)
 _VERSION = "1.0.0"
 
@@ -291,6 +297,28 @@ def sha256_file(path: str) -> str:
         for chunk in iter(lambda: fh.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def resample_iq(samples: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
+    """Resample complex IQ samples from *fs_in* to *fs_out* Hz.
+
+    Uses scipy.signal.resample_poly when available (polyphase FIR, lower
+    aliasing); falls back to numpy linear interpolation otherwise.
+    """
+    if fs_in == fs_out:
+        return samples
+    g = math.gcd(int(fs_out), int(fs_in))
+    up = int(fs_out) // g
+    down = int(fs_in) // g
+    if _HAVE_SCIPY:
+        return _resample_poly(samples, up, down).astype(np.complex64)
+    # Numpy fallback: linear interpolation on I and Q channels separately
+    n_out = int(round(len(samples) * fs_out / fs_in))
+    t_in = np.arange(len(samples), dtype=np.float64)
+    t_out = np.arange(n_out) * (len(samples) / n_out)
+    i_out = np.interp(t_out, t_in, samples.real).astype(np.float32)
+    q_out = np.interp(t_out, t_in, samples.imag).astype(np.float32)
+    return (i_out + 1j * q_out).astype(np.complex64)
 
 
 # ---------------------------------------------------------------------------
