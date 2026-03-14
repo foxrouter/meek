@@ -35,6 +35,7 @@
 #include <unistd.h>
 #include <cerrno>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
   const char* p = std::getenv("NOTIFY_SOCKET");
