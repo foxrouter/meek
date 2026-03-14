@@ -7,6 +7,24 @@ project(rf_adapt_intel
   LANGUAGES CXX
 )
 
+# ── Compiler version guard ────────────────────────────────────────────────────
+# C++23 stdlib requires GCC ≥ 13 (Bookworm ships GCC 12) or Clang ≥ 17.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13.0")
+  message(FATAL_ERROR
+    "GCC ≥ 13 required for C++23 stdlib completeness "
+    "(std::expected, std::flat_map, std::ranges::to).\n"
+    "On Bookworm: sudo apt install gcc-13 g++-13\n"
+    "Then: cmake -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13 .")
+endif()
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "17.0")
+  message(FATAL_ERROR
+    "Clang ≥ 17 required for C++23 stdlib completeness "
+    "(std::expected, std::flat_map, std::ranges::to).\n"
+    "Install clang-17 or newer and pass -DCMAKE_CXX_COMPILER=clang++-17 .")
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

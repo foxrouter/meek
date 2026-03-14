@@ -151,6 +151,11 @@ Key design decisions:
 | Python 3 | 3.8+ | For tests and tools (`numpy` required) |
 | liquid-dsp | optional | Advanced demodulation — see [Optional decoder setup](#optional-decoder-setup-opssetupsh) |
 
+### Compiler requirements
+- GCC ≥ 13 or Clang ≥ 17 (C++23 stdlib required)
+- On Raspberry Pi OS Bookworm: `sudo apt install gcc-13 g++-13`
+- Pass `-DCMAKE_CXX_COMPILER=g++-13` to cmake on Bookworm nodes
+
 On Debian/Ubuntu (Bookworm or Noble):
 
 ```bash
