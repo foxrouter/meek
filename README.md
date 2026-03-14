@@ -183,6 +183,10 @@ sudo apt install -y build-essential cmake pkg-config \
 
 ## Build
 
+> **Raspberry Pi OS Bookworm:** the default compiler is GCC 12 and will be
+> rejected by the feature probe. Follow the [Compiler requirements](#compiler-requirements)
+> steps above to install GCC 13 and pass `-DCMAKE_CXX_COMPILER=g++-13`.
+
 ```bash
 mkdir build && cd build
 cmake -S .. -B . -DCMAKE_BUILD_TYPE=Release

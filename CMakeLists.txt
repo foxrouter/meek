@@ -7,34 +7,19 @@ project(rf_adapt_intel
   LANGUAGES CXX
 )
 
-# ── Compiler version guard ────────────────────────────────────────────────────
-# GCC 12 (Debian Bookworm) cannot compile this project in -std=c++23 mode.
-# Reject early with an actionable message; GCC ≥ 13 ships with a complete
-# C++23 stdlib and full support for C++20 features used here (std::jthread,
-# std::stop_token, std::span).
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
-   AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13.0")
-  message(FATAL_ERROR
-    "GCC ≥ 13 required (found ${CMAKE_CXX_COMPILER_VERSION}). "
-    "This project uses std::jthread, std::stop_token, and std::span "
-    "compiled in C++23 mode, which requires GCC ≥ 13.\n"
-    "On Bookworm: sudo apt install gcc-13 g++-13\n"
-    "Then recreate the build directory and re-run cmake:\n"
-    "  rm -rf build && cmake -S . -B build -DCMAKE_CXX_COMPILER=g++-13")
-endif()
-
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# For Clang the standard library version matters more than the compiler
-# version alone (libstdc++ vs libc++).  Use a compile test against the
-# same standard the project targets to catch mismatches a bare version
-# check would miss.
+# Probe for the C++20/23 library features this project actually uses.
+# cmake_push_check_state(RESET) clears only CMAKE_REQUIRED_* variables;
+# CMAKE_CXX_STANDARD is inherited so the try-compile uses the same standard
+# (-std=c++23 on GCC/Clang, /std:c++latest on MSVC) without hard-coding a
+# compiler-specific flag.  This catches mismatched compiler+stdlib combos
+# (e.g. GCC 12 or Clang with an old libstdc++) regardless of compiler family.
 include(CMakePushCheckState)
 include(CheckCXXSourceCompiles)
 cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_FLAGS "-std=c++${CMAKE_CXX_STANDARD}")
 set(CMAKE_REQUIRED_LIBRARIES pthread)
 check_cxx_source_compiles([=[
 #include <stop_token>
@@ -49,13 +34,26 @@ int main() {
 ]=] _STDCXX_FEATURES_AVAILABLE)
 cmake_pop_check_state()
 if(NOT _STDCXX_FEATURES_AVAILABLE)
-  message(FATAL_ERROR
-    "C++${CMAKE_CXX_STANDARD} feature check failed "
-    "(compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}).\n"
-    "The probe tests std::jthread, std::stop_token, and std::span — "
-    "all required by this project.\n"
-    "Ensure your compiler and standard library support C++${CMAKE_CXX_STANDARD} "
-    "(GCC ≥ 13 with libstdc++ ≥ 13, or Clang ≥ 17 with a compatible libc++).")
+  # Provide targeted guidance for the most common failure: GCC 12 on Bookworm.
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+     AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13.0")
+    message(FATAL_ERROR
+      "C++${CMAKE_CXX_STANDARD} feature check failed: "
+      "GCC ${CMAKE_CXX_COMPILER_VERSION} does not fully support the required "
+      "standard library (std::jthread, std::stop_token, std::span in C++${CMAKE_CXX_STANDARD} mode).\n"
+      "GCC ≥ 13 is required.\n"
+      "On Bookworm: sudo apt install gcc-13 g++-13\n"
+      "Then recreate the build directory:\n"
+      "  rm -rf build && cmake -S . -B build -DCMAKE_CXX_COMPILER=g++-13")
+  else()
+    message(FATAL_ERROR
+      "C++${CMAKE_CXX_STANDARD} feature check failed "
+      "(compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}).\n"
+      "The probe tests std::jthread, std::stop_token, and std::span — "
+      "all required by this project.\n"
+      "Ensure your compiler and standard library support C++${CMAKE_CXX_STANDARD} "
+      "(GCC ≥ 13 with libstdc++ ≥ 13, or Clang ≥ 17 with a compatible libc++).")
+  endif()
 endif()
 
 # ── Build options ─────────────────────────────────────────────────────────────
