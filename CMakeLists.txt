@@ -157,12 +157,14 @@ int main() {
   # Optional: libsystemd for sd_notify watchdog integration
   pkg_check_modules(LIBSYSTEMD QUIET libsystemd)
   if(LIBSYSTEMD_FOUND)
-    message(STATUS "libsystemd found — sd_notify uses native <systemd/sd-daemon.h>")
+    message(STATUS "libsystemd found — READY/WATCHDOG/STOPPING all use native sd_notify "
+                   "via <systemd/sd-daemon.h>")
     target_compile_definitions(rf_adapt_intel PRIVATE HAVE_SYSTEMD)
     target_link_libraries(rf_adapt_intel PRIVATE ${LIBSYSTEMD_LIBRARIES})
     target_include_directories(rf_adapt_intel PRIVATE ${LIBSYSTEMD_INCLUDE_DIRS})
   else()
-    message(STATUS "libsystemd not found — sd_notify uses socket-based fallback (NOTIFY_SOCKET datagram)")
+    message(STATUS "libsystemd not found — READY/WATCHDOG/STOPPING all use socket-based "
+                   "sd_notify fallback (NOTIFY_SOCKET datagram)")
   endif()
 
   target_compile_options(rf_adapt_intel PRIVATE
