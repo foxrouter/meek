@@ -32,8 +32,11 @@
 // when $NOTIFY_SOCKET is unset (i.e. not running under systemd).
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <unistd.h>
+#include <cerrno>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
   const char* p = std::getenv("NOTIFY_SOCKET");
   if (!p || !*p) return 0;
@@ -368,11 +371,14 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
 
   while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
     const auto n = sdr.read_samples(std::span{buf});
-    // Update progress on every iteration; read_samples() has a 500 ms timeout,
-    // so a missing update for > a few seconds indicates the thread is hung.
+    // Update progress on every iteration; read_samples() blocks for at most
+    // cfg.read_timeout_us, so a missing update for > a few seconds indicates
+    // the thread is hung.
     cap_progress.store(
         static_cast<std::uint64_t>(
-            std::chrono::steady_clock::now().time_since_epoch().count()),
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count()),
         std::memory_order_relaxed);
     if (n <= 0) {
       if (n < 0) {
@@ -448,14 +454,18 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       // the thread is spinning and not deadlocked.
       proc_progress.store(
           static_cast<std::uint64_t>(
-              std::chrono::steady_clock::now().time_since_epoch().count()),
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::steady_clock::now().time_since_epoch())
+                  .count()),
           std::memory_order_relaxed);
       std::this_thread::sleep_for(std::chrono::microseconds(100));
       continue;
     }
     proc_progress.store(
         static_cast<std::uint64_t>(
-            std::chrono::steady_clock::now().time_since_epoch().count()),
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count()),
         std::memory_order_relaxed);
 
     // Sub-window classification: slide through blk.samples in analysis_len
@@ -772,7 +782,9 @@ int main(int argc, char** argv) {
   // Initialise to "now" so the main loop doesn't see a stale value before the
   // threads have had a chance to run their first iteration.
   const auto startup_time_ns = static_cast<std::uint64_t>(
-      std::chrono::steady_clock::now().time_since_epoch().count());
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
   std::atomic<std::uint64_t> cap_progress{startup_time_ns};
   std::atomic<std::uint64_t> proc_progress{startup_time_ns};
 
@@ -864,7 +876,9 @@ int main(int argc, char** argv) {
     // progress; 10 s stale threshold keeps well within WatchdogSec=30 s.
     constexpr std::uint64_t kStaleNs = 10'000'000'000ULL;  // 10 s
     const auto now_ns = static_cast<std::uint64_t>(
-        std::chrono::steady_clock::now().time_since_epoch().count());
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
     const bool threads_healthy =
         (now_ns - cap_progress.load(std::memory_order_relaxed) < kStaleNs) &&
         (now_ns - proc_progress.load(std::memory_order_relaxed) < kStaleNs);
