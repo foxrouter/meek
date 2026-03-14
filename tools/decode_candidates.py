@@ -1238,8 +1238,13 @@ def decode_candidate(
     # Scale max_samples so that the resampled block is approximately
     # _MAX_DECODE_SAMPLES long regardless of capture rate.  Without scaling,
     # a low capture rate (e.g. 2 kHz) would upsample 200 k input samples
-    # into ~200 M output samples, risking OOM.
-    max_load = max(1, round(_MAX_DECODE_SAMPLES * fs_i / _DECODER_FS))
+    # into ~200 M output samples, risking OOM.  Cap at _MAX_RESAMPLE_OUTPUT so
+    # that a very high capture rate (e.g. 1 GHz) cannot inflate the disk read
+    # into hundreds of millions of samples even when decimating.
+    max_load = min(
+        _MAX_RESAMPLE_OUTPUT,
+        max(1, round(_MAX_DECODE_SAMPLES * fs_i / _DECODER_FS)),
+    )
     try:
         samples = load_cf32(snap["path"], max_samples=max_load)
     except Exception as exc:  # pylint: disable=broad-except

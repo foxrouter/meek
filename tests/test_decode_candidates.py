@@ -875,12 +875,15 @@ class TestResampleIq(unittest.TestCase):
             dc.resample_iq(big_samples, 1000, 999_000)
 
     def test_decode_candidate_max_load_scales_with_fs(self):
-        """decode_candidate loads max(1, round(_MAX_DECODE_SAMPLES * fs_i / _DECODER_FS)) samples."""
+        """decode_candidate loads min(_MAX_RESAMPLE_OUTPUT, max(1, round(_MAX_DECODE_SAMPLES * fs_i / _DECODER_FS))) samples."""
         import unittest.mock as mock
 
         # At fs=_DECODER_FS/10, max_load should be _MAX_DECODE_SAMPLES/10.
         fs_capture = dc._DECODER_FS // 10
-        expected_max_load = max(1, round(dc._MAX_DECODE_SAMPLES * fs_capture // dc._DECODER_FS))
+        expected_max_load = min(
+            dc._MAX_RESAMPLE_OUTPUT,
+            max(1, round(dc._MAX_DECODE_SAMPLES * fs_capture / dc._DECODER_FS)),
+        )
         calls = []
 
         tmp = tempfile.mkdtemp()
@@ -908,6 +911,42 @@ class TestResampleIq(unittest.TestCase):
 
         self.assertEqual(len(calls), 1, "load_cf32 should be called exactly once")
         self.assertEqual(calls[0], expected_max_load)
+
+    def test_decode_candidate_max_load_capped_at_max_resample_output(self):
+        """max_load is capped at _MAX_RESAMPLE_OUTPUT even for very high capture rates."""
+        import unittest.mock as mock
+
+        # A capture rate 1000× _DECODER_FS would naively give max_load =
+        # _MAX_DECODE_SAMPLES * 1000 = 200_000_000, but the cap must clamp it
+        # to _MAX_RESAMPLE_OUTPUT = 20_000_000.
+        fs_capture = dc._DECODER_FS * 1000
+        calls = []
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")
+        with open(snap_path, "wb") as fh:
+            fh.write(np.zeros(100, dtype=np.float32).tobytes())
+
+        snap = {"path": snap_path, "filename": os.path.basename(snap_path),
+                "size_bytes": os.path.getsize(snap_path)}
+        cand = {
+            "signal_id": 1, "example_id": 1, "db_timestamp": "",
+            "source": "", "confidence": 0.9,
+            "decision_trace": "snr=10dB scores(FSK=0.9) -> FSK@0.9",
+        }
+
+        orig_load = dc.load_cf32
+        def patched_load(path, max_samples):
+            calls.append(max_samples)
+            return orig_load(path, max_samples)
+
+        with mock.patch.object(dc, "load_cf32", side_effect=patched_load):
+            dc.decode_candidate(cand, snap, float(fs_capture), False)
+
+        self.assertEqual(len(calls), 1, "load_cf32 should be called exactly once")
+        self.assertEqual(calls[0], dc._MAX_RESAMPLE_OUTPUT,
+                         "max_load must be capped at _MAX_RESAMPLE_OUTPUT")
 
     def test_decode_candidate_resample_error_recorded_not_raised(self):
         """decode_candidate catches ValueError from resample_iq and records it instead of raising."""
