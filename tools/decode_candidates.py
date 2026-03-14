@@ -5,13 +5,13 @@ RF-adapt SQLite database, locate matching IQ snapshot files, attempt decoding
 using available decoders, and produce a verifiable audit report.
 
 Usage:
+    # --sample-rate: snapshot capture rate; built-in decoders receive
+    # samples resampled to the canonical analysis rate (2,048,000 Hz).
     python3 tools/decode_candidates.py \\
         --db rf_adapt_intel.db \\
         --snapshot-dir /var/lib/rf-adapt-intel/snapshots \\
         [--out /tmp/audit_report.json] \\
         [--min-confidence 0.6] \\
-        # --sample-rate: snapshot capture rate; built-in decoders receive
-        # samples resampled to the canonical analysis rate (2,048,000 Hz).
         [--sample-rate 2048000] \\
         [--limit 100] \\
         [--external]
