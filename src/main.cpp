@@ -24,6 +24,7 @@
 #include <SoapySDR/Formats.h>
 #include <SoapySDR/Version.h>
 #endif  // HAVE_SOAPY
+#include <cstdlib>
 #ifdef HAVE_SYSTEMD
 #include <systemd/sd-daemon.h>
 #else
@@ -35,7 +36,6 @@
 #include <unistd.h>
 #include <cerrno>
 #include <cstddef>
-#include <cstdlib>
 #include <cstring>
 static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
   const char* p = std::getenv("NOTIFY_SOCKET");
@@ -70,7 +70,6 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
 #include <chrono>
 #include <complex>
 #include <csignal>
-#include <cstdlib>
 #include <cstring>
 #include <cstdint>
 #include <deque>
