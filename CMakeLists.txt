@@ -35,11 +35,19 @@ include(CMakePushCheckState)
 include(CheckCXXSourceCompiles)
 cmake_push_check_state(RESET)
 set(CMAKE_REQUIRED_FLAGS "-std=c++${CMAKE_CXX_STANDARD}")
-check_cxx_source_compiles(
-  "#include <stop_token>\n#include <thread>\nint main(){return 0;}"
-  _STDCXX_STOP_TOKEN_AVAILABLE)
+check_cxx_source_compiles([=[
+#include <stop_token>
+#include <thread>
+#include <span>
+int main() {
+  std::jthread t([](std::stop_token) {});
+  int arr[4]{};
+  std::span<int> s(arr);
+  return 0;
+}
+]=] _STDCXX_FEATURES_AVAILABLE)
 cmake_pop_check_state()
-if(NOT _STDCXX_STOP_TOKEN_AVAILABLE)
+if(NOT _STDCXX_FEATURES_AVAILABLE)
   message(FATAL_ERROR
     "Required C++${CMAKE_CXX_STANDARD} header <stop_token> could not be compiled.\n"
     "Ensure your compiler and standard library support C++${CMAKE_CXX_STANDARD} "

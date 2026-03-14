@@ -156,7 +156,16 @@ Key design decisions:
 - On Raspberry Pi OS Bookworm: `sudo apt install gcc-13 g++-13`
 - Pass `-DCMAKE_CXX_COMPILER=g++-13` to cmake on Bookworm nodes
 
-On Debian/Ubuntu (Bookworm or Noble):
+On Raspberry Pi OS Bookworm (installs GCC 13 alongside the default GCC 12):
+
+```bash
+sudo apt install -y build-essential cmake pkg-config gcc-13 g++-13 \
+    libsoapysdr-dev soapysdr-tools soapysdr-module-rtlsdr \
+    libsqlite3-dev python3 python3-numpy \
+    rtl-sdr librtlsdr-dev inotify-tools rsync
+```
+
+On Ubuntu Noble (24.04) or later (default GCC is already ≥ 13):
 
 ```bash
 sudo apt install -y build-essential cmake pkg-config \
