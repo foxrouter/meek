@@ -701,6 +701,25 @@ class TestResampleIq(unittest.TestCase):
         with self.assertRaises(ValueError):
             dc.resample_iq(self._samples, -FS, FS)
 
+    def test_invalid_rate_nan_raises(self):
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, float("nan"), FS)
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, FS, float("nan"))
+
+    def test_invalid_rate_inf_raises(self):
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, float("inf"), FS)
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, FS, float("-inf"))
+
+    def test_invalid_rate_sub_hz_rounds_to_zero_raises(self):
+        """Rates that round to 0 integer Hz must raise ValueError, not ZeroDivisionError."""
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, 0.4, FS)
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, FS, 0.4)
+
     def test_extreme_decimation_returns_empty(self):
         """A single sample decimated by a large factor yields an empty array."""
         tiny = self._samples[:1]

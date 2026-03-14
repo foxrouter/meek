@@ -310,10 +310,15 @@ def resample_iq(samples: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
     Uses scipy.signal.resample_poly when available (polyphase FIR, lower
     aliasing); falls back to numpy linear interpolation otherwise.
 
-    Raises ``ValueError`` if either sample rate is non-positive.
+    Raises ``ValueError`` if either sample rate is non-positive, non-finite,
+    or rounds to zero integer Hz.
     Returns an empty complex64 array when the output would contain zero
     samples (extreme decimation applied to very short inputs).
     """
+    if not (math.isfinite(fs_in) and math.isfinite(fs_out)):
+        raise ValueError(
+            f"Sample rates must be finite; got fs_in={fs_in}, fs_out={fs_out}"
+        )
     if fs_in <= 0 or fs_out <= 0:
         raise ValueError(
             f"Sample rates must be positive; got fs_in={fs_in}, fs_out={fs_out}"
@@ -322,6 +327,10 @@ def resample_iq(samples: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
     # ratio, and the passthrough check all use the same representation.
     fs_in_i  = int(round(fs_in))
     fs_out_i = int(round(fs_out))
+    if fs_in_i < 1 or fs_out_i < 1:
+        raise ValueError(
+            f"Sample rates must round to at least 1 Hz; got fs_in={fs_in}, fs_out={fs_out}"
+        )
     if fs_in_i == fs_out_i:
         return samples
     n_out = int(round(len(samples) * fs_out_i / fs_in_i))
