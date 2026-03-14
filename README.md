@@ -144,7 +144,7 @@ Key design decisions:
 
 | Component | Minimum version | Notes |
 |---|---|---|
-| GCC or Clang | C++23 capable | GCC 13+, Clang 17+ |
+| GCC or Clang | C++23 capable | see [Compiler requirements](#compiler-requirements) |
 | CMake | 3.25 | Build system |
 | SoapySDR | any | `libsoapysdr-dev` on Debian/Ubuntu |
 | SQLite 3 | any | `libsqlite3-dev` |

@@ -8,21 +8,36 @@ project(rf_adapt_intel
 )
 
 # ── Compiler version guard ────────────────────────────────────────────────────
-# C++23 stdlib requires GCC ≥ 13 (Bookworm ships GCC 12) or Clang ≥ 17.
+# GCC 12 (Debian Bookworm) cannot compile this project in -std=c++23 mode.
+# Reject early with an actionable message; GCC ≥ 13 ships with a complete
+# C++23 stdlib and full support for C++20 features used here (std::jthread,
+# std::stop_token, std::span).
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
    AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13.0")
   message(FATAL_ERROR
-    "GCC ≥ 13 required for C++23 stdlib completeness "
-    "(std::expected, std::flat_map, std::ranges::to).\n"
+    "GCC ≥ 13 required (found ${CMAKE_CXX_COMPILER_VERSION}). "
+    "This project uses std::jthread, std::stop_token, and std::span "
+    "compiled in C++23 mode, which requires GCC ≥ 13.\n"
     "On Bookworm: sudo apt install gcc-13 g++-13\n"
-    "Then: cmake -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13 .")
+    "Then re-run cmake: cmake -DCMAKE_CXX_COMPILER=g++-13 .")
 endif()
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-   AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "17.0")
+
+# For Clang the standard library version matters more than the compiler
+# version alone (libstdc++ vs libc++).  Use a compile test to catch
+# mismatches that a bare version check would miss.
+include(CMakePushCheckState)
+include(CheckCXXSourceCompiles)
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_FLAGS "-std=c++20")
+check_cxx_source_compiles(
+  "#include <stop_token>\n#include <thread>\nint main(){return 0;}"
+  _CXX20_STOP_TOKEN_AVAILABLE)
+cmake_pop_check_state()
+if(NOT _CXX20_STOP_TOKEN_AVAILABLE)
   message(FATAL_ERROR
-    "Clang ≥ 17 required for C++23 stdlib completeness "
-    "(std::expected, std::flat_map, std::ranges::to).\n"
-    "Install clang-17 or newer and pass -DCMAKE_CXX_COMPILER=clang++-17 .")
+    "Required C++20 header <stop_token> could not be compiled.\n"
+    "Ensure your compiler and standard library support C++20 "
+    "(GCC ≥ 13 with libstdc++ ≥ 13, or Clang ≥ 17 with a compatible libc++).")
 endif()
 
 set(CMAKE_CXX_STANDARD 23)
