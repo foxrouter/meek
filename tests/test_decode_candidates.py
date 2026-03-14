@@ -599,6 +599,16 @@ class TestEndToEnd(unittest.TestCase):
         ])
         self.assertNotEqual(rc, 0)
 
+    def test_invalid_sample_rate_sub_hz_returns_nonzero(self):
+        """sub-Hz rate that rounds to 0 integer Hz must also fail upfront."""
+        rc = dc.main([
+            "--db",           self._dbp,
+            "--snapshot-dir", self._snapd,
+            "--out",          self._report,
+            "--sample-rate",  "0.4",
+        ])
+        self.assertNotEqual(rc, 0)
+
     def test_no_snapshot_dir_graceful(self):
         """Should still produce a report when snapshot dir does not exist."""
         rc = dc.main([
@@ -903,7 +913,7 @@ class TestResampleIq(unittest.TestCase):
         """decode_candidate catches ValueError from resample_iq and records it instead of raising."""
         import unittest.mock as mock
 
-        # Write a minimal CF32 snapshot file (8 bytes = 1 sample)
+        # Write a minimal CF32 snapshot file (8 float32 values = 32 bytes = 4 complex samples)
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp)
         snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")

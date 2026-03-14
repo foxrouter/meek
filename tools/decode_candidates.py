@@ -1230,6 +1230,10 @@ def decode_candidate(
             f"--sample-rate must be a finite positive number; got {fs}"
         )
     fs_i = int(round(fs))
+    if fs_i < 1:
+        raise ValueError(
+            f"--sample-rate rounds to 0 Hz (got {fs}); must be >= 1 Hz"
+        )
 
     # Scale max_samples so that the resampled block is approximately
     # _MAX_DECODE_SAMPLES long regardless of capture rate.  Without scaling,
@@ -1390,9 +1394,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     # fails immediately with a clear message rather than aborting mid-loop
     # after some candidates have already been processed.
     fs = args.sample_rate
-    if not (math.isfinite(fs) and fs > 0):
+    if not (math.isfinite(fs) and fs > 0) or int(round(fs)) < 1:
         print(
-            f"[ERROR] --sample-rate must be a finite positive number; got {fs}",
+            f"[ERROR] --sample-rate must be a finite positive number >= 1 Hz; got {fs}",
             file=sys.stderr,
         )
         return 1
