@@ -10,7 +10,9 @@ Usage:
         --snapshot-dir /var/lib/rf-adapt-intel/snapshots \\
         [--out /tmp/audit_report.json] \\
         [--min-confidence 0.6] \\
-        [--sample-rate 2048000] \\   # snapshot capture rate (resampled to 2,048,000 Hz for decoders)
+        # --sample-rate: snapshot capture rate; built-in decoders receive
+        # samples resampled to the canonical analysis rate (2,048,000 Hz).
+        [--sample-rate 2048000] \\
         [--limit 100] \\
         [--external]
 
@@ -1193,8 +1195,10 @@ def decode_candidate(
 
     # Normalise to the canonical analysis rate so that built-in decoders
     # receive the expected samples-per-symbol regardless of capture rate.
+    # Use integer-rounded Hz for the comparison (same as resample_iq) so
+    # that 2048000.0 parsed from the CLI does not trigger spurious work.
     fs_decode = fs
-    if fs != _DECODER_FS:
+    if int(round(fs)) != _DECODER_FS:
         samples   = resample_iq(samples, fs, _DECODER_FS)
         fs_decode = _DECODER_FS
 
