@@ -10,7 +10,7 @@ Usage:
         --snapshot-dir /var/lib/rf-adapt-intel/snapshots \\
         [--out /tmp/audit_report.json] \\
         [--min-confidence 0.6] \\
-        [--sample-rate 2048000] \\
+        [--sample-rate 2048000] \\   # snapshot capture rate (resampled to 2,048,000 Hz for decoders)
         [--limit 100] \\
         [--external]
 
@@ -318,12 +318,16 @@ def resample_iq(samples: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
         raise ValueError(
             f"Sample rates must be positive; got fs_in={fs_in}, fs_out={fs_out}"
         )
-    if fs_in == fs_out:
+    # Canonicalize to integer Hz once so that n_out, the polyphase up/down
+    # ratio, and the passthrough check all use the same representation.
+    fs_in_i  = int(round(fs_in))
+    fs_out_i = int(round(fs_out))
+    if fs_in_i == fs_out_i:
         return samples
-    n_out = int(round(len(samples) * fs_out / fs_in))
+    n_out = int(round(len(samples) * fs_out_i / fs_in_i))
     if n_out < 1:
         return np.empty(0, dtype=np.complex64)
-    ratio = Fraction(int(round(fs_out)), int(round(fs_in))).limit_denominator(1_000)
+    ratio = Fraction(fs_out_i, fs_in_i).limit_denominator(1_000)
     up    = ratio.numerator
     down  = ratio.denominator
     if _HAVE_SCIPY:
@@ -1300,7 +1304,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--limit",          type=int,   default=200,
                    help="Maximum number of DB candidates to process")
     p.add_argument("--sample-rate",    type=float, default=2_048_000,
-                   help="IQ sample rate in Hz (used by built-in decoders)")
+                   help="IQ snapshot capture rate in Hz.  Built-in decoders always"
+                        " receive samples resampled to the canonical analysis rate"
+                        f" ({_DECODER_FS} Hz); this value is the source capture rate.")
     p.add_argument("--external",       action="store_true",
                    help="Also try external free CLI decoders (multimon-ng, rtl_433)")
     return p.parse_args(argv)
