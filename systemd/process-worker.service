@@ -12,8 +12,11 @@ Type=notify
 ExecStart=/usr/local/bin/rf_adapt_intel 433920000 2048000 30
 WatchdogSec=30s
 # Heartbeat is sent every 2 s, but only while both capture and proc threads
-# have updated their progress atomics within the last 10 s.  A hang stops
-# heartbeats after ≤10 s; systemd then kills and restarts within WatchdogSec=30 s.
+# have updated their progress atomics within the last 10 s.  After a hang the
+# last heartbeat may have been sent up to 10 s earlier, so systemd kills and
+# restarts up to ~40 s after the hang (≤10 s stale window + WatchdogSec=30 s).
+# Restart=always is intentional: a fatal SDR read error triggers g_shutdown and
+# main() exits cleanly (status 0), which Restart=on-failure would not restart.
 Restart=always
 RestartSec=10s
 User=rf_worker
