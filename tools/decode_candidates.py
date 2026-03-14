@@ -82,6 +82,16 @@ _MAX_RESAMPLE_DENOM = 1_000
 # stream would request ~2 billion output samples).
 _MAX_UPSAMPLE_RATIO = 1_000
 
+# Hard ceiling on the number of output samples produced by resample_iq().
+# Even when the ratio is within _MAX_UPSAMPLE_RATIO a long input array can
+# still produce a very large output.  20 M complex64 samples ≈ 160 MB.
+_MAX_RESAMPLE_OUTPUT = 20_000_000
+
+# Maximum samples handed to the built-in decoders (before resampling).
+# The actual load limit is scaled by (fs_capture / _DECODER_FS) so that
+# after resampling the block is approximately this size.
+_MAX_DECODE_SAMPLES = 200_000
+
 # ---------------------------------------------------------------------------
 # Band name -> centre frequency (Hz) table, mirrors UK_BANDS in main.cpp
 # ---------------------------------------------------------------------------
@@ -358,6 +368,13 @@ def resample_iq(samples: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
     n_out = int(round(len(samples) * fs_out_i / fs_in_i))
     if n_out < 1:
         return np.empty(0, dtype=np.complex64)
+    if n_out > _MAX_RESAMPLE_OUTPUT:
+        raise ValueError(
+            f"Requested output length {n_out:,} exceeds the maximum "
+            f"{_MAX_RESAMPLE_OUTPUT:,} (fs_in={fs_in}, fs_out={fs_out}, "
+            f"input_len={len(samples)}); pass fewer input samples or reduce "
+            f"the sample-rate difference"
+        )
     # Derive the polyphase ratio via Fraction.limit_denominator so that:
     #   * common SDR rates use the exact GCD-reduced fraction (e.g.
     #     44100→48000 → up=160, down=147, denominator 147 ≤ 1000);
@@ -1204,8 +1221,23 @@ def decode_candidate(
         return entry
 
     # ── 1. Built-in decoder ──────────────────────────────────────────────
+    # Validate fs and compute the integer capture rate early so we can scale
+    # how many samples to load.  Non-finite / non-positive rates are rejected
+    # here; main() also validates upfront, but decode_candidate() may be
+    # called directly from tests or other tooling.
+    if not (math.isfinite(fs) and fs > 0):
+        raise ValueError(
+            f"--sample-rate must be a finite positive number; got {fs}"
+        )
+    fs_i = int(round(fs))
+
+    # Scale max_samples so that the resampled block is approximately
+    # _MAX_DECODE_SAMPLES long regardless of capture rate.  Without scaling,
+    # a low capture rate (e.g. 2 kHz) would upsample 200 k input samples
+    # into ~200 M output samples, risking OOM.
+    max_load = max(1, round(_MAX_DECODE_SAMPLES * fs_i / _DECODER_FS))
     try:
-        samples = load_cf32(snap["path"], max_samples=200_000)
+        samples = load_cf32(snap["path"], max_samples=max_load)
     except Exception as exc:  # pylint: disable=broad-except
         entry["decode_result"] = {
             "error": f"load_cf32_failed: {exc}",
@@ -1220,16 +1252,12 @@ def decode_candidate(
 
     # Normalise to the canonical analysis rate so that built-in decoders
     # receive the expected samples-per-symbol regardless of capture rate.
-    # Validate fs before arithmetic (non-finite or non-positive rates are
-    # rejected with a clear message; int(round(nan)) would raise an obscure
-    # ValueError / OverflowError otherwise).
-    if not (math.isfinite(fs) and fs > 0):
-        raise ValueError(
-            f"--sample-rate must be a finite positive number; got {fs}"
-        )
-    fs_i = int(round(fs))
     if fs_i != _DECODER_FS:
-        samples = resample_iq(samples, fs, _DECODER_FS)
+        try:
+            samples = resample_iq(samples, fs, _DECODER_FS)
+        except ValueError as exc:
+            entry["decode_result"] = {"error": f"resample_failed: {exc}"}
+            return entry
     fs_decode = _DECODER_FS
 
     result = decoder_fn(samples, fs=fs_decode)

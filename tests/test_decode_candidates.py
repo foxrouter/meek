@@ -853,6 +853,77 @@ class TestResampleIq(unittest.TestCase):
         with self.assertRaises(ValueError):
             dc.resample_iq(self._samples, 1, dc._DECODER_FS)
 
+    def test_max_output_samples_guard_raises(self):
+        """resample_iq raises ValueError when n_out would exceed _MAX_RESAMPLE_OUTPUT."""
+        # Use a ratio just within _MAX_UPSAMPLE_RATIO but with a long input
+        # so that n_out = len * ratio > _MAX_RESAMPLE_OUTPUT.
+        # ratio=999, input_len = _MAX_RESAMPLE_OUTPUT // 999 + 1 overflows.
+        input_len = dc._MAX_RESAMPLE_OUTPUT // 999 + 1
+        big_samples = np.zeros(input_len, dtype=np.complex64)
+        # fs_out/fs_in = 999: just within ratio limit but n_out > 20M
+        with self.assertRaisesRegex(ValueError, r"exceeds the maximum"):
+            dc.resample_iq(big_samples, 1000, 999_000)
+
+    def test_decode_candidate_max_load_scales_with_fs(self):
+        """decode_candidate loads max(1, round(_MAX_DECODE_SAMPLES * fs_i / _DECODER_FS)) samples."""
+        import unittest.mock as mock
+
+        # At fs=_DECODER_FS/10, max_load should be _MAX_DECODE_SAMPLES/10.
+        fs_capture = dc._DECODER_FS // 10
+        expected_max_load = max(1, round(dc._MAX_DECODE_SAMPLES * fs_capture // dc._DECODER_FS))
+        calls = []
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")
+        # Write a minimal CF32 file large enough for sha256_file to succeed
+        with open(snap_path, "wb") as fh:
+            fh.write(np.zeros(100, dtype=np.float32).tobytes())
+
+        snap = {"path": snap_path, "filename": os.path.basename(snap_path),
+                "size_bytes": os.path.getsize(snap_path)}
+        cand = {
+            "signal_id": 1, "example_id": 1, "db_timestamp": "",
+            "source": "", "confidence": 0.9,
+            "decision_trace": "snr=10dB scores(FSK=0.9) -> FSK@0.9",
+        }
+
+        orig_load = dc.load_cf32
+        def patched_load(path, max_samples):
+            calls.append(max_samples)
+            return orig_load(path, max_samples)
+
+        with mock.patch.object(dc, "load_cf32", side_effect=patched_load):
+            dc.decode_candidate(cand, snap, float(fs_capture), False)
+
+        self.assertEqual(len(calls), 1, "load_cf32 should be called exactly once")
+        self.assertEqual(calls[0], expected_max_load)
+
+    def test_decode_candidate_resample_error_recorded_not_raised(self):
+        """decode_candidate catches ValueError from resample_iq and records it instead of raising."""
+        import unittest.mock as mock
+
+        # Write a minimal CF32 snapshot file (8 bytes = 1 sample)
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")
+        with open(snap_path, "wb") as fh:
+            fh.write(np.zeros(8, dtype=np.float32).tobytes())
+
+        snap = {"path": snap_path, "filename": os.path.basename(snap_path),
+                "size_bytes": os.path.getsize(snap_path)}
+        cand = {
+            "signal_id": 1, "example_id": 1, "db_timestamp": "",
+            "source": "", "confidence": 0.9,
+            "decision_trace": "snr=10dB scores(FSK=0.9) -> FSK@0.9",
+        }
+        # Patch resample_iq to raise ValueError to simulate OOM guard firing
+        with mock.patch.object(dc, "resample_iq", side_effect=ValueError("simulated OOM")):
+            entry = dc.decode_candidate(cand, snap, dc._DECODER_FS / 2, False)
+
+        self.assertIn("resample_failed", entry["decode_result"].get("error", ""))
+        self.assertFalse(entry["decoded"])
+
 
 # ---------------------------------------------------------------------------
 # Entry point
