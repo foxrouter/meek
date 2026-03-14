@@ -674,6 +674,13 @@ class TestResampleIq(unittest.TestCase):
     def test_passthrough_same_rate(self):
         out = dc.resample_iq(self._samples, FS, FS)
         np.testing.assert_array_equal(out, self._samples)
+        self.assertEqual(out.dtype, np.complex64)
+
+    def test_passthrough_normalises_dtype(self):
+        """Passthrough must return complex64 even for non-complex64 input."""
+        c128 = self._samples.astype(np.complex128)
+        out  = dc.resample_iq(c128, FS, FS)
+        self.assertEqual(out.dtype, np.complex64)
 
     def test_decimation_length(self):
         fs_out = FS // 4  # 512 000 Hz

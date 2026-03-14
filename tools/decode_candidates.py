@@ -334,7 +334,8 @@ def resample_iq(samples: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
             f"Sample rates must round to at least 1 Hz; got fs_in={fs_in}, fs_out={fs_out}"
         )
     if fs_in_i == fs_out_i:
-        return samples
+        # Normalize dtype for consistency — callers always get complex64.
+        return np.asarray(samples, dtype=np.complex64)
     n_out = int(round(len(samples) * fs_out_i / fs_in_i))
     if n_out < 1:
         return np.empty(0, dtype=np.complex64)
@@ -1197,10 +1198,12 @@ def decode_candidate(
     # receive the expected samples-per-symbol regardless of capture rate.
     # Use integer-rounded Hz for the comparison (same as resample_iq) so
     # that 2048000.0 parsed from the CLI does not trigger spurious work.
-    fs_decode = fs
-    if int(round(fs)) != _DECODER_FS:
-        samples   = resample_iq(samples, fs, _DECODER_FS)
-        fs_decode = _DECODER_FS
+    # Always pass _DECODER_FS as the decode rate so the decoder sees the
+    # canonical rate even when no resampling was needed (e.g. fs=2048000.0).
+    fs_i = int(round(fs))
+    if fs_i != _DECODER_FS:
+        samples = resample_iq(samples, fs, _DECODER_FS)
+    fs_decode = _DECODER_FS
 
     result = decoder_fn(samples, fs=fs_decode)
     entry["decode_result"] = result
