@@ -110,10 +110,26 @@ inline std::unique_ptr<Database> Database::open(const std::string& path) {
   // Retry SQLITE_BUSY for up to 5 seconds before propagating the error.
   // Required in WAL mode when decode_candidates.py or admin tools hold read
   // transactions concurrently with the daemon's write path.
-  sqlite3_busy_timeout(raw, 5000);
+  {
+    const int bt_rc = sqlite3_busy_timeout(raw, 5000);
+    if (bt_rc != SQLITE_OK) {
+      std::cerr << "[DB] sqlite3_busy_timeout failed: " << sqlite3_errmsg(raw)
+                << " - SQLITE_BUSY errors may reach callers immediately\n";
+    }
+  }
   // Increase page cache to reduce write stalls under burst classification.
-  sqlite3_exec(raw, "PRAGMA cache_size = -8000;",
-               nullptr, nullptr, nullptr);  // 8 MiB
+  // Negative value is in KiB: -8000 = 8000 KiB (~8 MiB).
+  {
+    char* cache_err = nullptr;
+    const int cache_rc = sqlite3_exec(raw, "PRAGMA cache_size = -8000;",
+                                      nullptr, nullptr, &cache_err);
+    if (cache_rc != SQLITE_OK) {
+      std::cerr << "[DB] cache_size pragma failed: "
+                << (cache_err ? cache_err : sqlite3_errmsg(raw))
+                << " - using default page cache\n";
+      sqlite3_free(cache_err);
+    }
+  }
 
   if (!db->apply_schema() || !db->prepare_statements()) {
     return nullptr;

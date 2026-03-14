@@ -17,6 +17,7 @@ or via pytest:
     pytest tests/test_db_wal.py
 """
 
+import queue
 import sqlite3
 import tempfile
 import threading
@@ -122,8 +123,11 @@ class TestWalMode(unittest.TestCase):
         conn_setup.commit()
         conn_setup.close()
 
-        errors = []
+        errors = queue.Queue()
         rows_per_thread = 50
+        # Barrier ensures both threads enter the write loop simultaneously,
+        # maximizing lock contention and ensuring the busy-timeout path is exercised.
+        barrier = threading.Barrier(2)
 
         def _writer(label):
             # timeout=5.0 is the Python sqlite3 equivalent of the C++
@@ -134,11 +138,12 @@ class TestWalMode(unittest.TestCase):
             conn.execute("PRAGMA journal_mode = WAL;")
             conn.execute("PRAGMA synchronous = NORMAL;")
             try:
+                barrier.wait()
                 for i in range(rows_per_thread):
                     conn.execute("INSERT INTO t(v) VALUES (?);", (f"{label}-{i}",))
                     conn.commit()
-            except sqlite3.OperationalError as exc:
-                errors.append(exc)
+            except (sqlite3.OperationalError, threading.BrokenBarrierError) as exc:
+                errors.put(exc)
             finally:
                 conn.close()
 
@@ -149,10 +154,9 @@ class TestWalMode(unittest.TestCase):
         t1.join()
         t2.join()
 
-        self.assertEqual(
-            errors,
-            [],
-            f"Expected zero SQLITE_BUSY errors, got: {errors}",
+        self.assertTrue(
+            errors.empty(),
+            f"Expected zero SQLITE_BUSY errors, got: {list(errors.queue)}",
         )
 
         # Verify all rows were written.
