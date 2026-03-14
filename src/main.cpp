@@ -446,10 +446,10 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   std::vector<float> scratch;
   scratch.reserve(cfg.analysis_len);
 
-  // Idle-path progress throttle: update the watchdog timestamp at most every
-  // 250 ms (wall-clock) to avoid a steady_clock::now() call at 10 kHz.
-  // Using elapsed time rather than an iteration count avoids false-stale
-  // signals when sleep_for oversleeps significantly under system load.
+  // Idle-path progress throttle: steady_clock::now() is called every idle
+  // iteration, but the proc_progress atomic is written at most every 250 ms
+  // (wall-clock).  Using elapsed time rather than an iteration count avoids
+  // false-stale signals when sleep_for oversleeps significantly under load.
   auto last_idle_progress = std::chrono::steady_clock::now();
 
   while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
@@ -887,9 +887,10 @@ int main(int argc, char** argv) {
 #endif
 
   // Stale threshold: max(3 × read_timeout_us, 10 s) in nanoseconds.
-  // Using 3× the configured SDR read timeout (1 µs × 1000 = 1 ns, × 3)
-  // ensures the window stays valid even when RF_READ_TIMEOUT_US is set well
-  // above its 500 ms default; the 10 s floor guards against very short values.
+  // 1 µs = 1000 ns, so multiply by kUsToNs then by kStaleMultiplier (3×).
+  // This ensures the window stays valid even when RF_READ_TIMEOUT_US is set
+  // well above its 500 ms default; the 10 s floor guards against very short
+  // values.
   constexpr std::uint64_t kUsToNs = 1'000ULL;   // µs → ns
   constexpr std::uint64_t kStaleMultiplier = 3;   // stale = 3 × read_timeout
   constexpr std::uint64_t kStaleMinNs = 10'000'000'000ULL;  // 10 s floor
@@ -919,6 +920,10 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "Shutdown requested — stopping threads\n";
+  // Notify systemd that shutdown is intentional so it doesn't kill the
+  // process via WatchdogSec during the (potentially multi-second) thread
+  // teardown and drain.
+  sd_notify(0, "STOPPING=1");
   cap_thread.request_stop();
   proc_thread.request_stop();
   out_thread.request_stop();
