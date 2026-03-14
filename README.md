@@ -165,6 +165,13 @@ sudo apt install -y build-essential cmake pkg-config gcc-13 g++-13 \
     rtl-sdr librtlsdr-dev inotify-tools rsync
 ```
 
+Then configure with the GCC 13 compiler explicitly:
+
+```bash
+rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-13
+cmake --build build -- -j$(nproc)
+```
+
 On Ubuntu Noble (24.04) or later (default GCC is already ≥ 13):
 
 ```bash

@@ -35,6 +35,7 @@ include(CMakePushCheckState)
 include(CheckCXXSourceCompiles)
 cmake_push_check_state(RESET)
 set(CMAKE_REQUIRED_FLAGS "-std=c++${CMAKE_CXX_STANDARD}")
+set(CMAKE_REQUIRED_LIBRARIES pthread)
 check_cxx_source_compiles([=[
 #include <stop_token>
 #include <thread>
@@ -49,7 +50,10 @@ int main() {
 cmake_pop_check_state()
 if(NOT _STDCXX_FEATURES_AVAILABLE)
   message(FATAL_ERROR
-    "Required C++${CMAKE_CXX_STANDARD} header <stop_token> could not be compiled.\n"
+    "C++${CMAKE_CXX_STANDARD} feature check failed "
+    "(compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}).\n"
+    "The probe tests std::jthread, std::stop_token, and std::span — "
+    "all required by this project.\n"
     "Ensure your compiler and standard library support C++${CMAKE_CXX_STANDARD} "
     "(GCC ≥ 13 with libstdc++ ≥ 13, or Clang ≥ 17 with a compatible libc++).")
 endif()
