@@ -5,6 +5,8 @@ RF-adapt SQLite database, locate matching IQ snapshot files, attempt decoding
 using available decoders, and produce a verifiable audit report.
 
 Usage:
+    # --sample-rate: snapshot capture rate; built-in decoders receive
+    # samples resampled to the canonical analysis rate (2,048,000 Hz).
     python3 tools/decode_candidates.py \\
         --db rf_adapt_intel.db \\
         --snapshot-dir /var/lib/rf-adapt-intel/snapshots \\
@@ -36,6 +38,7 @@ Optional: scipy (improved resampling; auto-detected at runtime)
 """
 
 import argparse
+from fractions import Fraction
 import hashlib
 import json
 import math
@@ -53,8 +56,41 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+try:
+    from scipy.signal import resample_poly as _resample_poly
+    _HAVE_SCIPY = True
+except ImportError:  # pragma: no cover
+    _HAVE_SCIPY = False
+
 # Audit report format version (increment when report schema changes)
 _VERSION = "1.0.0"
+
+# Canonical analysis sample rate fed to built-in decoders.  Snapshots that
+# were captured at a different rate are resampled to this value before decoding.
+_DECODER_FS = 2_048_000
+
+# Maximum denominator used when reducing the polyphase up/down ratio via
+# Fraction.limit_denominator().  Keeping this bounded prevents resample_poly
+# from becoming prohibitively slow or memory-heavy when the input and output
+# rates are co-prime or nearly so (e.g. 44101 Hz → 48001 Hz would otherwise
+# give up=48001, down=44101).  For all common SDR capture rates the exact GCD
+# reduction stays well below this limit (e.g. 44100→48000: up=160, down=147).
+_MAX_RESAMPLE_DENOM = 1_000
+
+# Maximum upsample ratio (fs_out / fs_in) accepted by resample_iq().  Values
+# beyond this would explode n_out and risk OOM (e.g. fs_in=1 Hz into a 2 Msps
+# stream would request ~2 billion output samples).
+_MAX_UPSAMPLE_RATIO = 1_000
+
+# Hard ceiling on the number of output samples produced by resample_iq().
+# Even when the ratio is within _MAX_UPSAMPLE_RATIO a long input array can
+# still produce a very large output.  20 M complex64 samples ≈ 160 MB.
+_MAX_RESAMPLE_OUTPUT = 20_000_000
+
+# Maximum samples handed to the built-in decoders (before resampling).
+# The actual load limit is scaled by (fs_capture / _DECODER_FS) so that
+# after resampling the block is approximately this size.
+_MAX_DECODE_SAMPLES = 200_000
 
 # ---------------------------------------------------------------------------
 # Band name -> centre frequency (Hz) table, mirrors UK_BANDS in main.cpp
@@ -291,6 +327,80 @@ def sha256_file(path: str) -> str:
         for chunk in iter(lambda: fh.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def resample_iq(samples: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
+    """Resample complex IQ samples from *fs_in* to *fs_out* Hz.
+
+    Uses scipy.signal.resample_poly when available (polyphase FIR, lower
+    aliasing); falls back to numpy linear interpolation otherwise.
+
+    Raises ``ValueError`` if either sample rate is non-positive, non-finite,
+    or rounds to zero integer Hz.
+    Returns an empty complex64 array when the output would contain zero
+    samples (extreme decimation applied to very short inputs).
+    """
+    if not (math.isfinite(fs_in) and math.isfinite(fs_out)):
+        raise ValueError(
+            f"Sample rates must be finite; got fs_in={fs_in}, fs_out={fs_out}"
+        )
+    if fs_in <= 0 or fs_out <= 0:
+        raise ValueError(
+            f"Sample rates must be positive; got fs_in={fs_in}, fs_out={fs_out}"
+        )
+    # Canonicalize to integer Hz once so that n_out, the polyphase up/down
+    # ratio, and the passthrough check all use the same representation.
+    fs_in_i  = int(round(fs_in))
+    fs_out_i = int(round(fs_out))
+    if fs_in_i < 1 or fs_out_i < 1:
+        raise ValueError(
+            f"Sample rates must round to at least 1 Hz; got fs_in={fs_in}, fs_out={fs_out}"
+        )
+    if fs_in_i == fs_out_i:
+        # Normalize dtype for consistency — callers always get complex64.
+        return np.asarray(samples, dtype=np.complex64)
+    if fs_out_i / fs_in_i > _MAX_UPSAMPLE_RATIO:
+        raise ValueError(
+            f"Upsample ratio {fs_out_i / fs_in_i:.1f} exceeds the maximum "
+            f"allowed ratio of {_MAX_UPSAMPLE_RATIO} "
+            f"(fs_in={fs_in}, fs_out={fs_out})"
+        )
+    n_out = int(round(len(samples) * fs_out_i / fs_in_i))
+    if n_out < 1:
+        return np.empty(0, dtype=np.complex64)
+    if n_out > _MAX_RESAMPLE_OUTPUT:
+        raise ValueError(
+            f"Requested output length {n_out:,} exceeds the maximum "
+            f"{_MAX_RESAMPLE_OUTPUT:,} (fs_in={fs_in}, fs_out={fs_out}, "
+            f"input_len={len(samples)}); pass fewer input samples or reduce "
+            f"the sample-rate difference"
+        )
+    # Derive the polyphase ratio via Fraction.limit_denominator so that:
+    #   * common SDR rates use the exact GCD-reduced fraction (e.g.
+    #     44100→48000 → up=160, down=147, denominator 147 ≤ 1000);
+    #   * co-prime or unusual rates are capped at _MAX_RESAMPLE_DENOM to keep
+    #     resample_poly runtime and memory bounded (small ratio error accepted).
+    frac = Fraction(fs_out_i, fs_in_i).limit_denominator(_MAX_RESAMPLE_DENOM)
+    up   = frac.numerator
+    down = frac.denominator
+    if _HAVE_SCIPY:
+        out = _resample_poly(samples, up, down).astype(np.complex64)
+        # Trim or zero-pad to n_out so both backends return the same length.
+        if len(out) > n_out:
+            return out[:n_out]
+        if len(out) < n_out:
+            return np.concatenate(
+                [out, np.zeros(n_out - len(out), dtype=np.complex64)]
+            )
+        return out
+    # Numpy fallback: linear interpolation on I and Q channels separately.
+    # linspace spans the full input index range [0, len-1] so no time-axis
+    # compression occurs regardless of the resampling ratio.
+    t_in  = np.arange(len(samples), dtype=np.float64)
+    t_out = np.linspace(0, len(samples) - 1, n_out)
+    i_out = np.interp(t_out, t_in, samples.real).astype(np.float32)
+    q_out = np.interp(t_out, t_in, samples.imag).astype(np.float32)
+    return (i_out + 1j * q_out).astype(np.complex64)
 
 
 # ---------------------------------------------------------------------------
@@ -1111,8 +1221,32 @@ def decode_candidate(
         return entry
 
     # ── 1. Built-in decoder ──────────────────────────────────────────────
+    # Validate fs and compute the integer capture rate early so we can scale
+    # how many samples to load.  Non-finite / non-positive rates are rejected
+    # here; main() also validates upfront, but decode_candidate() may be
+    # called directly from tests or other tooling.
+    if not (math.isfinite(fs) and fs > 0):
+        raise ValueError(
+            f"--sample-rate must be a finite positive number; got {fs}"
+        )
+    fs_i = int(round(fs))
+    if fs_i < 1:
+        raise ValueError(
+            f"--sample-rate rounds to 0 Hz (got {fs}); must be >= 1 Hz"
+        )
+
+    # Scale max_samples so that the resampled block is approximately
+    # _MAX_DECODE_SAMPLES long regardless of capture rate.  Without scaling,
+    # a low capture rate (e.g. 2 kHz) would upsample 200 k input samples
+    # into ~200 M output samples, risking OOM.  Cap at _MAX_RESAMPLE_OUTPUT so
+    # that a very high capture rate (e.g. 1 GHz) cannot inflate the disk read
+    # into hundreds of millions of samples even when decimating.
+    max_load = min(
+        _MAX_RESAMPLE_OUTPUT,
+        max(1, round(_MAX_DECODE_SAMPLES * fs_i / _DECODER_FS)),
+    )
     try:
-        samples = load_cf32(snap["path"], max_samples=200_000)
+        samples = load_cf32(snap["path"], max_samples=max_load)
     except Exception as exc:  # pylint: disable=broad-except
         entry["decode_result"] = {
             "error": f"load_cf32_failed: {exc}",
@@ -1125,7 +1259,17 @@ def decode_candidate(
         # Fallback: try FSK (most common), but mark method accordingly
         decoder_fn = decode_fsk
 
-    result = decoder_fn(samples, fs=fs)
+    # Normalise to the canonical analysis rate so that built-in decoders
+    # receive the expected samples-per-symbol regardless of capture rate.
+    if fs_i != _DECODER_FS:
+        try:
+            samples = resample_iq(samples, fs, _DECODER_FS)
+        except ValueError as exc:
+            entry["decode_result"] = {"error": f"resample_failed: {exc}"}
+            return entry
+    fs_decode = _DECODER_FS
+
+    result = decoder_fn(samples, fs=fs_decode)
     entry["decode_result"] = result
     entry["decoded"]       = result.get("decoded", False)
     entry["decoder_used"]  = result.get("method", "built_in_unknown")
@@ -1240,7 +1384,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--limit",          type=int,   default=200,
                    help="Maximum number of DB candidates to process")
     p.add_argument("--sample-rate",    type=float, default=2_048_000,
-                   help="IQ sample rate in Hz (used by built-in decoders)")
+                   help="IQ snapshot capture rate in Hz.  Built-in decoders always"
+                        " receive samples resampled to the canonical analysis rate"
+                        f" ({_DECODER_FS} Hz); this value is the source capture rate.")
     p.add_argument("--external",       action="store_true",
                    help="Also try external free CLI decoders (multimon-ng, rtl_433)")
     return p.parse_args(argv)
@@ -1248,6 +1394,17 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
+
+    # Validate --sample-rate up-front so a bad value (nan, inf, 0, negative)
+    # fails immediately with a clear message rather than aborting mid-loop
+    # after some candidates have already been processed.
+    fs = args.sample_rate
+    if not (math.isfinite(fs) and fs > 0) or int(round(fs)) < 1:
+        print(
+            f"[ERROR] --sample-rate must be a finite positive number >= 1 Hz; got {fs}",
+            file=sys.stderr,
+        )
+        return 1
 
     # ── DB ───────────────────────────────────────────────────────────────
     if not os.path.isfile(args.db):

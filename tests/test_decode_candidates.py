@@ -581,6 +581,34 @@ class TestEndToEnd(unittest.TestCase):
         ])
         self.assertNotEqual(rc, 0)
 
+    def test_invalid_sample_rate_nan_returns_nonzero(self):
+        rc = dc.main([
+            "--db",           self._dbp,
+            "--snapshot-dir", self._snapd,
+            "--out",          self._report,
+            "--sample-rate",  "nan",
+        ])
+        self.assertNotEqual(rc, 0)
+
+    def test_invalid_sample_rate_zero_returns_nonzero(self):
+        rc = dc.main([
+            "--db",           self._dbp,
+            "--snapshot-dir", self._snapd,
+            "--out",          self._report,
+            "--sample-rate",  "0",
+        ])
+        self.assertNotEqual(rc, 0)
+
+    def test_invalid_sample_rate_sub_hz_returns_nonzero(self):
+        """sub-Hz rate that rounds to 0 integer Hz must also fail upfront."""
+        rc = dc.main([
+            "--db",           self._dbp,
+            "--snapshot-dir", self._snapd,
+            "--out",          self._report,
+            "--sample-rate",  "0.4",
+        ])
+        self.assertNotEqual(rc, 0)
+
     def test_no_snapshot_dir_graceful(self):
         """Should still produce a report when snapshot dir does not exist."""
         rc = dc.main([
@@ -658,6 +686,292 @@ class TestAcarsDispatchTable(unittest.TestCase):
         for band in self._ACARSDEC_BANDS:
             self.assertIn(f'"{band}"', source,
                           msg=f'Band "{band}" missing from acarsdec dispatch in decode_candidate()')
+
+
+# ---------------------------------------------------------------------------
+# Tests: resample_iq (scipy / numpy backends)
+# ---------------------------------------------------------------------------
+
+class TestResampleIq(unittest.TestCase):
+    """Tests for dc.resample_iq() covering both scipy and numpy code paths."""
+
+    def setUp(self):
+        np.random.seed(0)
+        self._samples = make_fsk2(n_syms=200, sps=8, fs=FS)  # 1600 samples
+
+    def test_passthrough_same_rate(self):
+        out = dc.resample_iq(self._samples, FS, FS)
+        np.testing.assert_array_equal(out, self._samples)
+        self.assertEqual(out.dtype, np.complex64)
+
+    def test_passthrough_normalises_dtype(self):
+        """Passthrough must return complex64 even for non-complex64 input."""
+        c128 = self._samples.astype(np.complex128)
+        out  = dc.resample_iq(c128, FS, FS)
+        self.assertEqual(out.dtype, np.complex64)
+
+    def test_decimation_length(self):
+        fs_out = FS // 4  # 512 000 Hz
+        out = dc.resample_iq(self._samples, FS, fs_out)
+        expected = int(round(len(self._samples) * fs_out / FS))
+        self.assertEqual(len(out), expected)
+
+    def test_upsampling_length(self):
+        fs_out = FS * 2  # 4 096 000 Hz
+        out = dc.resample_iq(self._samples, FS, fs_out)
+        expected = int(round(len(self._samples) * fs_out / FS))
+        self.assertEqual(len(out), expected)
+
+    def test_output_dtype(self):
+        out = dc.resample_iq(self._samples, FS, FS // 2)
+        self.assertEqual(out.dtype, np.complex64)
+
+    def test_invalid_rate_zero_raises(self):
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, 0, FS)
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, FS, 0)
+
+    def test_invalid_rate_negative_raises(self):
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, -FS, FS)
+
+    def test_invalid_rate_nan_raises(self):
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, float("nan"), FS)
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, FS, float("nan"))
+
+    def test_invalid_rate_inf_raises(self):
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, float("inf"), FS)
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, FS, float("-inf"))
+
+    def test_invalid_rate_sub_hz_rounds_to_zero_raises(self):
+        """Rates that round to 0 integer Hz must raise ValueError, not ZeroDivisionError."""
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, 0.4, FS)
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, FS, 0.4)
+
+    def test_extreme_decimation_returns_empty(self):
+        """A single sample decimated by a large factor yields an empty array."""
+        tiny = self._samples[:1]
+        out = dc.resample_iq(tiny, FS * 1_000, FS)
+        self.assertEqual(len(out), 0)
+        self.assertEqual(out.dtype, np.complex64)
+
+    def test_scipy_path(self):
+        """scipy backend produces the correct output length."""
+        if not dc._HAVE_SCIPY:
+            self.skipTest("scipy not installed")
+        fs_out = FS // 4
+        out = dc.resample_iq(self._samples, FS, fs_out)
+        expected = int(round(len(self._samples) * fs_out / FS))
+        self.assertEqual(len(out), expected)
+        self.assertEqual(out.dtype, np.complex64)
+
+    def test_numpy_fallback_path(self):
+        """numpy fallback produces the correct output length when scipy is absent."""
+        orig = dc._HAVE_SCIPY
+        try:
+            dc._HAVE_SCIPY = False
+            fs_out = FS // 4
+            out = dc.resample_iq(self._samples, FS, fs_out)
+            expected = int(round(len(self._samples) * fs_out / FS))
+            self.assertEqual(len(out), expected)
+            self.assertEqual(out.dtype, np.complex64)
+        finally:
+            dc._HAVE_SCIPY = orig
+
+    def test_numpy_fallback_spans_full_range(self):
+        """numpy fallback must not compress the time axis (linspace, not arange)."""
+        orig = dc._HAVE_SCIPY
+        try:
+            dc._HAVE_SCIPY = False
+            # Use a simple ramp so we can check first/last values
+            n = 100
+            ramp = np.arange(n, dtype=np.float32) + 1j * np.arange(n, dtype=np.float32)
+            out = dc.resample_iq(ramp, float(n), float(n // 4))
+            # First sample should be ~0+0j, last should be ~(n-1)+(n-1)j
+            self.assertAlmostEqual(out[0].real, 0.0, places=3)
+            self.assertAlmostEqual(out[-1].real, float(n - 1), places=1)
+        finally:
+            dc._HAVE_SCIPY = orig
+
+    def test_scipy_and_numpy_same_length(self):
+        """Both scipy and numpy backends must return the same output length."""
+        if not dc._HAVE_SCIPY:
+            self.skipTest("scipy not installed")
+        fs_out = FS // 3
+        out_scipy = dc.resample_iq(self._samples, FS, fs_out)
+        orig = dc._HAVE_SCIPY
+        try:
+            dc._HAVE_SCIPY = False
+            out_numpy = dc.resample_iq(self._samples, FS, fs_out)
+        finally:
+            dc._HAVE_SCIPY = orig
+        self.assertEqual(len(out_scipy), len(out_numpy))
+
+    def test_decode_candidate_resamples_at_non_default_fs(self):
+        """decode_candidate() resamples snapshots not at _DECODER_FS."""
+        np.random.seed(42)
+        # Generate FSK at 2× the decoder rate so decode_candidate must downsample
+        fs_capture = dc._DECODER_FS * 2
+        samples_hi = make_fsk2(n_syms=400, sps=16, fs=fs_capture)
+        tmp = tempfile.mkdtemp()
+        try:
+            snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")
+            with open(snap_path, "wb") as fh:
+                fh.write(cf32_bytes(samples_hi))
+            candidate = {
+                "signal_id": 1, "example_id": 1,
+                "db_timestamp": "2023-11-15T00:00:00",
+                "source": "test",
+                "confidence": 0.81,
+                "decision_trace": (
+                    "snr=20dB band=ISM-433 scores(fsk_like=0.81,ook_am_like=0.1)"
+                    " -> fsk_like@0.81"
+                ),
+            }
+            snap = {
+                "path": snap_path,
+                "filename": os.path.basename(snap_path),
+                "size_bytes": os.path.getsize(snap_path),
+            }
+            result = dc.decode_candidate(candidate, snap, fs_capture, use_external=False)
+            self.assertTrue(result["decoded"], msg=f"decode failed after resample: {result}")
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_rational_ratio_44100_to_48000(self):
+        """resample_iq produces the correct output length for 44100→48000 Hz.
+
+        With limit_denominator(1000) the exact GCD fraction is preserved:
+        gcd=300, up=160, down=147 — denominator 147 is well below the cap.
+        """
+        # 44100 → 48000: gcd=300, exact up=160, down=147 (denominator < 1000).
+        out = dc.resample_iq(self._samples, 44_100, 48_000)
+        expected = int(round(len(self._samples) * 48_000 / 44_100))
+        self.assertEqual(len(out), expected)
+        self.assertEqual(out.dtype, np.complex64)
+
+    def test_excessive_upsample_ratio_raises(self):
+        """resample_iq raises ValueError when the upsample ratio exceeds _MAX_UPSAMPLE_RATIO."""
+        # fs_out / fs_in = 2_048_000 / 1 = 2_048_000 >> _MAX_UPSAMPLE_RATIO
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, 1, dc._DECODER_FS)
+
+    def test_max_output_samples_guard_raises(self):
+        """resample_iq raises ValueError when n_out would exceed _MAX_RESAMPLE_OUTPUT."""
+        # Use a ratio just within _MAX_UPSAMPLE_RATIO but with a long input
+        # so that n_out = len * ratio > _MAX_RESAMPLE_OUTPUT.
+        # ratio=999, input_len = _MAX_RESAMPLE_OUTPUT // 999 + 1 overflows.
+        input_len = dc._MAX_RESAMPLE_OUTPUT // 999 + 1
+        big_samples = np.zeros(input_len, dtype=np.complex64)
+        # fs_out/fs_in = 999: just within ratio limit but n_out > 20M
+        with self.assertRaisesRegex(ValueError, r"exceeds the maximum"):
+            dc.resample_iq(big_samples, 1000, 999_000)
+
+    def test_decode_candidate_max_load_scales_with_fs(self):
+        """decode_candidate loads min(_MAX_RESAMPLE_OUTPUT, max(1, round(_MAX_DECODE_SAMPLES * fs_i / _DECODER_FS))) samples."""
+        import unittest.mock as mock
+
+        # At fs=_DECODER_FS/10, max_load should be _MAX_DECODE_SAMPLES/10.
+        fs_capture = dc._DECODER_FS // 10
+        expected_max_load = min(
+            dc._MAX_RESAMPLE_OUTPUT,
+            max(1, round(dc._MAX_DECODE_SAMPLES * fs_capture / dc._DECODER_FS)),
+        )
+        calls = []
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")
+        # Write a minimal CF32 file large enough for sha256_file to succeed
+        with open(snap_path, "wb") as fh:
+            fh.write(np.zeros(100, dtype=np.float32).tobytes())
+
+        snap = {"path": snap_path, "filename": os.path.basename(snap_path),
+                "size_bytes": os.path.getsize(snap_path)}
+        cand = {
+            "signal_id": 1, "example_id": 1, "db_timestamp": "",
+            "source": "", "confidence": 0.9,
+            "decision_trace": "snr=10dB scores(FSK=0.9) -> FSK@0.9",
+        }
+
+        orig_load = dc.load_cf32
+        def patched_load(path, max_samples):
+            calls.append(max_samples)
+            return orig_load(path, max_samples)
+
+        with mock.patch.object(dc, "load_cf32", side_effect=patched_load):
+            dc.decode_candidate(cand, snap, float(fs_capture), False)
+
+        self.assertEqual(len(calls), 1, "load_cf32 should be called exactly once")
+        self.assertEqual(calls[0], expected_max_load)
+
+    def test_decode_candidate_max_load_capped_at_max_resample_output(self):
+        """max_load is capped at _MAX_RESAMPLE_OUTPUT even for very high capture rates."""
+        import unittest.mock as mock
+
+        # A capture rate 1000× _DECODER_FS would naively give max_load =
+        # _MAX_DECODE_SAMPLES * 1000 = 200_000_000, but the cap must clamp it
+        # to _MAX_RESAMPLE_OUTPUT = 20_000_000.
+        fs_capture = dc._DECODER_FS * 1000
+        calls = []
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")
+        with open(snap_path, "wb") as fh:
+            fh.write(np.zeros(100, dtype=np.float32).tobytes())
+
+        snap = {"path": snap_path, "filename": os.path.basename(snap_path),
+                "size_bytes": os.path.getsize(snap_path)}
+        cand = {
+            "signal_id": 1, "example_id": 1, "db_timestamp": "",
+            "source": "", "confidence": 0.9,
+            "decision_trace": "snr=10dB scores(FSK=0.9) -> FSK@0.9",
+        }
+
+        orig_load = dc.load_cf32
+        def patched_load(path, max_samples):
+            calls.append(max_samples)
+            return orig_load(path, max_samples)
+
+        with mock.patch.object(dc, "load_cf32", side_effect=patched_load):
+            dc.decode_candidate(cand, snap, float(fs_capture), False)
+
+        self.assertEqual(len(calls), 1, "load_cf32 should be called exactly once")
+        self.assertEqual(calls[0], dc._MAX_RESAMPLE_OUTPUT,
+                         "max_load must be capped at _MAX_RESAMPLE_OUTPUT")
+
+    def test_decode_candidate_resample_error_recorded_not_raised(self):
+        """decode_candidate catches ValueError from resample_iq and records it instead of raising."""
+        import unittest.mock as mock
+
+        # Write a minimal CF32 snapshot file (8 float32 values = 32 bytes = 4 complex samples)
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")
+        with open(snap_path, "wb") as fh:
+            fh.write(np.zeros(8, dtype=np.float32).tobytes())
+
+        snap = {"path": snap_path, "filename": os.path.basename(snap_path),
+                "size_bytes": os.path.getsize(snap_path)}
+        cand = {
+            "signal_id": 1, "example_id": 1, "db_timestamp": "",
+            "source": "", "confidence": 0.9,
+            "decision_trace": "snr=10dB scores(FSK=0.9) -> FSK@0.9",
+        }
+        # Patch resample_iq to raise ValueError to simulate OOM guard firing
+        with mock.patch.object(dc, "resample_iq", side_effect=ValueError("simulated OOM")):
+            entry = dc.decode_candidate(cand, snap, dc._DECODER_FS / 2, False)
+
+        self.assertIn("resample_failed", entry["decode_result"].get("error", ""))
+        self.assertFalse(entry["decoded"])
 
 
 # ---------------------------------------------------------------------------

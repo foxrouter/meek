@@ -1,3 +1,7 @@
 # Python test and tool dependencies for rf_adapt_intel
 # Install with: pip install -r requirements.txt
-numpy>=1.24,<3
+#
+# numpy>=1.26 required for numpy.array_api used by scipy>=1.11
+numpy>=1.26,<3
+# scipy: improved IQ resampling in tools/decode_candidates.py
+scipy>=1.11,<2
