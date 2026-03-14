@@ -458,8 +458,8 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     if (!in_buf.pop(blk)) {
       if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
         break;
-      // Update progress every 250 ms in the idle path; this proves the thread
-      // is alive without burning CPU on clock reads at 10 kHz.
+      // steady_clock::now() is called every idle iteration; only the atomic
+      // write to proc_progress is throttled to at most every 250 ms.
       const auto now = std::chrono::steady_clock::now();
       if (now - last_idle_progress >= std::chrono::milliseconds(250)) {
         last_idle_progress = now;
