@@ -84,6 +84,12 @@ done
 # ---------------------------------------------------------------------------
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Pinned liquid-dsp release tarball SHA256 (passed to ops/setup.sh via env).
+# Recompute with: curl -fsSL <tarball-url> | sha256sum
+# where <tarball-url> = https://github.com/jgaeddert/liquid-dsp/archive/refs/tags/<LIQUID_DSP_GIT_TAG>.tar.gz
+# (see LIQUID_DSP_GIT_TAG in ops/setup.sh for the pinned version)
+export LIQUID_DSP_SHA256="33c42ebc2e6088570421e282c6332e899705d42b4f73ebd1212e6a11da714dd4"
+
 run() {
   if $DRY_RUN; then
     echo "[dry-run] $*"
