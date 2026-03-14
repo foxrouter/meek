@@ -77,6 +77,11 @@ _DECODER_FS = 2_048_000
 # reduction stays well below this limit (e.g. 44100→48000: up=160, down=147).
 _MAX_RESAMPLE_DENOM = 1_000
 
+# Maximum upsample ratio (fs_out / fs_in) accepted by resample_iq().  Values
+# beyond this would explode n_out and risk OOM (e.g. fs_in=1 Hz into a 2 Msps
+# stream would request ~2 billion output samples).
+_MAX_UPSAMPLE_RATIO = 1_000
+
 # ---------------------------------------------------------------------------
 # Band name -> centre frequency (Hz) table, mirrors UK_BANDS in main.cpp
 # ---------------------------------------------------------------------------
@@ -344,6 +349,12 @@ def resample_iq(samples: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
     if fs_in_i == fs_out_i:
         # Normalize dtype for consistency — callers always get complex64.
         return np.asarray(samples, dtype=np.complex64)
+    if fs_out_i / fs_in_i > _MAX_UPSAMPLE_RATIO:
+        raise ValueError(
+            f"Upsample ratio {fs_out_i / fs_in_i:.1f} exceeds the maximum "
+            f"allowed ratio of {_MAX_UPSAMPLE_RATIO} "
+            f"(fs_in={fs_in}, fs_out={fs_out})"
+        )
     n_out = int(round(len(samples) * fs_out_i / fs_in_i))
     if n_out < 1:
         return np.empty(0, dtype=np.complex64)
@@ -1346,6 +1357,17 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
+
+    # Validate --sample-rate up-front so a bad value (nan, inf, 0, negative)
+    # fails immediately with a clear message rather than aborting mid-loop
+    # after some candidates have already been processed.
+    fs = args.sample_rate
+    if not (math.isfinite(fs) and fs > 0):
+        print(
+            f"[ERROR] --sample-rate must be a finite positive number; got {fs}",
+            file=sys.stderr,
+        )
+        return 1
 
     # ── DB ───────────────────────────────────────────────────────────────
     if not os.path.isfile(args.db):

@@ -581,6 +581,24 @@ class TestEndToEnd(unittest.TestCase):
         ])
         self.assertNotEqual(rc, 0)
 
+    def test_invalid_sample_rate_nan_returns_nonzero(self):
+        rc = dc.main([
+            "--db",           self._dbp,
+            "--snapshot-dir", self._snapd,
+            "--out",          self._report,
+            "--sample-rate",  "nan",
+        ])
+        self.assertNotEqual(rc, 0)
+
+    def test_invalid_sample_rate_zero_returns_nonzero(self):
+        rc = dc.main([
+            "--db",           self._dbp,
+            "--snapshot-dir", self._snapd,
+            "--out",          self._report,
+            "--sample-rate",  "0",
+        ])
+        self.assertNotEqual(rc, 0)
+
     def test_no_snapshot_dir_graceful(self):
         """Should still produce a report when snapshot dir does not exist."""
         rc = dc.main([
@@ -828,6 +846,12 @@ class TestResampleIq(unittest.TestCase):
         expected = int(round(len(self._samples) * 48_000 / 44_100))
         self.assertEqual(len(out), expected)
         self.assertEqual(out.dtype, np.complex64)
+
+    def test_excessive_upsample_ratio_raises(self):
+        """resample_iq raises ValueError when the upsample ratio exceeds _MAX_UPSAMPLE_RATIO."""
+        # fs_out / fs_in = 2_048_000 / 1 = 2_048_000 >> _MAX_UPSAMPLE_RATIO
+        with self.assertRaises(ValueError):
+            dc.resample_iq(self._samples, 1, dc._DECODER_FS)
 
 
 # ---------------------------------------------------------------------------
