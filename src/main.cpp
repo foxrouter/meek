@@ -891,12 +891,18 @@ int main(int argc, char** argv) {
   // This ensures the window stays valid even when RF_READ_TIMEOUT_US is set
   // well above its 500 ms default; the 10 s floor guards against very short
   // values.
-  constexpr std::uint64_t kUsToNs = 1'000ULL;   // µs → ns
-  constexpr std::uint64_t kStaleMultiplier = 3;   // stale = 3 × read_timeout
+  // read_timeout_us is a signed int64; clamp to [0, kStaleMaxUs] before
+  // converting to uint64 so that a negative env value does not wrap to a
+  // huge number (disabling stale detection) and a very large value does not
+  // overflow the multiply below.
+  constexpr std::uint64_t kUsToNs = 1'000ULL;         // µs → ns
+  constexpr std::uint64_t kStaleMultiplier = 3;         // stale = 3 × read_timeout
   constexpr std::uint64_t kStaleMinNs = 10'000'000'000ULL;  // 10 s floor
+  constexpr std::int64_t kStaleMaxUs = 300'000'000LL;  // 300 s (5 min) upper cap
+  const std::uint64_t timeout_clamped_us = static_cast<std::uint64_t>(
+      std::max(std::int64_t{0}, std::min(cfg.read_timeout_us, kStaleMaxUs)));
   const std::uint64_t kStaleNs =
-      std::max(static_cast<std::uint64_t>(cfg.read_timeout_us) * kUsToNs * kStaleMultiplier,
-               kStaleMinNs);
+      std::max(timeout_clamped_us * kUsToNs * kStaleMultiplier, kStaleMinNs);
 
   while (!g_shutdown.load(std::memory_order_relaxed)) {
     std::this_thread::sleep_for(std::chrono::seconds(2));
