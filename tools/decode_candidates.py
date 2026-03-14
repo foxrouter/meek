@@ -50,7 +50,6 @@ import sys
 import tempfile
 import traceback
 from datetime import datetime, timezone
-from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -339,9 +338,11 @@ def resample_iq(samples: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
     n_out = int(round(len(samples) * fs_out_i / fs_in_i))
     if n_out < 1:
         return np.empty(0, dtype=np.complex64)
-    ratio = Fraction(fs_out_i, fs_in_i).limit_denominator(1_000)
-    up    = ratio.numerator
-    down  = ratio.denominator
+    # Derive exact rational via GCD reduction — no approximation, no time-axis
+    # drift from limit_denominator capping.
+    gcd  = math.gcd(fs_out_i, fs_in_i)
+    up   = fs_out_i // gcd
+    down = fs_in_i  // gcd
     if _HAVE_SCIPY:
         out = _resample_poly(samples, up, down).astype(np.complex64)
         # Trim or zero-pad to n_out so both backends return the same length.
@@ -1196,10 +1197,13 @@ def decode_candidate(
 
     # Normalise to the canonical analysis rate so that built-in decoders
     # receive the expected samples-per-symbol regardless of capture rate.
-    # Use integer-rounded Hz for the comparison (same as resample_iq) so
-    # that 2048000.0 parsed from the CLI does not trigger spurious work.
-    # Always pass _DECODER_FS as the decode rate so the decoder sees the
-    # canonical rate even when no resampling was needed (e.g. fs=2048000.0).
+    # Validate fs before arithmetic (non-finite or non-positive rates are
+    # rejected with a clear message; int(round(nan)) would raise an obscure
+    # ValueError / OverflowError otherwise).
+    if not (math.isfinite(fs) and fs > 0):
+        raise ValueError(
+            f"--sample-rate must be a finite positive number; got {fs}"
+        )
     fs_i = int(round(fs))
     if fs_i != _DECODER_FS:
         samples = resample_iq(samples, fs, _DECODER_FS)
