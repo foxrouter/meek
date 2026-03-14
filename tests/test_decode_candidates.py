@@ -817,11 +817,13 @@ class TestResampleIq(unittest.TestCase):
         finally:
             shutil.rmtree(tmp)
 
-    def test_exact_gcd_ratio_no_approximation(self):
-        """resample_iq produces the correct output length for 44100→48000 Hz
-        using exact GCD reduction (gcd=300, up=160, down=147) without
-        limit_denominator approximation."""
-        # 44100 → 48000: gcd=300, exact up=160, down=147 (no common approximation).
+    def test_rational_ratio_44100_to_48000(self):
+        """resample_iq produces the correct output length for 44100→48000 Hz.
+
+        With limit_denominator(1000) the exact GCD fraction is preserved:
+        gcd=300, up=160, down=147 — denominator 147 is well below the cap.
+        """
+        # 44100 → 48000: gcd=300, exact up=160, down=147 (denominator < 1000).
         out = dc.resample_iq(self._samples, 44_100, 48_000)
         expected = int(round(len(self._samples) * 48_000 / 44_100))
         self.assertEqual(len(out), expected)

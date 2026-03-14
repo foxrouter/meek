@@ -38,6 +38,7 @@ Optional: scipy (improved resampling; auto-detected at runtime)
 """
 
 import argparse
+from fractions import Fraction
 import hashlib
 import json
 import math
@@ -67,6 +68,14 @@ _VERSION = "1.0.0"
 # Canonical analysis sample rate fed to built-in decoders.  Snapshots that
 # were captured at a different rate are resampled to this value before decoding.
 _DECODER_FS = 2_048_000
+
+# Maximum denominator used when reducing the polyphase up/down ratio via
+# Fraction.limit_denominator().  Keeping this bounded prevents resample_poly
+# from becoming prohibitively slow or memory-heavy when the input and output
+# rates are co-prime or nearly so (e.g. 44101 Hz → 48001 Hz would otherwise
+# give up=48001, down=44101).  For all common SDR capture rates the exact GCD
+# reduction stays well below this limit (e.g. 44100→48000: up=160, down=147).
+_MAX_RESAMPLE_DENOM = 1_000
 
 # ---------------------------------------------------------------------------
 # Band name -> centre frequency (Hz) table, mirrors UK_BANDS in main.cpp
@@ -338,11 +347,14 @@ def resample_iq(samples: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
     n_out = int(round(len(samples) * fs_out_i / fs_in_i))
     if n_out < 1:
         return np.empty(0, dtype=np.complex64)
-    # Derive exact rational via GCD reduction — no approximation, no time-axis
-    # drift from limit_denominator capping.
-    gcd  = math.gcd(fs_out_i, fs_in_i)
-    up   = fs_out_i // gcd
-    down = fs_in_i  // gcd
+    # Derive the polyphase ratio via Fraction.limit_denominator so that:
+    #   * common SDR rates use the exact GCD-reduced fraction (e.g.
+    #     44100→48000 → up=160, down=147, denominator 147 ≤ 1000);
+    #   * co-prime or unusual rates are capped at _MAX_RESAMPLE_DENOM to keep
+    #     resample_poly runtime and memory bounded (small ratio error accepted).
+    frac = Fraction(fs_out_i, fs_in_i).limit_denominator(_MAX_RESAMPLE_DENOM)
+    up   = frac.numerator
+    down = frac.denominator
     if _HAVE_SCIPY:
         out = _resample_poly(samples, up, down).astype(np.complex64)
         # Trim or zero-pad to n_out so both backends return the same length.
