@@ -455,11 +455,14 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   // false-stale signals when sleep_for oversleeps significantly under load.
   auto last_idle_progress = std::chrono::steady_clock::now();
 
-  while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
-         !in_buf.empty_approx()) {
+  // Only exit when stop is requested via stop_token (set by main() after
+  // cap_thread.join()), not on g_shutdown alone.  g_shutdown can be true
+  // while cap_thread is still pushing its final block; relying on the stop
+  // token ensures cap_to_proc is fully sealed before proc_loop drains.
+  while (!st.stop_requested() || !in_buf.empty_approx()) {
     SampleBlock blk;
     if (!in_buf.pop(blk)) {
-      if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
+      if (st.stop_requested())
         break;
       // steady_clock::now() is called every idle iteration; only the atomic
       // write to proc_progress is throttled to at most every 250 ms.
@@ -602,11 +605,14 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   auto last_idle_out_progress = std::chrono::steady_clock::now();
   JsonLog jlog(cfg.worker_log);
 
-  while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
-         !in_buf.empty_approx()) {
+  // Only exit when stop is requested via stop_token (set by main() after
+  // proc_thread.join()), not on g_shutdown alone.  proc_to_out may be
+  // momentarily empty while proc_thread is still draining cap_to_proc;
+  // relying on the stop token guarantees proc_to_out is fully sealed first.
+  while (!st.stop_requested() || !in_buf.empty_approx()) {
     ClassificationResult cr;
     if (!in_buf.pop(cr)) {
-      if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
+      if (st.stop_requested())
         break;
       const auto idle_now = std::chrono::steady_clock::now();
       if (idle_now - last_idle_out_progress >= std::chrono::milliseconds(250)) {
@@ -1031,7 +1037,7 @@ int main(int argc, char** argv) {
 
   // Step 4: drain output — out_thread drains proc_to_out and flushes DB.
   out_thread.request_stop();
-  // out_thread joins at scope exit (jthread destructor)
+  out_thread.join();
 
 #ifdef HAVE_HTTPLIB
   if (http_svr) {
