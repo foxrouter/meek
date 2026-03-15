@@ -7,6 +7,7 @@ StartLimitBurst=5
 
 [Service]
 Type=notify
+NotifyAccess=main    # sd_notify called from main thread only; explicit contract
 # ExecStart args: <center_freq_Hz> <sample_rate_Sps> <gain_dB>
 # Override via ExecStart= in a drop-in (processor.conf) for different bands.
 ExecStart=/usr/local/bin/rf_adapt_intel 433920000 2048000 30
