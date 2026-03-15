@@ -24,6 +24,42 @@
 #include <SoapySDR/Formats.h>
 #include <SoapySDR/Version.h>
 #endif  // HAVE_SOAPY
+#include <cstdlib>
+#ifdef HAVE_SYSTEMD
+#include <systemd/sd-daemon.h>
+#else
+// Minimal sd_notify fallback — implements the sd_notify(3) wire protocol via a
+// Unix datagram socket without linking against libsystemd.  Returns 0 silently
+// when $NOTIFY_SOCKET is unset (i.e. not running under systemd).
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#include <cerrno>
+#include <cstddef>
+#include <cstring>
+static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
+  const char* p = std::getenv("NOTIFY_SOCKET");
+  if (!p || !*p) return 0;
+  const int fd = ::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+  if (fd < 0) return -errno;
+  struct sockaddr_un sa{};
+  sa.sun_family = AF_UNIX;
+  const std::size_t plen = std::strlen(p);
+  if (plen >= sizeof(sa.sun_path)) { ::close(fd); return -EINVAL; }
+  std::memcpy(sa.sun_path, p, plen + 1);
+  // Abstract-namespace sockets start with '@'; replace with the required NUL byte.
+  if (sa.sun_path[0] == '@') sa.sun_path[0] = '\0';
+  const socklen_t addrlen = static_cast<socklen_t>(
+      offsetof(struct sockaddr_un, sun_path) +
+      (sa.sun_path[0] == '\0' ? plen : plen + 1));
+  const ssize_t r = ::sendto(fd, state, std::strlen(state), MSG_NOSIGNAL,
+                             reinterpret_cast<const struct sockaddr*>(&sa), addrlen);
+  // Save errno before close() which may overwrite it.
+  const int saved_errno = (r < 0) ? errno : 0;
+  ::close(fd);
+  return r < 0 ? -saved_errno : 1;
+}
+#endif  // HAVE_SYSTEMD
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
@@ -331,11 +367,24 @@ struct SnapTask {
 
 static void capture_loop(std::stop_token st, ISdrSource& sdr,
                          SpscRingBuffer<SampleBlock, 64>& out_buf, const Config& cfg,
-                         std::atomic<std::uint64_t>& cap_dropped) {
+                         std::atomic<std::uint64_t>& cap_dropped,
+                         std::atomic<std::uint64_t>& cap_progress) {
   std::vector<std::complex<float>> buf(cfg.block_len);
 
   while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
     const auto n = sdr.read_samples(std::span{buf});
+    // Update progress on every iteration; read_samples() is configured to
+    // block up to cfg.read_timeout_us µs (clamped to [1, 300 s] at config
+    // parse time), but SoapyRemote can hang beyond that — which is exactly
+    // what the watchdog detects. The watchdog poll loop checks progress
+    // against kStaleNs (max(3×timeout, 10 s)); a missing update for longer
+    // than that window signals a hang.
+    cap_progress.store(
+        static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count()),
+        std::memory_order_relaxed);
     if (n <= 0) {
       if (n < 0) {
         std::cerr << "[CAPTURE] fatal read error\n";
@@ -381,7 +430,8 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
                       std::mutex& snap_mu, std::condition_variable& snap_cv,
                       std::deque<SnapTask>& snap_queue,
                       std::atomic<std::uint64_t>& snap_dropped,
-                      std::atomic<std::uint64_t>& proc_dropped) {
+                      std::atomic<std::uint64_t>& proc_dropped,
+                      std::atomic<std::uint64_t>& proc_progress) {
   const BandProfile* band = find_band(cfg.center_freq);
   if (band) {
     std::cout << "[BAND] Matched: " << band->name << " (" << band->description << ")\n";
@@ -399,14 +449,42 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   std::vector<float> scratch;
   scratch.reserve(cfg.analysis_len);
 
+  // Idle-path progress throttle: steady_clock::now() is called every idle
+  // iteration, but the proc_progress atomic is written at most every 250 ms
+  // (wall-clock).  Using elapsed time rather than an iteration count avoids
+  // false-stale signals when sleep_for oversleeps significantly under load.
+  auto last_idle_progress = std::chrono::steady_clock::now();
+
   while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
          !in_buf.empty_approx()) {
     SampleBlock blk;
     if (!in_buf.pop(blk)) {
       if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
         break;
+      // steady_clock::now() is called every idle iteration; only the atomic
+      // write to proc_progress is throttled to at most every 250 ms.
+      const auto now = std::chrono::steady_clock::now();
+      if (now - last_idle_progress >= std::chrono::milliseconds(250)) {
+        last_idle_progress = now;
+        proc_progress.store(
+            static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    now.time_since_epoch())
+                    .count()),
+            std::memory_order_relaxed);
+      }
       std::this_thread::sleep_for(std::chrono::microseconds(100));
       continue;
+    }
+    {
+      const auto now = std::chrono::steady_clock::now();
+      last_idle_progress = now;
+      proc_progress.store(
+          static_cast<std::uint64_t>(
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  now.time_since_epoch())
+                  .count()),
+          std::memory_order_relaxed);
     }
 
     // Sub-window classification: slide through blk.samples in analysis_len
@@ -504,6 +582,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
                         std::atomic<std::uint64_t>& snap_dropped,
                         std::atomic<std::uint64_t>& cap_dropped,
                         std::atomic<std::uint64_t>& proc_dropped,
+                        std::atomic<std::uint64_t>& out_progress,
                         std::shared_ptr<MetricsSnapshot> metrics_snapshot) {
   const std::int64_t method_id = db.upsert_method(
       "modulation_classifier",
@@ -516,6 +595,11 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   auto last_metrics_write = std::chrono::steady_clock::now();
   auto last_heartbeat = std::chrono::steady_clock::now();
   auto last_prune = std::chrono::steady_clock::now();
+  // Idle-path progress throttle: steady_clock::now() is called every idle
+  // iteration, but out_progress is written at most every 250 ms when no items
+  // arrive.  The active path always writes (no throttle) and resets this
+  // variable so the 250 ms window restarts cleanly after a burst of items.
+  auto last_idle_out_progress = std::chrono::steady_clock::now();
   JsonLog jlog(cfg.worker_log);
 
   while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
@@ -524,8 +608,28 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
     if (!in_buf.pop(cr)) {
       if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
         break;
+      const auto idle_now = std::chrono::steady_clock::now();
+      if (idle_now - last_idle_out_progress >= std::chrono::milliseconds(250)) {
+        last_idle_out_progress = idle_now;
+        out_progress.store(
+            static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    idle_now.time_since_epoch())
+                    .count()),
+            std::memory_order_relaxed);
+      }
       std::this_thread::sleep_for(std::chrono::microseconds(200));
       continue;
+    }
+    {
+      const auto active_now = std::chrono::steady_clock::now();
+      last_idle_out_progress = active_now;
+      out_progress.store(
+          static_cast<std::uint64_t>(
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  active_now.time_since_epoch())
+                  .count()),
+          std::memory_order_relaxed);
     }
 
     ++metrics.frames_total;
@@ -695,6 +799,7 @@ int main(int argc, char** argv) {
     sdr = std::make_unique<SoapySdrSource>(cfg.center_freq, cfg.sample_rate, cfg.gain,
                                            cfg.read_timeout_us);
     std::cout << "[SDR] " << sdr->description() << " opened\n";
+    sd_notify(0, "READY=1\nSTATUS=SDR device open, capturing");
   } catch (const std::exception& e) {
     std::cerr << "Failed to open SDR device: " << e.what() << "\n";
     return 1;
@@ -718,6 +823,16 @@ int main(int argc, char** argv) {
   std::atomic<std::uint64_t> snap_dropped{0};
   std::atomic<std::uint64_t> cap_dropped{0};
   std::atomic<std::uint64_t> proc_dropped{0};
+
+  // Initialise to "now" so the main loop doesn't see a stale value before the
+  // threads have had a chance to run their first iteration.
+  const auto startup_time_ns = static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+  std::atomic<std::uint64_t> cap_progress{startup_time_ns};
+  std::atomic<std::uint64_t> proc_progress{startup_time_ns};
+  std::atomic<std::uint64_t> out_progress{startup_time_ns};
 
   std::jthread snap_thread([&](std::stop_token st) {
     while (!st.stop_requested()) {
@@ -754,17 +869,17 @@ int main(int argc, char** argv) {
 #endif
 
   std::jthread cap_thread([&](std::stop_token st) {
-    capture_loop(st, *sdr, cap_to_proc, cfg, cap_dropped);
+    capture_loop(st, *sdr, cap_to_proc, cfg, cap_dropped, cap_progress);
   });
 
   std::jthread proc_thread([&](std::stop_token st) {
     proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_mu, snap_cv, snap_queue, snap_dropped,
-              proc_dropped);
+              proc_dropped, proc_progress);
   });
 
   std::jthread out_thread([&](std::stop_token st) {
     output_loop(st, proc_to_out, *db, cfg, snap_errors, snap_dropped, cap_dropped, proc_dropped,
-                metrics_snapshot);
+                out_progress, metrics_snapshot);
   });
 
 #ifdef HAVE_HTTPLIB
@@ -801,13 +916,104 @@ int main(int argc, char** argv) {
   }
 #endif
 
+  // Stale threshold: max(3 × read_timeout_us, 10 s) in nanoseconds.
+  // 1 µs = 1000 ns, so multiply by kUsToNs then by kStaleMultiplier (3×).
+  // cfg.read_timeout_us is already clamped to [1, kMaxReadTimeoutUs] (300 s)
+  // by parse_config() in config.hpp, so the cast to uint64 is safe and no
+  // duplicate upper-cap constant is needed here.
+  constexpr std::uint64_t kUsToNs = 1'000ULL;         // µs → ns
+  constexpr std::uint64_t kStaleMultiplier = 3;         // stale = 3 × read_timeout
+  constexpr std::uint64_t kStaleMinNs = 10'000'000'000ULL;  // 10 s floor
+  const std::uint64_t kStaleNs = std::max(
+      static_cast<std::uint64_t>(cfg.read_timeout_us) * kUsToNs * kStaleMultiplier,
+      kStaleMinNs);
+
+  // Derive the watchdog ping cadence from $WATCHDOG_USEC (set by systemd when
+  // WatchdogSec is active). sd_notify(3) recommends pinging at most every
+  // WATCHDOG_USEC/2 µs; using that value exactly means the interval
+  // automatically tracks any changes to WatchdogSec in the unit file.
+  // When WATCHDOG_USEC is zero/unset the watchdog is not active: pings are
+  // suppressed and the loop falls back to a 2 s status-print cadence.
+  std::uint64_t watchdog_usec = 0;
+#ifdef HAVE_SYSTEMD
+  sd_watchdog_enabled(0, &watchdog_usec);
+#else
+  {
+    const char* wd_env = std::getenv("WATCHDOG_USEC");
+    if (wd_env != nullptr && *wd_env != '\0') {
+      char* end = nullptr;
+      // Parse as signed long long so a leading '-' yields a negative value
+      // that is cleanly rejected by the val_ll > 0 guard below.
+      // (strtoull would silently convert "-1" to ULLONG_MAX which then gets
+      //  clamped to 1 h and incorrectly arms the watchdog.)
+      const long long val_ll = std::strtoll(wd_env, &end, 10);
+      if (end != wd_env && *end == '\0' && val_ll > 0) {
+        // Only arm the watchdog interval if it is intended for this process.
+        const char* wd_pid = std::getenv("WATCHDOG_PID");
+        bool for_us = true;
+        if (wd_pid != nullptr && *wd_pid != '\0') {
+          char* pid_end = nullptr;
+          const long parsed_pid = std::strtol(wd_pid, &pid_end, 10);
+          // Reject negative, zero, or out-of-range values before comparing so
+          // that a malformed WATCHDOG_PID cannot wrap-cast to a valid pid_t.
+          for_us = (pid_end != wd_pid && *pid_end == '\0') &&
+                   (parsed_pid > 0) &&
+                   (parsed_pid == static_cast<long>(getpid()));
+        }
+        if (for_us) watchdog_usec = static_cast<std::uint64_t>(val_ll);
+      }
+    }
+  }
+#endif
+  // Validate watchdog_usec before use: values < 2 cannot be halved to a
+  // useful interval (watchdog_usec/2 == 0 → busy-spin), so treat them as
+  // disabled.  Values above 1 h are capped to guard against signed-overflow
+  // when constructing std::chrono::microseconds (int64_t backing type).
+  constexpr std::uint64_t kMaxWatchdogUs = 3'600'000'000ULL;  // 1 h
+  if (watchdog_usec > 0 && watchdog_usec < 2) {
+    watchdog_usec = 0;
+  } else if (watchdog_usec > kMaxWatchdogUs) {
+    watchdog_usec = kMaxWatchdogUs;
+  }
+  const bool watchdog_active = (watchdog_usec > 0);
+  const std::chrono::nanoseconds poll_interval =
+      watchdog_active ? std::chrono::microseconds(watchdog_usec / 2)
+                      : std::chrono::seconds(2);
+
   while (!g_shutdown.load(std::memory_order_relaxed)) {
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    std::this_thread::sleep_for(poll_interval);
+    // Only pet the watchdog when all three pipeline threads (capture, process,
+    // output) have made recent progress (within kStaleNs) so a genuinely hung
+    // thread stops heartbeats.
+    if (watchdog_active) {
+      const auto now_ns = static_cast<std::uint64_t>(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now().time_since_epoch())
+              .count());
+      const auto cap_last  = cap_progress.load(std::memory_order_relaxed);
+      const auto proc_last = proc_progress.load(std::memory_order_relaxed);
+      const auto out_last  = out_progress.load(std::memory_order_relaxed);
+      // Use addition rather than subtraction to avoid unsigned underflow when a
+      // thread updates its timestamp between the now_ns capture and the load.
+      // All three pipeline threads (capture, process, output) must be healthy
+      // so a stalled output thread (e.g. blocked SQLite write) stops heartbeats.
+      const bool threads_healthy =
+          (cap_last + kStaleNs > now_ns) &&
+          (proc_last + kStaleNs > now_ns) &&
+          (out_last  + kStaleNs > now_ns);
+      if (threads_healthy) {
+        sd_notify(0, "WATCHDOG=1");
+      }
+    }
     std::cout << "[STATUS] cap_queue=" << cap_to_proc.size_approx()
               << " out_queue=" << proc_to_out.size_approx() << "\n";
   }
 
   std::cout << "Shutdown requested — stopping threads\n";
+  // Notify systemd that shutdown is intentional so it doesn't kill the
+  // process via WatchdogSec during the (potentially multi-second) thread
+  // teardown and drain.
+  sd_notify(0, "STOPPING=1");
   cap_thread.request_stop();
   proc_thread.request_stop();
   out_thread.request_stop();

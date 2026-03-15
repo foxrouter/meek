@@ -143,6 +143,13 @@ inline std::string env_str(const char* name, const char* def) {
   cfg.read_timeout_us =
       detail::env_ll("RF_READ_TIMEOUT_US",
                      detail::env_ll("READ_TIMEOUT_US", 500'000));
+  // Clamp to [1, kMaxReadTimeoutUs] so negative/zero/enormous values cannot
+  // wrap or overflow when used as a SoapySDR timeout or to derive the watchdog
+  // stale window.  1 µs is effectively instant; 300 s matches the upper cap
+  // used by the watchdog stale-window calculation in src/main.cpp.
+  constexpr std::int64_t kMaxReadTimeoutUs = 300'000'000LL;  // 300 s
+  if (cfg.read_timeout_us < 1) cfg.read_timeout_us = 1;
+  if (cfg.read_timeout_us > kMaxReadTimeoutUs) cfg.read_timeout_us = kMaxReadTimeoutUs;
 
   // Processing
   cfg.min_power = detail::env_d("RF_MIN_POWER", 5e-6);

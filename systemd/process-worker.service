@@ -2,14 +2,30 @@
 Description=RF Process Worker (rf_adapt_intel modulation classifier)
 After=network.target
 Documentation=https://github.com/foxrouter/meek
+StartLimitIntervalSec=120s
+StartLimitBurst=5
 
 [Service]
-Type=simple
+Type=notify
 # ExecStart args: <center_freq_Hz> <sample_rate_Sps> <gain_dB>
 # Override via ExecStart= in a drop-in (processor.conf) for different bands.
 ExecStart=/usr/local/bin/rf_adapt_intel 433920000 2048000 30
+WatchdogSec=30s
+# Heartbeat cadence is WatchdogSec/2 (derived from $WATCHDOG_USEC; 15 s with
+# WatchdogSec=30 s), per the sd_notify(3) recommendation.  WATCHDOG=1 is sent
+# only while all three pipeline threads (capture, proc, output) have updated
+# their progress atomics within the stale window (max(3 × RF_READ_TIMEOUT_US,
+# 10 s); RF_READ_TIMEOUT_US is clamped to 300 s at config-parse time
+# (kMaxReadTimeoutUs in config.hpp), so the stale window is at most 900 s).
+# After a hang, heartbeats continue
+# until the stale window elapses; systemd then kills after WatchdogSec.
+# Worst-case hang-to-kill ≤ stale_window + WatchdogSec: with
+# RF_READ_TIMEOUT_US=500 ms (stale window=10 s) this gives ≤10 s + 30 s = ~40 s;
+# at the 300 s cap ≤930 s.
+# Restart=always is intentional: a fatal SDR read error triggers g_shutdown and
+# main() exits cleanly (status 0), which Restart=on-failure would not restart.
 Restart=always
-RestartSec=5s
+RestartSec=10s
 User=rf_worker
 Group=rf_worker
 # Grant plugdev membership so the RTL-SDR udev rule (GROUP="plugdev") is honoured.
