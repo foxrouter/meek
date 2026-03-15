@@ -923,8 +923,11 @@ int main(int argc, char** argv) {
         if (wd_pid != nullptr && *wd_pid != '\0') {
           char* pid_end = nullptr;
           const long parsed_pid = std::strtol(wd_pid, &pid_end, 10);
+          // Reject negative, zero, or out-of-range values before comparing so
+          // that a malformed WATCHDOG_PID cannot wrap-cast to a valid pid_t.
           for_us = (pid_end != wd_pid && *pid_end == '\0') &&
-                   (static_cast<pid_t>(parsed_pid) == getpid());
+                   (parsed_pid > 0) &&
+                   (parsed_pid == static_cast<long>(getpid()));
         }
         if (for_us) watchdog_usec = val;
       }
