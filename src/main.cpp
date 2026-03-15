@@ -375,8 +375,7 @@ struct SnapTask {
 static void capture_loop(std::stop_token st, ISdrSource& sdr,
                          SpscRingBuffer<SampleBlock, 64>& out_buf, const Config& cfg,
                          std::atomic<std::uint64_t>& cap_dropped,
-                         std::atomic<std::uint64_t>& cap_progress,
-                         std::atomic<bool>& cap_exiting) {
+                         std::atomic<std::uint64_t>& cap_progress, std::atomic<bool>& cap_exiting) {
   std::vector<std::complex<float>> buf(cfg.block_len);
 
   while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
@@ -442,8 +441,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
                       std::deque<SnapTask>& snap_queue, std::atomic<std::uint64_t>& snap_dropped,
                       std::atomic<std::uint64_t>& proc_dropped,
                       std::atomic<std::uint64_t>& proc_progress,
-                      const std::atomic<bool>& cap_exiting,
-                      std::atomic<bool>& proc_exiting) {
+                      const std::atomic<bool>& cap_exiting, std::atomic<bool>& proc_exiting) {
   const BandProfile* band = find_band(cfg.center_freq);
   if (band) {
     std::cout << "[BAND] Matched: " << band->name << " (" << band->description << ")\n";
@@ -487,8 +485,10 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   while (true) {
     SampleBlock blk;
     if (!in_buf.pop(blk)) {
-      if (st.stop_requested()) break;
-      if (cap_done_seen) break;
+      if (st.stop_requested())
+        break;
+      if (cap_done_seen)
+        break;
       if (cap_exiting.load(std::memory_order_acquire)) {
         // Acquire-load establishes happens-before with capture_loop's last
         // push.  Set the flag and retry pop() immediately (no sleep) so that
@@ -658,8 +658,10 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   while (true) {
     ClassificationResult cr;
     if (!in_buf.pop(cr)) {
-      if (st.stop_requested()) break;
-      if (proc_done_seen) break;
+      if (st.stop_requested())
+        break;
+      if (proc_done_seen)
+        break;
       if (proc_exiting.load(std::memory_order_acquire)) {
         // Acquire-load establishes happens-before with proc_loop's last push.
         // Set the flag and retry pop() immediately (no sleep) so that any
