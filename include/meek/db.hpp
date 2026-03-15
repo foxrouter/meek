@@ -178,6 +178,42 @@ inline bool Database::apply_schema() {
     return false;
   }
 
+  // Indexes — applied after schema creation; idempotent via IF NOT EXISTS.
+  // These cover every join pattern used by decode_candidates.py and
+  // docs/db_queries.sql. Wrapped in an explicit transaction so all four
+  // indexes are built atomically and SQLite avoids a separate autocommit
+  // fsync per statement (faster on existing DBs with many rows).
+  static constexpr const char* kIndexes = R"sql(
+    BEGIN;
+    CREATE INDEX IF NOT EXISTS idx_examples_signal_id
+      ON examples(signal_id);
+    CREATE INDEX IF NOT EXISTS idx_examples_method_id
+      ON examples(method_id);
+    CREATE INDEX IF NOT EXISTS idx_examples_confidence
+      ON examples(confidence DESC)
+      WHERE confidence IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_signals_timestamp
+      ON signals(timestamp DESC);
+    COMMIT;
+  )sql";
+  {
+    char* idx_err = nullptr;
+    if (sqlite3_exec(db_, kIndexes, nullptr, nullptr, &idx_err) != SQLITE_OK) {
+      std::cerr << "[DB] apply indexes: "
+                << (idx_err ? idx_err : sqlite3_errmsg(db_)) << "\n";
+      sqlite3_free(idx_err);
+      // Roll back any partial transaction so the connection is not left with
+      // schema locks held before migrations and prepare_statements() run.
+      // Guard with sqlite3_get_autocommit: ROLLBACK outside a transaction
+      // returns an error ("cannot rollback - no transaction is active"), so
+      // only issue it when we are actually inside one (autocommit == 0).
+      if (sqlite3_get_autocommit(db_) == 0) {
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+      }
+      // Non-fatal: the daemon continues; missing indexes only degrade performance.
+    }
+  }
+
   // Migration: add notes column to signals if it does not exist yet.
   // ALTER TABLE ... ADD COLUMN returns SQLITE_ERROR when the column already
   // exists; that is expected and harmless.  Log any other error for diagnostics

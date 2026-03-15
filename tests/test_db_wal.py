@@ -108,6 +108,96 @@ class TestWalMode(unittest.TestCase):
         self.assertEqual(mode, "wal")
         conn.close()
 
+    def _apply_schema(self, conn: sqlite3.Connection) -> None:
+        """Apply the baseline CREATE TABLE and CREATE INDEX DDL to *conn*.
+
+        Replicates only the schema-creation portion of the C++ apply_schema()
+        (kSchema + kIndexes blocks).  The ALTER TABLE migration statements are
+        intentionally omitted: they are irrelevant for tests that start from a
+        fresh database, and omitting them keeps this helper from drifting as
+        new migrations are added."""
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS signals (
+              id        INTEGER PRIMARY KEY AUTOINCREMENT,
+              timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+              source    TEXT,
+              notes     TEXT
+            );
+            CREATE TABLE IF NOT EXISTS methods (
+              id     INTEGER PRIMARY KEY AUTOINCREMENT,
+              name   TEXT UNIQUE NOT NULL,
+              params TEXT
+            );
+            CREATE TABLE IF NOT EXISTS examples (
+              id         INTEGER PRIMARY KEY AUTOINCREMENT,
+              signal_id  INTEGER NOT NULL REFERENCES signals(id),
+              method_id  INTEGER NOT NULL REFERENCES methods(id),
+              confidence REAL,
+              notes      TEXT,
+              created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_examples_signal_id
+              ON examples(signal_id);
+            CREATE INDEX IF NOT EXISTS idx_examples_method_id
+              ON examples(method_id);
+            CREATE INDEX IF NOT EXISTS idx_examples_confidence
+              ON examples(confidence DESC)
+              WHERE confidence IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_signals_timestamp
+              ON signals(timestamp DESC);
+        """)
+
+    def test_indexes_present(self):
+        """Verify that the four performance indexes are present after schema
+        creation, matching the CREATE INDEX IF NOT EXISTS statements in db.hpp."""
+        conn = self._open_wal()
+        self._apply_schema(conn)
+        idx_names = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index';"
+            ).fetchall()
+        }
+        conn.close()
+        expected = {
+            "idx_examples_signal_id",
+            "idx_examples_method_id",
+            "idx_examples_confidence",
+            "idx_signals_timestamp",
+        }
+        self.assertTrue(
+            expected.issubset(idx_names),
+            f"Missing indexes: {expected - idx_names}",
+        )
+
+    def test_examples_signal_id_uses_index(self):
+        """EXPLAIN QUERY PLAN must show SEARCH using idx_examples_signal_id
+        for signal_id lookups — confirms the correct index is chosen by
+        SQLite's query planner and that a full table scan is avoided."""
+        conn = self._open_wal()
+        self._apply_schema(conn)
+        plan = conn.execute(
+            "EXPLAIN QUERY PLAN "
+            "SELECT confidence FROM examples WHERE signal_id = 1;"
+        ).fetchall()
+        conn.close()
+        plan_text = " ".join(str(row) for row in plan)
+        self.assertIn(
+            "SEARCH",
+            plan_text,
+            f"Expected index SEARCH, got: {plan_text}",
+        )
+        self.assertIn(
+            "idx_examples_signal_id",
+            plan_text,
+            f"Expected idx_examples_signal_id in plan, got: {plan_text}",
+        )
+        self.assertNotIn(
+            "SCAN examples",
+            plan_text,
+            f"Unexpected full table scan in plan: {plan_text}",
+        )
+
     def test_concurrent_write_no_busy_errors(self):
         """Two connections writing concurrently under WAL + busy_timeout must
         produce zero SQLITE_BUSY errors returned to callers.

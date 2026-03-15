@@ -46,6 +46,7 @@ jobs:
           # to avoid blocking CI on unrelated pre-existing violations.
           pycodestyle --max-line-length=100 \
             tests/test_iq_metrics.py \
+            tests/test_db_wal.py \
             benchmarks/bench_iq_metrics.py
 
       - name: test_autotune
@@ -56,6 +57,9 @@ jobs:
 
       - name: test_guardrails
         run: python3 tests/test_guardrails.py -v
+
+      - name: test_db_wal
+        run: python3 tests/test_db_wal.py -v
 
       - name: test_demod_ber
         run: python3 tests/test_demod_ber.py -v
