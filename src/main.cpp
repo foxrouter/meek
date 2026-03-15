@@ -582,6 +582,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
                         std::atomic<std::uint64_t>& snap_dropped,
                         std::atomic<std::uint64_t>& cap_dropped,
                         std::atomic<std::uint64_t>& proc_dropped,
+                        std::atomic<std::uint64_t>& out_progress,
                         std::shared_ptr<MetricsSnapshot> metrics_snapshot) {
   const std::int64_t method_id = db.upsert_method(
       "modulation_classifier",
@@ -594,6 +595,11 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   auto last_metrics_write = std::chrono::steady_clock::now();
   auto last_heartbeat = std::chrono::steady_clock::now();
   auto last_prune = std::chrono::steady_clock::now();
+  // Idle-path progress throttle: steady_clock::now() is called every idle
+  // iteration, but out_progress is written at most every 250 ms when no items
+  // arrive.  The active path always writes (no throttle) and resets this
+  // variable so the 250 ms window restarts cleanly after a burst of items.
+  auto last_idle_out_progress = std::chrono::steady_clock::now();
   JsonLog jlog(cfg.worker_log);
 
   while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
@@ -602,8 +608,28 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
     if (!in_buf.pop(cr)) {
       if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
         break;
+      const auto idle_now = std::chrono::steady_clock::now();
+      if (idle_now - last_idle_out_progress >= std::chrono::milliseconds(250)) {
+        last_idle_out_progress = idle_now;
+        out_progress.store(
+            static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    idle_now.time_since_epoch())
+                    .count()),
+            std::memory_order_relaxed);
+      }
       std::this_thread::sleep_for(std::chrono::microseconds(200));
       continue;
+    }
+    {
+      const auto active_now = std::chrono::steady_clock::now();
+      last_idle_out_progress = active_now;
+      out_progress.store(
+          static_cast<std::uint64_t>(
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  active_now.time_since_epoch())
+                  .count()),
+          std::memory_order_relaxed);
     }
 
     ++metrics.frames_total;
@@ -806,6 +832,7 @@ int main(int argc, char** argv) {
           .count());
   std::atomic<std::uint64_t> cap_progress{startup_time_ns};
   std::atomic<std::uint64_t> proc_progress{startup_time_ns};
+  std::atomic<std::uint64_t> out_progress{startup_time_ns};
 
   std::jthread snap_thread([&](std::stop_token st) {
     while (!st.stop_requested()) {
@@ -852,7 +879,7 @@ int main(int argc, char** argv) {
 
   std::jthread out_thread([&](std::stop_token st) {
     output_loop(st, proc_to_out, *db, cfg, snap_errors, snap_dropped, cap_dropped, proc_dropped,
-                metrics_snapshot);
+                out_progress, metrics_snapshot);
   });
 
 #ifdef HAVE_HTTPLIB
@@ -915,8 +942,12 @@ int main(int argc, char** argv) {
     const char* wd_env = std::getenv("WATCHDOG_USEC");
     if (wd_env != nullptr && *wd_env != '\0') {
       char* end = nullptr;
-      const std::uint64_t val = std::strtoull(wd_env, &end, 10);
-      if (end != wd_env && *end == '\0') {
+      // Parse as signed long long so a leading '-' yields a negative value
+      // that is cleanly rejected by the val_ll > 0 guard below.
+      // (strtoull would silently convert "-1" to ULLONG_MAX which then gets
+      //  clamped to 1 h and incorrectly arms the watchdog.)
+      const long long val_ll = std::strtoll(wd_env, &end, 10);
+      if (end != wd_env && *end == '\0' && val_ll > 0) {
         // Only arm the watchdog interval if it is intended for this process.
         const char* wd_pid = std::getenv("WATCHDOG_PID");
         bool for_us = true;
@@ -929,7 +960,7 @@ int main(int argc, char** argv) {
                    (parsed_pid > 0) &&
                    (parsed_pid == static_cast<long>(getpid()));
         }
-        if (for_us) watchdog_usec = val;
+        if (for_us) watchdog_usec = static_cast<std::uint64_t>(val_ll);
       }
     }
   }
@@ -960,10 +991,15 @@ int main(int argc, char** argv) {
               .count());
       const auto cap_last  = cap_progress.load(std::memory_order_relaxed);
       const auto proc_last = proc_progress.load(std::memory_order_relaxed);
+      const auto out_last  = out_progress.load(std::memory_order_relaxed);
       // Use addition rather than subtraction to avoid unsigned underflow when a
       // thread updates its timestamp between the now_ns capture and the load.
+      // All three pipeline threads (capture, process, output) must be healthy
+      // so a stalled output thread (e.g. blocked SQLite write) stops heartbeats.
       const bool threads_healthy =
-          (cap_last + kStaleNs > now_ns) && (proc_last + kStaleNs > now_ns);
+          (cap_last + kStaleNs > now_ns) &&
+          (proc_last + kStaleNs > now_ns) &&
+          (out_last  + kStaleNs > now_ns);
       if (threads_healthy) {
         sd_notify(0, "WATCHDOG=1");
       }
