@@ -55,6 +55,7 @@ struct Config {
   std::string metrics_file{"/var/lib/rf-adapt-intel/metrics.prom"};
   std::string heartbeat_file{"/var/lib/rf-adapt-intel/heartbeat"};
   std::string worker_log{"/var/lib/rf-adapt-intel/worker.log"};
+  int worker_log_max_backups{5};
 
   // Retention
   int snapshot_retention_days{0};
@@ -197,6 +198,8 @@ inline std::string env_str(const char* name, const char* def) {
       detail::env_str("RF_HEARTBEAT_FILE", "/var/lib/rf-adapt-intel/heartbeat");
   cfg.worker_log =
       detail::env_str("RF_WORKER_LOG", "/var/lib/rf-adapt-intel/worker.log");
+  cfg.worker_log_max_backups =
+      static_cast<int>(detail::env_ll("RF_WORKER_LOG_MAX_BACKUPS", 5));
 
   // Retention
   cfg.snapshot_retention_days =
