@@ -202,6 +202,11 @@ inline bool Database::apply_schema() {
       std::cerr << "[DB] apply indexes: "
                 << (idx_err ? idx_err : sqlite3_errmsg(db_)) << "\n";
       sqlite3_free(idx_err);
+      // Roll back any partial transaction so the connection is not left with
+      // schema locks held before migrations and prepare_statements() run.
+      // ROLLBACK is a no-op when no transaction is active, so this is safe
+      // even if the failure occurred before BEGIN was processed.
+      sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
       // Non-fatal: the daemon continues; missing indexes only degrade performance.
     }
   }
