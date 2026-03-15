@@ -649,17 +649,16 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   // proc_loop has signalled completion (proc_exiting) and the buffer is
   // confirmed empty via the two-step pattern above.  pop() uses an acquire
   // load of head_, which is the accurate emptiness check.
-  // Note: g_shutdown alone is not a safe exit trigger here because proc_loop
-  // is the producer of this buffer and may still push items after
-  // capture_loop sets g_shutdown.  Only proc_exiting (set by proc_loop itself
-  // as a release store after its last push) guarantees no further items.
+  // proc_exiting alone (without g_shutdown) is sufficient: it is a dedicated
+  // "producer finished" flag set by proc_loop itself as a release store after
+  // its last push, so it is safe to break on regardless of how shutdown was
+  // triggered (fatal read error, SIGTERM, or request_stop()).
   while (true) {
     ClassificationResult cr;
     if (!in_buf.pop(cr)) {
       if (st.stop_requested()) break;
       if (proc_done_seen) break;
-      if (g_shutdown.load(std::memory_order_relaxed) &&
-          proc_exiting.load(std::memory_order_acquire)) {
+      if (proc_exiting.load(std::memory_order_acquire)) {
         // Acquire-load establishes happens-before with proc_loop's last push.
         // Set the flag and retry pop() immediately (no sleep) so that any
         // ClassificationResult pushed before proc_exiting was set is consumed.
