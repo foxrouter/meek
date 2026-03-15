@@ -462,8 +462,9 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   // only when stop is requested (or a fatal capture error set g_shutdown) AND
   // pop() returns false (buffer confirmed empty via acquire semantics).
   // Checking g_shutdown here prevents the proc thread from spinning on an
-  // empty buffer for up to the watchdog poll interval (≤15 s) before
-  // request_stop() arrives from main after a fatal SDR read error.
+  // empty buffer for a full watchdog poll interval (WATCHDOG_USEC/2, or 2 s
+  // when the watchdog is inactive) before request_stop() arrives from main
+  // after a fatal SDR read error.
   while (true) {
     SampleBlock blk;
     if (!in_buf.pop(blk)) {
@@ -617,8 +618,9 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   // only when stop is requested (or a fatal capture error set g_shutdown) AND
   // pop() returns false (buffer confirmed empty via acquire semantics).
   // Checking g_shutdown here prevents the output thread from spinning on an
-  // empty buffer for up to the watchdog poll interval (≤15 s) before
-  // request_stop() arrives from main after a fatal SDR read error.
+  // empty buffer for a full watchdog poll interval (WATCHDOG_USEC/2, or 2 s
+  // when the watchdog is inactive) before request_stop() arrives from main
+  // after a fatal SDR read error.
   while (true) {
     ClassificationResult cr;
     if (!in_buf.pop(cr)) {
