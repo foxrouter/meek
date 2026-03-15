@@ -50,6 +50,7 @@ struct ProcMetrics {
   std::uint64_t snap_dropped{0};
   std::uint64_t frames_cap_dropped{0};
   std::uint64_t frames_proc_dropped{0};
+  std::uint64_t sdr_overflow{0};
   // Demodulation outcome counters (zero until demod_chains.hpp is integrated)
   std::uint64_t demod_ok{0};
   std::uint64_t demod_crc_ok{0};
@@ -103,6 +104,10 @@ struct ProcMetrics {
       << "Classification results dropped by proc_loop under output backpressure\n"
       << "# TYPE rf_frames_proc_dropped_total counter\n"
       << "rf_frames_proc_dropped_total " << m.frames_proc_dropped << "\n"
+      << "# HELP rf_sdr_overflow_total "
+      << "SDR hardware overflow events (SOAPY_SDR_OVERFLOW); stream alive but samples lost\n"
+      << "# TYPE rf_sdr_overflow_total counter\n"
+      << "rf_sdr_overflow_total " << m.sdr_overflow << "\n"
       << "# HELP rf_demod_total Demodulation attempts by result; "
       << "labels are mutually exclusive per attempt: "
       << "lock_ok=no-CRC success, crc_ok=CRC passed, "
