@@ -108,6 +108,82 @@ class TestWalMode(unittest.TestCase):
         self.assertEqual(mode, "wal")
         conn.close()
 
+    def _apply_schema(self, conn: sqlite3.Connection) -> None:
+        """Apply the db.hpp apply_schema() DDL (tables + indexes) to *conn*.
+
+        Mirrors the C++ apply_schema() so that Python-only tests can verify
+        schema behaviour without running the compiled binary."""
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS signals (
+              id        INTEGER PRIMARY KEY AUTOINCREMENT,
+              timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+              source    TEXT,
+              notes     TEXT
+            );
+            CREATE TABLE IF NOT EXISTS methods (
+              id     INTEGER PRIMARY KEY AUTOINCREMENT,
+              name   TEXT UNIQUE NOT NULL,
+              params TEXT
+            );
+            CREATE TABLE IF NOT EXISTS examples (
+              id         INTEGER PRIMARY KEY AUTOINCREMENT,
+              signal_id  INTEGER NOT NULL REFERENCES signals(id),
+              method_id  INTEGER NOT NULL REFERENCES methods(id),
+              confidence REAL,
+              notes      TEXT,
+              created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_examples_signal_id
+              ON examples(signal_id);
+            CREATE INDEX IF NOT EXISTS idx_examples_method_id
+              ON examples(method_id);
+            CREATE INDEX IF NOT EXISTS idx_examples_confidence
+              ON examples(confidence DESC)
+              WHERE confidence IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_signals_timestamp
+              ON signals(timestamp DESC);
+        """)
+
+    def test_indexes_present(self):
+        """Verify that the four performance indexes are present after schema
+        creation, matching the CREATE INDEX IF NOT EXISTS statements in db.hpp."""
+        conn = self._open_wal()
+        self._apply_schema(conn)
+        idx_names = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index';"
+            ).fetchall()
+        }
+        conn.close()
+        expected = {
+            "idx_examples_signal_id",
+            "idx_examples_method_id",
+            "idx_examples_confidence",
+            "idx_signals_timestamp",
+        }
+        self.assertTrue(
+            expected.issubset(idx_names),
+            f"Missing indexes: {expected - idx_names}",
+        )
+
+    def test_examples_signal_id_uses_index(self):
+        """EXPLAIN QUERY PLAN must show SEARCH (index) not SCAN for
+        signal_id lookups — confirms the index is used by SQLite's planner."""
+        conn = self._open_wal()
+        self._apply_schema(conn)
+        plan = conn.execute(
+            "EXPLAIN QUERY PLAN "
+            "SELECT confidence FROM examples WHERE signal_id = 1;"
+        ).fetchall()
+        conn.close()
+        plan_text = " ".join(str(row) for row in plan)
+        self.assertIn(
+            "SEARCH",
+            plan_text,
+            f"Expected index SEARCH, got: {plan_text}",
+        )
+
     def test_concurrent_write_no_busy_errors(self):
         """Two connections writing concurrently under WAL + busy_timeout must
         produce zero SQLITE_BUSY errors returned to callers.

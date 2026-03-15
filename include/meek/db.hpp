@@ -178,6 +178,30 @@ inline bool Database::apply_schema() {
     return false;
   }
 
+  // Indexes — applied after schema creation; idempotent via IF NOT EXISTS.
+  // These cover every join pattern used by decode_candidates.py and
+  // docs/db_queries.sql. Applied as a single exec to reduce round-trips.
+  static constexpr const char* kIndexes = R"sql(
+    CREATE INDEX IF NOT EXISTS idx_examples_signal_id
+      ON examples(signal_id);
+    CREATE INDEX IF NOT EXISTS idx_examples_method_id
+      ON examples(method_id);
+    CREATE INDEX IF NOT EXISTS idx_examples_confidence
+      ON examples(confidence DESC)
+      WHERE confidence IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_signals_timestamp
+      ON signals(timestamp DESC);
+  )sql";
+  {
+    char* idx_err = nullptr;
+    if (sqlite3_exec(db_, kIndexes, nullptr, nullptr, &idx_err) != SQLITE_OK) {
+      std::cerr << "[DB] apply indexes: "
+                << (idx_err ? idx_err : sqlite3_errmsg(db_)) << "\n";
+      sqlite3_free(idx_err);
+      // Non-fatal: the daemon continues; missing indexes only degrade performance.
+    }
+  }
+
   // Migration: add notes column to signals if it does not exist yet.
   // ALTER TABLE ... ADD COLUMN returns SQLITE_ERROR when the column already
   // exists; that is expected and harmless.  Log any other error for diagnostics
