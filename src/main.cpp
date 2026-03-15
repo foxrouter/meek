@@ -982,8 +982,9 @@ int main(int argc, char** argv) {
 
   while (!g_shutdown.load(std::memory_order_relaxed)) {
     std::this_thread::sleep_for(poll_interval);
-    // Only pet the watchdog when both pipeline threads have made recent
-    // progress (within kStaleNs) so a genuinely hung thread stops heartbeats.
+    // Only pet the watchdog when all three pipeline threads (capture, process,
+    // output) have made recent progress (within kStaleNs) so a genuinely hung
+    // thread stops heartbeats.
     if (watchdog_active) {
       const auto now_ns = static_cast<std::uint64_t>(
           std::chrono::duration_cast<std::chrono::nanoseconds>(
