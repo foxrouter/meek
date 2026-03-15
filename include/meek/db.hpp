@@ -180,8 +180,11 @@ inline bool Database::apply_schema() {
 
   // Indexes — applied after schema creation; idempotent via IF NOT EXISTS.
   // These cover every join pattern used by decode_candidates.py and
-  // docs/db_queries.sql. Applied as a single exec to reduce round-trips.
+  // docs/db_queries.sql. Wrapped in an explicit transaction so all four
+  // indexes are built atomically and SQLite avoids a separate autocommit
+  // fsync per statement (faster on existing DBs with many rows).
   static constexpr const char* kIndexes = R"sql(
+    BEGIN;
     CREATE INDEX IF NOT EXISTS idx_examples_signal_id
       ON examples(signal_id);
     CREATE INDEX IF NOT EXISTS idx_examples_method_id
@@ -191,6 +194,7 @@ inline bool Database::apply_schema() {
       WHERE confidence IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_signals_timestamp
       ON signals(timestamp DESC);
+    COMMIT;
   )sql";
   {
     char* idx_err = nullptr;

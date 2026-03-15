@@ -109,10 +109,13 @@ class TestWalMode(unittest.TestCase):
         conn.close()
 
     def _apply_schema(self, conn: sqlite3.Connection) -> None:
-        """Apply the db.hpp apply_schema() DDL (tables + indexes) to *conn*.
+        """Apply the baseline CREATE TABLE and CREATE INDEX DDL to *conn*.
 
-        Mirrors the C++ apply_schema() so that Python-only tests can verify
-        schema behaviour without running the compiled binary."""
+        Replicates only the schema-creation portion of the C++ apply_schema()
+        (kSchema + kIndexes blocks).  The ALTER TABLE migration statements are
+        intentionally omitted: they are irrelevant for tests that start from a
+        fresh database, and omitting them keeps this helper from drifting as
+        new migrations are added."""
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS signals (
               id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,8 +171,9 @@ class TestWalMode(unittest.TestCase):
         )
 
     def test_examples_signal_id_uses_index(self):
-        """EXPLAIN QUERY PLAN must show SEARCH (index) not SCAN for
-        signal_id lookups — confirms the index is used by SQLite's planner."""
+        """EXPLAIN QUERY PLAN must show SEARCH using idx_examples_signal_id
+        for signal_id lookups — confirms the correct index is chosen by
+        SQLite's query planner and that a full table scan is avoided."""
         conn = self._open_wal()
         self._apply_schema(conn)
         plan = conn.execute(
@@ -182,6 +186,16 @@ class TestWalMode(unittest.TestCase):
             "SEARCH",
             plan_text,
             f"Expected index SEARCH, got: {plan_text}",
+        )
+        self.assertIn(
+            "idx_examples_signal_id",
+            plan_text,
+            f"Expected idx_examples_signal_id in plan, got: {plan_text}",
+        )
+        self.assertNotIn(
+            "SCAN examples",
+            plan_text,
+            f"Unexpected full table scan in plan: {plan_text}",
         )
 
     def test_concurrent_write_no_busy_errors(self):
