@@ -7,8 +7,8 @@ StartLimitBurst=5
 
 [Service]
 Type=notify
-# sd_notify called from main thread only; explicit contract (prevents silent
-# watchdog-ping drops if a future refactor moves sd_notify to a helper thread).
+# Restrict sd_notify to the main process only (child processes are excluded).
+# Explicit so the contract is clear if a future refactor spawns subprocesses.
 NotifyAccess=main
 # ExecStart args: <center_freq_Hz> <sample_rate_Sps> <gain_dB>
 # Override via ExecStart= in a drop-in (processor.conf) for different bands.
