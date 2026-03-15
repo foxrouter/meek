@@ -15,11 +15,11 @@ WatchdogSec=30s
 # WatchdogSec=30 s), per the sd_notify(3) recommendation.  WATCHDOG=1 is sent
 # only while both capture and proc threads have updated their progress atomics
 # within the stale window (max(3 × RF_READ_TIMEOUT_US, 10 s), capped at 900 s
-# when RF_READ_TIMEOUT_US exceeds 300 s).  After a hang, at most one extra
-# heartbeat may be sent before threads are detected stale (poll_interval can
-# exceed stale_window); systemd then kills after WatchdogSec.  Worst-case
-# hang-to-kill ≤ stale_window + WatchdogSec: with RF_READ_TIMEOUT_US=500 ms
-# (stale window=10 s) this gives ≤10 s + 30 s = ~40 s; at the 300 s cap ≤930 s.
+# when RF_READ_TIMEOUT_US exceeds 300 s).  After a hang, heartbeats continue
+# until the stale window elapses; systemd then kills after WatchdogSec.
+# Worst-case hang-to-kill ≤ stale_window + WatchdogSec: with
+# RF_READ_TIMEOUT_US=500 ms (stale window=10 s) this gives ≤10 s + 30 s = ~40 s;
+# at the 300 s cap ≤930 s.
 # Restart=always is intentional: a fatal SDR read error triggers g_shutdown and
 # main() exits cleanly (status 0), which Restart=on-failure would not restart.
 Restart=always

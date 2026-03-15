@@ -931,6 +931,16 @@ int main(int argc, char** argv) {
     }
   }
 #endif
+  // Validate watchdog_usec before use: values < 2 cannot be halved to a
+  // useful interval (watchdog_usec/2 == 0 → busy-spin), so treat them as
+  // disabled.  Values above 1 h are capped to guard against signed-overflow
+  // when constructing std::chrono::microseconds (int64_t backing type).
+  constexpr std::uint64_t kMaxWatchdogUs = 3'600'000'000ULL;  // 1 h
+  if (watchdog_usec > 0 && watchdog_usec < 2) {
+    watchdog_usec = 0;
+  } else if (watchdog_usec > kMaxWatchdogUs) {
+    watchdog_usec = kMaxWatchdogUs;
+  }
   const bool watchdog_active = (watchdog_usec > 0);
   const std::chrono::nanoseconds poll_interval =
       watchdog_active ? std::chrono::microseconds(watchdog_usec / 2)
