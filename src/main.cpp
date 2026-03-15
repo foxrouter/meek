@@ -436,7 +436,8 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
                       std::mutex& snap_mu, std::condition_variable& snap_cv,
                       std::deque<SnapTask>& snap_queue, std::atomic<std::uint64_t>& snap_dropped,
                       std::atomic<std::uint64_t>& proc_dropped,
-                      std::atomic<std::uint64_t>& proc_progress) {
+                      std::atomic<std::uint64_t>& proc_progress,
+                      std::atomic<bool>& proc_exiting) {
   const BandProfile* band = find_band(cfg.center_freq);
   if (band) {
     std::cout << "[BAND] Matched: " << band->name << " (" << band->description << ")\n";
@@ -582,6 +583,10 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       cr = ClassificationResult{};
     }
   }
+  // Signal output_loop that no further ClassificationResults will be pushed.
+  // Release ordering ensures all prior pushes to out_buf are visible before
+  // output_loop's acquire-load of this flag.
+  proc_exiting.store(true, std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------
@@ -594,6 +599,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
                         std::atomic<std::uint64_t>& cap_dropped,
                         std::atomic<std::uint64_t>& proc_dropped,
                         std::atomic<std::uint64_t>& out_progress,
+                        const std::atomic<bool>& proc_exiting,
                         std::shared_ptr<MetricsSnapshot> metrics_snapshot) {
   const std::int64_t method_id = db.upsert_method(
       "modulation_classifier",
@@ -613,21 +619,35 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   auto last_idle_out_progress = std::chrono::steady_clock::now();
   JsonLog jlog(cfg.worker_log);
 
-  // Loop until stop is requested (or g_shutdown is set) AND the buffer is
-  // truly empty.  The outer condition is unconditional (while (true)) so
-  // empty_approx()'s relaxed loads cannot cause premature exit.  pop() uses
-  // an acquire load of head_, which is the accurate emptiness check: break
-  // only when stop is requested (or a fatal capture error set g_shutdown) AND
-  // pop() returns false (buffer confirmed empty via acquire semantics).
-  // Checking g_shutdown here prevents the output thread from spinning on an
-  // empty buffer for a full watchdog poll interval (WATCHDOG_USEC/2, or 2 s
-  // when the watchdog is inactive) before request_stop() arrives from main
-  // after a fatal SDR read error.
+  // Set to true once we have performed an acquire-load of proc_exiting=true,
+  // establishing visibility of all ClassificationResults pushed by proc_loop.
+  // On the subsequent iteration we re-check pop(); if it returns false the
+  // buffer is confirmed empty and we break.  This two-step pattern avoids a
+  // TOCTOU race where pop() returns false, proc_loop pushes a final result and
+  // then sets proc_exiting, and we would break without consuming that result.
+  bool proc_done_seen = false;
+
+  // Loop until stop is requested AND the buffer is truly empty, OR until
+  // proc_loop has signalled completion (proc_exiting) and the buffer is
+  // confirmed empty via the two-step pattern above.  pop() uses an acquire
+  // load of head_, which is the accurate emptiness check.
+  // Note: g_shutdown alone is not a safe exit trigger here because proc_loop
+  // is the producer of this buffer and may still push items after
+  // capture_loop sets g_shutdown.  Only proc_exiting (set by proc_loop itself
+  // as a release store after its last push) guarantees no further items.
   while (true) {
     ClassificationResult cr;
     if (!in_buf.pop(cr)) {
-      if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
-        break;
+      if (st.stop_requested()) break;
+      if (proc_done_seen) break;
+      if (g_shutdown.load(std::memory_order_relaxed) &&
+          proc_exiting.load(std::memory_order_acquire)) {
+        // Acquire-load establishes happens-before with proc_loop's last push.
+        // Set the flag and retry pop() immediately (no sleep) so that any
+        // ClassificationResult pushed before proc_exiting was set is consumed.
+        proc_done_seen = true;
+        continue;
+      }
       const auto idle_now = std::chrono::steady_clock::now();
       if (idle_now - last_idle_out_progress >= std::chrono::milliseconds(250)) {
         last_idle_out_progress = idle_now;
@@ -840,6 +860,9 @@ int main(int argc, char** argv) {
   std::atomic<std::uint64_t> snap_dropped{0};
   std::atomic<std::uint64_t> cap_dropped{0};
   std::atomic<std::uint64_t> proc_dropped{0};
+  // Set by proc_loop (release) after its main loop exits; read by output_loop
+  // (acquire) to detect that no further ClassificationResults will be pushed.
+  std::atomic<bool> proc_exiting{false};
 
   // Initialise to "now" so the main loop doesn't see a stale value before the
   // threads have had a chance to run their first iteration.
@@ -892,12 +915,12 @@ int main(int argc, char** argv) {
 
   std::jthread proc_thread([&](std::stop_token st) {
     proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_mu, snap_cv, snap_queue, snap_dropped,
-              proc_dropped, proc_progress);
+              proc_dropped, proc_progress, proc_exiting);
   });
 
   std::jthread out_thread([&](std::stop_token st) {
     output_loop(st, proc_to_out, *db, cfg, snap_errors, snap_dropped, cap_dropped, proc_dropped,
-                out_progress, metrics_snapshot);
+                out_progress, proc_exiting, metrics_snapshot);
   });
 
 #ifdef HAVE_HTTPLIB
