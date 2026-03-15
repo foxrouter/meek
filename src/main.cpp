@@ -455,11 +455,12 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   // false-stale signals when sleep_for oversleeps significantly under load.
   auto last_idle_progress = std::chrono::steady_clock::now();
 
-  // Only exit when stop is requested via stop_token (set by main() after
-  // cap_thread.join()), not on g_shutdown alone.  g_shutdown can be true
-  // while cap_thread is still pushing its final block; relying on the stop
-  // token ensures cap_to_proc is fully sealed before proc_loop drains.
-  while (!st.stop_requested() || !in_buf.empty_approx()) {
+  // Loop until stop is requested AND the buffer is truly empty.  The outer
+  // condition is unconditional (while (true)) so empty_approx()'s relaxed
+  // loads cannot cause premature exit.  pop() uses an acquire load of head_,
+  // which is the accurate emptiness check: break only when stop is requested
+  // AND pop() returns false (buffer confirmed empty via acquire semantics).
+  while (true) {
     SampleBlock blk;
     if (!in_buf.pop(blk)) {
       if (st.stop_requested())
@@ -605,11 +606,12 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   auto last_idle_out_progress = std::chrono::steady_clock::now();
   JsonLog jlog(cfg.worker_log);
 
-  // Only exit when stop is requested via stop_token (set by main() after
-  // proc_thread.join()), not on g_shutdown alone.  proc_to_out may be
-  // momentarily empty while proc_thread is still draining cap_to_proc;
-  // relying on the stop token guarantees proc_to_out is fully sealed first.
-  while (!st.stop_requested() || !in_buf.empty_approx()) {
+  // Loop until stop is requested AND the buffer is truly empty.  The outer
+  // condition is unconditional (while (true)) so empty_approx()'s relaxed
+  // loads cannot cause premature exit.  pop() uses an acquire load of head_,
+  // which is the accurate emptiness check: break only when stop is requested
+  // AND pop() returns false (buffer confirmed empty via acquire semantics).
+  while (true) {
     ClassificationResult cr;
     if (!in_buf.pop(cr)) {
       if (st.stop_requested())
