@@ -373,10 +373,12 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
 
   while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
     const auto n = sdr.read_samples(std::span{buf});
-    // Update progress on every iteration; read_samples() blocks for at most
-    // cfg.read_timeout_us µs (clamped to [1, 300 s] at config parse time).
-    // The watchdog poll loop checks progress against kStaleNs (max(3×timeout,
-    // 10 s)); a missing update for longer than that window signals a hang.
+    // Update progress on every iteration; read_samples() is configured to
+    // block up to cfg.read_timeout_us µs (clamped to [1, 300 s] at config
+    // parse time), but SoapyRemote can hang beyond that — which is exactly
+    // what the watchdog detects. The watchdog poll loop checks progress
+    // against kStaleNs (max(3×timeout, 10 s)); a missing update for longer
+    // than that window signals a hang.
     cap_progress.store(
         static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(
