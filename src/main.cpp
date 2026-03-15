@@ -455,11 +455,15 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   // false-stale signals when sleep_for oversleeps significantly under load.
   auto last_idle_progress = std::chrono::steady_clock::now();
 
-  while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
-         !in_buf.empty_approx()) {
+  // Loop until stop is requested AND the buffer is truly empty.  The outer
+  // condition is unconditional (while (true)) so empty_approx()'s relaxed
+  // loads cannot cause premature exit.  pop() uses an acquire load of head_,
+  // which is the accurate emptiness check: break only when stop is requested
+  // AND pop() returns false (buffer confirmed empty via acquire semantics).
+  while (true) {
     SampleBlock blk;
     if (!in_buf.pop(blk)) {
-      if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
+      if (st.stop_requested())
         break;
       // steady_clock::now() is called every idle iteration; only the atomic
       // write to proc_progress is throttled to at most every 250 ms.
@@ -602,11 +606,15 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   auto last_idle_out_progress = std::chrono::steady_clock::now();
   JsonLog jlog(cfg.worker_log);
 
-  while ((!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) ||
-         !in_buf.empty_approx()) {
+  // Loop until stop is requested AND the buffer is truly empty.  The outer
+  // condition is unconditional (while (true)) so empty_approx()'s relaxed
+  // loads cannot cause premature exit.  pop() uses an acquire load of head_,
+  // which is the accurate emptiness check: break only when stop is requested
+  // AND pop() returns false (buffer confirmed empty via acquire semantics).
+  while (true) {
     ClassificationResult cr;
     if (!in_buf.pop(cr)) {
-      if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
+      if (st.stop_requested())
         break;
       const auto idle_now = std::chrono::steady_clock::now();
       if (idle_now - last_idle_out_progress >= std::chrono::milliseconds(250)) {
@@ -1010,16 +1018,28 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "Shutdown requested — stopping threads\n";
-  // Notify systemd that shutdown is intentional so it doesn't kill the
-  // process via WatchdogSec during the (potentially multi-second) thread
-  // teardown and drain.
+  // STOPPING=1 before any join so systemd grants the full TimeoutStopSec
+  // window for pipeline drain, not just WatchdogSec.
   sd_notify(0, "STOPPING=1");
+
+  // Step 1: stop capture — after join() no new IQ blocks enter cap_to_proc.
   cap_thread.request_stop();
+  cap_thread.join();
+
+  // Step 2: drain proc — after join() no new SnapTasks or ClassificationResults
+  // can be enqueued. proc_loop post-stop drain is exhaustive.
   proc_thread.request_stop();
-  out_thread.request_stop();
+  proc_thread.join();
+
+  // Step 3: drain snapshots — snap_thread drain is now exhaustive; no late
+  // SnapTasks can arrive after step 2's join.
   snap_thread.request_stop();
   snap_cv.notify_all();
-  // jthreads join at scope exit
+  snap_thread.join();
+
+  // Step 4: drain output — out_thread drains proc_to_out and flushes DB.
+  out_thread.request_stop();
+  out_thread.join();
 
 #ifdef HAVE_HTTPLIB
   if (http_svr) {
