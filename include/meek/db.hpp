@@ -204,9 +204,12 @@ inline bool Database::apply_schema() {
       sqlite3_free(idx_err);
       // Roll back any partial transaction so the connection is not left with
       // schema locks held before migrations and prepare_statements() run.
-      // ROLLBACK is a no-op when no transaction is active, so this is safe
-      // even if the failure occurred before BEGIN was processed.
-      sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+      // Guard with sqlite3_get_autocommit: ROLLBACK outside a transaction
+      // returns an error ("cannot rollback - no transaction is active"), so
+      // only issue it when we are actually inside one (autocommit == 0).
+      if (sqlite3_get_autocommit(db_) == 0) {
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+      }
       // Non-fatal: the daemon continues; missing indexes only degrade performance.
     }
   }
