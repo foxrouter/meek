@@ -1010,16 +1010,28 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "Shutdown requested — stopping threads\n";
-  // Notify systemd that shutdown is intentional so it doesn't kill the
-  // process via WatchdogSec during the (potentially multi-second) thread
-  // teardown and drain.
+  // STOPPING=1 before any join so systemd grants the full TimeoutStopSec
+  // window for pipeline drain, not just WatchdogSec.
   sd_notify(0, "STOPPING=1");
+
+  // Step 1: stop capture — after join() no new IQ blocks enter cap_to_proc.
   cap_thread.request_stop();
+  cap_thread.join();
+
+  // Step 2: drain proc — after join() no new SnapTasks or ClassificationResults
+  // can be enqueued. proc_loop post-stop drain is exhaustive.
   proc_thread.request_stop();
-  out_thread.request_stop();
+  proc_thread.join();
+
+  // Step 3: drain snapshots — snap_thread drain is now exhaustive; no late
+  // SnapTasks can arrive after step 2's join.
   snap_thread.request_stop();
   snap_cv.notify_all();
-  // jthreads join at scope exit
+  snap_thread.join();
+
+  // Step 4: drain output — out_thread drains proc_to_out and flushes DB.
+  out_thread.request_stop();
+  // out_thread joins at scope exit (jthread destructor)
 
 #ifdef HAVE_HTTPLIB
   if (http_svr) {
