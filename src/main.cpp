@@ -460,15 +460,19 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   // false-stale signals when sleep_for oversleeps significantly under load.
   auto last_idle_progress = std::chrono::steady_clock::now();
 
-  // Loop until stop is requested AND the buffer is truly empty.  The outer
-  // condition is unconditional (while (true)) so empty_approx()'s relaxed
-  // loads cannot cause premature exit.  pop() uses an acquire load of head_,
-  // which is the accurate emptiness check: break only when stop is requested
-  // AND pop() returns false (buffer confirmed empty via acquire semantics).
+  // Loop until stop is requested (or g_shutdown is set) AND the buffer is
+  // truly empty.  The outer condition is unconditional (while (true)) so
+  // empty_approx()'s relaxed loads cannot cause premature exit.  pop() uses
+  // an acquire load of head_, which is the accurate emptiness check: break
+  // only when stop is requested (or a fatal capture error set g_shutdown) AND
+  // pop() returns false (buffer confirmed empty via acquire semantics).
+  // Checking g_shutdown here prevents the proc thread from spinning on an
+  // empty buffer for up to the watchdog poll interval (≤15 s) before
+  // request_stop() arrives from main after a fatal SDR read error.
   while (true) {
     SampleBlock blk;
     if (!in_buf.pop(blk)) {
-      if (st.stop_requested())
+      if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
         break;
       // steady_clock::now() is called every idle iteration; only the atomic
       // write to proc_progress is throttled to at most every 250 ms.
@@ -608,15 +612,19 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   auto last_idle_out_progress = std::chrono::steady_clock::now();
   JsonLog jlog(cfg.worker_log);
 
-  // Loop until stop is requested AND the buffer is truly empty.  The outer
-  // condition is unconditional (while (true)) so empty_approx()'s relaxed
-  // loads cannot cause premature exit.  pop() uses an acquire load of head_,
-  // which is the accurate emptiness check: break only when stop is requested
-  // AND pop() returns false (buffer confirmed empty via acquire semantics).
+  // Loop until stop is requested (or g_shutdown is set) AND the buffer is
+  // truly empty.  The outer condition is unconditional (while (true)) so
+  // empty_approx()'s relaxed loads cannot cause premature exit.  pop() uses
+  // an acquire load of head_, which is the accurate emptiness check: break
+  // only when stop is requested (or a fatal capture error set g_shutdown) AND
+  // pop() returns false (buffer confirmed empty via acquire semantics).
+  // Checking g_shutdown here prevents the output thread from spinning on an
+  // empty buffer for up to the watchdog poll interval (≤15 s) before
+  // request_stop() arrives from main after a fatal SDR read error.
   while (true) {
     ClassificationResult cr;
     if (!in_buf.pop(cr)) {
-      if (st.stop_requested())
+      if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed))
         break;
       const auto idle_now = std::chrono::steady_clock::now();
       if (idle_now - last_idle_out_progress >= std::chrono::milliseconds(250)) {
