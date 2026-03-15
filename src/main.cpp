@@ -901,22 +901,59 @@ int main(int argc, char** argv) {
       static_cast<std::uint64_t>(cfg.read_timeout_us) * kUsToNs * kStaleMultiplier,
       kStaleMinNs);
 
+  // Derive the watchdog ping cadence from $WATCHDOG_USEC (set by systemd when
+  // WatchdogSec is active). sd_notify(3) recommends pinging at most every
+  // WATCHDOG_USEC/2 µs; using that value exactly means the interval
+  // automatically tracks any changes to WatchdogSec in the unit file.
+  // When WATCHDOG_USEC is zero/unset the watchdog is not active: pings are
+  // suppressed and the loop falls back to a 2 s status-print cadence.
+  std::uint64_t watchdog_usec = 0;
+#ifdef HAVE_SYSTEMD
+  sd_watchdog_enabled(0, &watchdog_usec);
+#else
+  {
+    const char* wd_env = std::getenv("WATCHDOG_USEC");
+    if (wd_env != nullptr && *wd_env != '\0') {
+      char* end = nullptr;
+      const std::uint64_t val = std::strtoull(wd_env, &end, 10);
+      if (end != wd_env && *end == '\0') {
+        // Only arm the watchdog interval if it is intended for this process.
+        const char* wd_pid = std::getenv("WATCHDOG_PID");
+        bool for_us = true;
+        if (wd_pid != nullptr && *wd_pid != '\0') {
+          char* pid_end = nullptr;
+          const long parsed_pid = std::strtol(wd_pid, &pid_end, 10);
+          for_us = (pid_end != wd_pid && *pid_end == '\0') &&
+                   (static_cast<pid_t>(parsed_pid) == getpid());
+        }
+        if (for_us) watchdog_usec = val;
+      }
+    }
+  }
+#endif
+  const bool watchdog_active = (watchdog_usec > 0);
+  const std::chrono::nanoseconds poll_interval =
+      watchdog_active ? std::chrono::microseconds(watchdog_usec / 2)
+                      : std::chrono::seconds(2);
+
   while (!g_shutdown.load(std::memory_order_relaxed)) {
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    std::this_thread::sleep_for(poll_interval);
     // Only pet the watchdog when both pipeline threads have made recent
     // progress (within kStaleNs) so a genuinely hung thread stops heartbeats.
-    const auto now_ns = static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count());
-    const auto cap_last  = cap_progress.load(std::memory_order_relaxed);
-    const auto proc_last = proc_progress.load(std::memory_order_relaxed);
-    // Use addition rather than subtraction to avoid unsigned underflow when a
-    // thread updates its timestamp between the now_ns capture and the load.
-    const bool threads_healthy =
-        (cap_last + kStaleNs > now_ns) && (proc_last + kStaleNs > now_ns);
-    if (threads_healthy) {
-      sd_notify(0, "WATCHDOG=1");
+    if (watchdog_active) {
+      const auto now_ns = static_cast<std::uint64_t>(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now().time_since_epoch())
+              .count());
+      const auto cap_last  = cap_progress.load(std::memory_order_relaxed);
+      const auto proc_last = proc_progress.load(std::memory_order_relaxed);
+      // Use addition rather than subtraction to avoid unsigned underflow when a
+      // thread updates its timestamp between the now_ns capture and the load.
+      const bool threads_healthy =
+          (cap_last + kStaleNs > now_ns) && (proc_last + kStaleNs > now_ns);
+      if (threads_healthy) {
+        sd_notify(0, "WATCHDOG=1");
+      }
     }
     std::cout << "[STATUS] cap_queue=" << cap_to_proc.size_approx()
               << " out_queue=" << proc_to_out.size_approx() << "\n";
