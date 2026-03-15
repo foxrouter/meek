@@ -110,7 +110,12 @@ SoapySdrSource::SoapySdrSource(double center_freq, double sample_rate, double ga
                                long long read_timeout_us)
     : center_freq_hz_(center_freq),
       sample_rate_hz_(sample_rate),
+      gain_db_(gain),
       read_timeout_us_(read_timeout_us) {
+  do_open();
+}
+
+void SoapySdrSource::do_open() {
   SoapySDRKwargs args = {};
 
   // SoapySDR probes all installed driver plugins (including the ALSA audio
@@ -156,10 +161,10 @@ SoapySdrSource::SoapySdrSource(double center_freq, double sample_rate, double ga
   if (!dev_)
     throw std::runtime_error("SoapySDR: no device found");
 
-  SoapySDRDevice_setSampleRate(dev_, SOAPY_SDR_RX, 0, sample_rate);
-  SoapySDRDevice_setFrequency(dev_, SOAPY_SDR_RX, 0, center_freq, &args);
+  SoapySDRDevice_setSampleRate(dev_, SOAPY_SDR_RX, 0, sample_rate_hz_);
+  SoapySDRDevice_setFrequency(dev_, SOAPY_SDR_RX, 0, center_freq_hz_, &args);
   SoapySDRDevice_setGainMode(dev_, SOAPY_SDR_RX, 0, 0);
-  SoapySDRDevice_setGain(dev_, SOAPY_SDR_RX, 0, gain);
+  SoapySDRDevice_setGain(dev_, SOAPY_SDR_RX, 0, gain_db_);
 
   stream_ = SoapySDRDevice_setupStream(dev_, SOAPY_SDR_RX, SOAPY_SDR_CF32, nullptr, 0, nullptr);
   if (!stream_) {
@@ -182,6 +187,26 @@ SoapySdrSource::~SoapySdrSource() {
   if (dev_) {
     SoapySDRDevice_unmake(dev_);
     dev_ = nullptr;
+  }
+}
+
+bool SoapySdrSource::try_reconnect() noexcept {
+  // Tear down existing device/stream before attempting to reopen.
+  if (stream_) {
+    SoapySDRDevice_deactivateStream(dev_, stream_, 0, 0);
+    SoapySDRDevice_closeStream(dev_, stream_);
+    stream_ = nullptr;
+  }
+  if (dev_) {
+    SoapySDRDevice_unmake(dev_);
+    dev_ = nullptr;
+  }
+  try {
+    do_open();
+    return true;
+  } catch (...) {
+    // do_open() leaves dev_/stream_ as nullptr on failure — no extra cleanup needed.
+    return false;
   }
 }
 
@@ -387,9 +412,47 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
         std::memory_order_relaxed);
     if (n <= 0) {
       if (n < 0) {
-        std::cerr << "[CAPTURE] fatal read error\n";
-        g_shutdown.store(true, std::memory_order_relaxed);
-        break;
+        std::cerr << "[CAPTURE] fatal read error; entering reconnect loop\n";
+        bool reconnected = false;
+        // Exponential backoff: delay_ms * 2^attempt, capped at 30 s per attempt.
+        // If the initial delay is already near 30 s the sequence stays flat at
+        // 30 s, which is still meaningful spacing.
+        // cfg.sdr_reconnect_retries == -1 means retry indefinitely.
+        // cfg.sdr_reconnect_retries == 0: the loop body never runs and
+        // reconnected stays false, so we drop straight through to the
+        // g_shutdown path below (same result as the old immediate-exit
+        // behaviour).
+        for (int attempt = 0;
+             cfg.sdr_reconnect_retries < 0 || attempt < cfg.sdr_reconnect_retries;
+             ++attempt) {
+          if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed)) break;
+          // Keep the watchdog alive and indicate the thread is still active.
+          cap_progress.store(
+              static_cast<std::uint64_t>(
+                  std::chrono::duration_cast<std::chrono::nanoseconds>(
+                      std::chrono::steady_clock::now().time_since_epoch())
+                      .count()),
+              std::memory_order_relaxed);
+          const long long delay_ms = std::min(
+              cfg.sdr_reconnect_delay_ms * (1LL << std::min(attempt, 5)), 30'000LL);
+          std::cerr << "[CAPTURE] SDR reconnect in " << delay_ms
+                    << " ms (attempt " << (attempt + 1) << ")\n";
+          std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+          if (st.stop_requested() || g_shutdown.load(std::memory_order_relaxed)) break;
+          if (sdr.try_reconnect()) {
+            std::cerr << "[CAPTURE] SDR reconnected: " << sdr.description() << "\n";
+            reconnected = true;
+            break;
+          }
+          std::cerr << "[CAPTURE] SDR reconnect attempt " << (attempt + 1) << " failed\n";
+        }
+        if (!reconnected) {
+          if (!st.stop_requested()) {
+            std::cerr << "[CAPTURE] SDR reconnect exhausted; shutting down\n";
+            g_shutdown.store(true, std::memory_order_relaxed);
+          }
+          break;
+        }
       }
       continue;
     }

@@ -61,6 +61,14 @@ struct Config {
 
   // Prometheus HTTP server (0 = disabled; only serve textfile)
   std::uint16_t prometheus_port{0};
+
+  // SDR reconnect: on fatal read error, retry opening the device up to
+  // sdr_reconnect_retries times (-1 = infinite) with exponential backoff
+  // starting at sdr_reconnect_delay_ms ms (capped at 30 s per attempt).
+  // Set sdr_reconnect_retries=0 to disable in-process reconnect and fall
+  // back to the old behaviour of exiting immediately so systemd restarts.
+  std::int64_t sdr_reconnect_retries{-1};
+  std::int64_t sdr_reconnect_delay_ms{2000};
 };
 
 // ---------------------------------------------------------------------------
@@ -205,6 +213,16 @@ inline std::string env_str(const char* name, const char* def) {
   // Prometheus HTTP port (0 = disabled)
   cfg.prometheus_port = static_cast<std::uint16_t>(
       detail::env_ll("RF_PROMETHEUS_PORT", 0));
+
+  // SDR reconnect
+  cfg.sdr_reconnect_retries = detail::env_ll("RF_SDR_RECONNECT_RETRIES", -1);
+  // Clamp: any negative value other than -1 is normalised to -1 (infinite).
+  if (cfg.sdr_reconnect_retries < -1) cfg.sdr_reconnect_retries = -1;
+
+  cfg.sdr_reconnect_delay_ms = detail::env_ll("RF_SDR_RECONNECT_DELAY_MS", 2000);
+  // Clamp initial delay to [100 ms, 30 s] to avoid busy-spin or over-long sleeps.
+  if (cfg.sdr_reconnect_delay_ms < 100) cfg.sdr_reconnect_delay_ms = 100;
+  if (cfg.sdr_reconnect_delay_ms > 30'000) cfg.sdr_reconnect_delay_ms = 30'000;
 
   return cfg;
 }

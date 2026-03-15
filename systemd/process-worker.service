@@ -25,8 +25,9 @@ WatchdogSec=30s
 # Worst-case hang-to-kill ≤ stale_window + WatchdogSec: with
 # RF_READ_TIMEOUT_US=500 ms (stale window=10 s) this gives ≤10 s + 30 s = ~40 s;
 # at the 300 s cap ≤930 s.
-# Restart=always is intentional: a fatal SDR read error triggers g_shutdown and
-# main() exits cleanly (status 0), which Restart=on-failure would not restart.
+# Restart=always covers the case where RF_SDR_RECONNECT_RETRIES=0 (reconnect
+# disabled) or all reconnect attempts are exhausted; main() exits cleanly
+# (status 0) so Restart=on-failure would not restart it.
 Restart=always
 RestartSec=10s
 User=rf_worker

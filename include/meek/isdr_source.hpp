@@ -53,6 +53,11 @@ class ISdrSource {
   /// Human-readable description of the source (e.g. "RTL-SDR USB#0").
   [[nodiscard]] virtual std::string description() const = 0;
 
+  /// Attempt to close and reopen the SDR device using the same parameters.
+  /// Returns true on success, false if the device could not be reopened.
+  /// The default implementation always returns false (no reconnect support).
+  [[nodiscard]] virtual bool try_reconnect() noexcept { return false; }
+
  protected:
   ISdrSource() = default;
 };
@@ -90,13 +95,22 @@ class SoapySdrSource final : public ISdrSource {
   [[nodiscard]] bool is_open() const noexcept override { return dev_ != nullptr; }
   [[nodiscard]] std::string description() const override { return description_; }
 
+  /// Close and reopen the device. Returns true on success.
+  [[nodiscard]] bool try_reconnect() noexcept override;
+
  private:
   SoapySDRDevice* dev_{nullptr};
   SoapySDRStream* stream_{nullptr};
   double center_freq_hz_{0.0};
   double sample_rate_hz_{0.0};
+  double gain_db_{20.0};
   long long read_timeout_us_{500'000LL};
   std::string description_;
+
+  /// Open the SoapySDR device and configure it. Sets dev_, stream_, and
+  /// description_. Throws std::runtime_error on failure; leaves dev_ and
+  /// stream_ as nullptr so the object stays in a consistent closed state.
+  void do_open();
 };
 
 // Verify that SoapySdrSource satisfies the concept.
