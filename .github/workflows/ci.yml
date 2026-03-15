@@ -116,8 +116,9 @@ jobs:
 
       - name: clang-format check
         run: |
-          clang-format --style=file -n --Werror tools/iq_metrics.cpp || {
-            echo "clang-format violations found. Run: clang-format -i tools/iq_metrics.cpp"
+          clang-format --style=file -n --Werror \
+            src/main.cpp src/rf_audit.cpp tools/iq_metrics.cpp || {
+            echo "clang-format violations found. Run: clang-format -i src/main.cpp src/rf_audit.cpp tools/iq_metrics.cpp"
             exit 1
           }
 
