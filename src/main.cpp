@@ -34,24 +34,30 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
 static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
   const char* p = std::getenv("NOTIFY_SOCKET");
-  if (!p || !*p) return 0;
+  if (!p || !*p)
+    return 0;
   const int fd = ::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-  if (fd < 0) return -errno;
-  struct sockaddr_un sa{};
+  if (fd < 0)
+    return -errno;
+  struct sockaddr_un sa {};
   sa.sun_family = AF_UNIX;
   const std::size_t plen = std::strlen(p);
-  if (plen >= sizeof(sa.sun_path)) { ::close(fd); return -EINVAL; }
+  if (plen >= sizeof(sa.sun_path)) {
+    ::close(fd);
+    return -EINVAL;
+  }
   std::memcpy(sa.sun_path, p, plen + 1);
   // Abstract-namespace sockets start with '@'; replace with the required NUL byte.
-  if (sa.sun_path[0] == '@') sa.sun_path[0] = '\0';
-  const socklen_t addrlen = static_cast<socklen_t>(
-      offsetof(struct sockaddr_un, sun_path) +
-      (sa.sun_path[0] == '\0' ? plen : plen + 1));
+  if (sa.sun_path[0] == '@')
+    sa.sun_path[0] = '\0';
+  const socklen_t addrlen = static_cast<socklen_t>(offsetof(struct sockaddr_un, sun_path) +
+                                                   (sa.sun_path[0] == '\0' ? plen : plen + 1));
   const ssize_t r = ::sendto(fd, state, std::strlen(state), MSG_NOSIGNAL,
                              reinterpret_cast<const struct sockaddr*>(&sa), addrlen);
   // Save errno before close() which may overwrite it.
@@ -69,16 +75,16 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
 #include <cerrno>
 #include <chrono>
 #include <complex>
+#include <condition_variable>
 #include <csignal>
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
-#include <condition_variable>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <span>
@@ -264,13 +270,12 @@ static void prune_old_snapshots(const std::string& dir, int retention_days) {
 
 struct JsonLog {
   // max_bytes: rotate when log file reaches this size (0 = disabled).
-  explicit JsonLog(const std::string& path,
-                   std::uintmax_t max_bytes = 50ULL * 1024 * 1024)
+  explicit JsonLog(const std::string& path, std::uintmax_t max_bytes = 50ULL * 1024 * 1024)
       : path_(path), max_bytes_(max_bytes) {
-    if (path_.empty()) return;
+    if (path_.empty())
+      return;
     try {
-      std::filesystem::create_directories(
-          std::filesystem::path(path_).parent_path());
+      std::filesystem::create_directories(std::filesystem::path(path_).parent_path());
       open_append();
     } catch (...) {
       failed_ = true;
@@ -278,7 +283,8 @@ struct JsonLog {
   }
 
   void write(const json& j) {
-    if (failed_ || !ofs_) return;
+    if (failed_ || !ofs_)
+      return;
     const std::string line = j.dump() + "\n";
     ofs_ << line;
     if (!ofs_.good()) {
@@ -293,7 +299,8 @@ struct JsonLog {
   }
 
   void flush() {
-    if (ofs_) ofs_.flush();
+    if (ofs_)
+      ofs_.flush();
   }
 
  private:
@@ -371,7 +378,7 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
                          SpscRingBuffer<SampleBlock, 64>& out_buf, const Config& cfg,
                          std::atomic<std::uint64_t>& cap_dropped,
                          std::atomic<std::uint64_t>& cap_overflow,
-                         std::atomic<std::uint64_t>& cap_progress) {
+                         std::atomic<std::uint64_t>& cap_progress, std::atomic<bool>& cap_exiting) {
   std::vector<std::complex<float>> buf(cfg.block_len);
 
   while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
@@ -383,10 +390,9 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
     // against kStaleNs (max(3×timeout, 10 s)); a missing update for longer
     // than that window signals a hang.
     cap_progress.store(
-        static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now().time_since_epoch())
-                .count()),
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now().time_since_epoch())
+                                       .count()),
         std::memory_order_relaxed);
     if (n <= 0) {
       if (n == -2) {
@@ -427,6 +433,10 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
       cap_dropped.fetch_add(1, std::memory_order_relaxed);
     }
   }
+  // Signal proc_loop that no further SampleBlocks will be pushed.
+  // Release ordering ensures all prior pushes to out_buf are visible before
+  // proc_loop's acquire-load of this flag.
+  cap_exiting.store(true, std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------
@@ -436,10 +446,10 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
 static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_buf,
                       SpscRingBuffer<ClassificationResult, 64>& out_buf, const Config& cfg,
                       std::mutex& snap_mu, std::condition_variable& snap_cv,
-                      std::deque<SnapTask>& snap_queue,
-                      std::atomic<std::uint64_t>& snap_dropped,
+                      std::deque<SnapTask>& snap_queue, std::atomic<std::uint64_t>& snap_dropped,
                       std::atomic<std::uint64_t>& proc_dropped,
-                      std::atomic<std::uint64_t>& proc_progress) {
+                      std::atomic<std::uint64_t>& proc_progress,
+                      const std::atomic<bool>& cap_exiting, std::atomic<bool>& proc_exiting) {
   const BandProfile* band = find_band(cfg.center_freq);
   if (band) {
     std::cout << "[BAND] Matched: " << band->name << " (" << band->description << ")\n";
@@ -463,16 +473,37 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   // false-stale signals when sleep_for oversleeps significantly under load.
   auto last_idle_progress = std::chrono::steady_clock::now();
 
-  // Loop until stop is requested AND the buffer is truly empty.  The outer
-  // condition is unconditional (while (true)) so empty_approx()'s relaxed
-  // loads cannot cause premature exit.  pop() uses an acquire load of head_,
-  // which is the accurate emptiness check: break only when stop is requested
-  // AND pop() returns false (buffer confirmed empty via acquire semantics).
+  // Set to true once we have performed an acquire-load of cap_exiting=true,
+  // establishing visibility of all SampleBlocks pushed by capture_loop.  On
+  // the subsequent iteration we re-check pop(); if it returns false the buffer
+  // is confirmed empty and we break.  This two-step pattern avoids a TOCTOU
+  // race where pop() returns false, capture_loop pushes a final block and then
+  // sets cap_exiting, and we would break without consuming that block.
+  // Note: g_shutdown alone is NOT used here because it is also set by the
+  // SIGINT/SIGTERM handler, at which point capture_loop may complete one more
+  // full iteration (including a push) before observing g_shutdown at the top
+  // of its own loop.  Only cap_exiting (set by capture_loop itself as a
+  // release store after its last push) guarantees no further blocks.
+  bool cap_done_seen = false;
+
+  // Loop until stop is requested AND the buffer is truly empty, OR until
+  // capture_loop has signalled completion (cap_exiting) and the buffer is
+  // confirmed empty via the two-step pattern above.  pop() uses an acquire
+  // load of head_, which is the accurate emptiness check.
   while (true) {
     SampleBlock blk;
     if (!in_buf.pop(blk)) {
       if (st.stop_requested())
         break;
+      if (cap_done_seen)
+        break;
+      if (cap_exiting.load(std::memory_order_acquire)) {
+        // Acquire-load establishes happens-before with capture_loop's last
+        // push.  Set the flag and retry pop() immediately (no sleep) so that
+        // any SampleBlock pushed before cap_exiting was set is consumed.
+        cap_done_seen = true;
+        continue;
+      }
       // steady_clock::now() is called every idle iteration; only the atomic
       // write to proc_progress is throttled to at most every 250 ms.
       const auto now = std::chrono::steady_clock::now();
@@ -480,8 +511,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
         last_idle_progress = now;
         proc_progress.store(
             static_cast<std::uint64_t>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    now.time_since_epoch())
+                std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch())
                     .count()),
             std::memory_order_relaxed);
       }
@@ -493,9 +523,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       last_idle_progress = now;
       proc_progress.store(
           static_cast<std::uint64_t>(
-              std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  now.time_since_epoch())
-                  .count()),
+              std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count()),
           std::memory_order_relaxed);
     }
 
@@ -513,7 +541,8 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     const std::size_t step = cfg.analysis_len;
     for (std::size_t off = 0; off < n; off += step) {
       const std::size_t win = std::min(step, n - off);
-      if (win < kMinClassifyBlockSamples) break;
+      if (win < kMinClassifyBlockSamples)
+        break;
       std::span<const std::complex<float>> window{blk.samples.data() + off, win};
       ClassificationResult sub = classify_block(window, opts, scratch);
       if (!have_best || sub.confidence > cr.confidence) {
@@ -548,8 +577,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
         std::lock_guard lk(snap_mu);
         if (snap_queue.size() < 64) {
           SnapTask task;
-          const auto snap_begin =
-              blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
+          const auto snap_begin = blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
           const auto snap_end = snap_begin + static_cast<std::ptrdiff_t>(best_len);
           task.samples.assign(snap_begin, snap_end);
           task.dir = cfg.snapshot_dir;
@@ -583,6 +611,10 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       cr = ClassificationResult{};
     }
   }
+  // Signal output_loop that no further ClassificationResults will be pushed.
+  // Release ordering ensures all prior pushes to out_buf are visible before
+  // output_loop's acquire-load of this flag.
+  proc_exiting.store(true, std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------
@@ -596,6 +628,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
                         std::atomic<std::uint64_t>& cap_overflow,
                         std::atomic<std::uint64_t>& proc_dropped,
                         std::atomic<std::uint64_t>& out_progress,
+                        const std::atomic<bool>& proc_exiting,
                         std::shared_ptr<MetricsSnapshot> metrics_snapshot) {
   const std::int64_t method_id = db.upsert_method(
       "modulation_classifier",
@@ -615,23 +648,42 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   auto last_idle_out_progress = std::chrono::steady_clock::now();
   JsonLog jlog(cfg.worker_log);
 
-  // Loop until stop is requested AND the buffer is truly empty.  The outer
-  // condition is unconditional (while (true)) so empty_approx()'s relaxed
-  // loads cannot cause premature exit.  pop() uses an acquire load of head_,
-  // which is the accurate emptiness check: break only when stop is requested
-  // AND pop() returns false (buffer confirmed empty via acquire semantics).
+  // Set to true once we have performed an acquire-load of proc_exiting=true,
+  // establishing visibility of all ClassificationResults pushed by proc_loop.
+  // On the subsequent iteration we re-check pop(); if it returns false the
+  // buffer is confirmed empty and we break.  This two-step pattern avoids a
+  // TOCTOU race where pop() returns false, proc_loop pushes a final result and
+  // then sets proc_exiting, and we would break without consuming that result.
+  bool proc_done_seen = false;
+
+  // Loop until stop is requested AND the buffer is truly empty, OR until
+  // proc_loop has signalled completion (proc_exiting) and the buffer is
+  // confirmed empty via the two-step pattern above.  pop() uses an acquire
+  // load of head_, which is the accurate emptiness check.
+  // proc_exiting alone (without g_shutdown) is sufficient: it is a dedicated
+  // "producer finished" flag set by proc_loop itself as a release store after
+  // its last push, so it is safe to break on regardless of how shutdown was
+  // triggered (fatal read error, SIGTERM, or request_stop()).
   while (true) {
     ClassificationResult cr;
     if (!in_buf.pop(cr)) {
       if (st.stop_requested())
         break;
+      if (proc_done_seen)
+        break;
+      if (proc_exiting.load(std::memory_order_acquire)) {
+        // Acquire-load establishes happens-before with proc_loop's last push.
+        // Set the flag and retry pop() immediately (no sleep) so that any
+        // ClassificationResult pushed before proc_exiting was set is consumed.
+        proc_done_seen = true;
+        continue;
+      }
       const auto idle_now = std::chrono::steady_clock::now();
       if (idle_now - last_idle_out_progress >= std::chrono::milliseconds(250)) {
         last_idle_out_progress = idle_now;
         out_progress.store(
             static_cast<std::uint64_t>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    idle_now.time_since_epoch())
+                std::chrono::duration_cast<std::chrono::nanoseconds>(idle_now.time_since_epoch())
                     .count()),
             std::memory_order_relaxed);
       }
@@ -643,8 +695,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
       last_idle_out_progress = active_now;
       out_progress.store(
           static_cast<std::uint64_t>(
-              std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  active_now.time_since_epoch())
+              std::chrono::duration_cast<std::chrono::nanoseconds>(active_now.time_since_epoch())
                   .count()),
           std::memory_order_relaxed);
     }
@@ -692,21 +743,21 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
       {
         json j;
         j["schema_version"] = "2";
-        j["ts_ns"]          = cr.timestamp_ns;
-        j["mod"]            = mod_class_name(cr.mod_class);
-        j["confidence"]     = cr.confidence;
-        j["snr_db"]         = cr.snr_db;
-        j["avg_power"]      = cr.avg_power;
-        j["papr_db"]        = cr.papr_db;
+        j["ts_ns"] = cr.timestamp_ns;
+        j["mod"] = mod_class_name(cr.mod_class);
+        j["confidence"] = cr.confidence;
+        j["snr_db"] = cr.snr_db;
+        j["avg_power"] = cr.avg_power;
+        j["papr_db"] = cr.papr_db;
         j["spectral_flatness"] = cr.spectral_flatness;
         j["time_occupancy"] = cr.time_occupancy;
-        j["avg_abs_phase"]  = cr.avg_abs_phase;
-        j["trans_ratio"]    = cr.trans_ratio;
-        j["p50"]            = cr.p50;
-        j["p90"]            = cr.p90;
-        j["snr_gate_pass"]  = cr.snr_gate_pass;
-        j["bw_gate_pass"]   = cr.bw_gate_pass;
-        j["band"]           = cr.band_name;
+        j["avg_abs_phase"] = cr.avg_abs_phase;
+        j["trans_ratio"] = cr.trans_ratio;
+        j["p50"] = cr.p50;
+        j["p90"] = cr.p90;
+        j["snr_gate_pass"] = cr.snr_gate_pass;
+        j["bw_gate_pass"] = cr.bw_gate_pass;
+        j["band"] = cr.band_name;
         j["decision_trace"] = cr.decision_trace;
         jlog.write(j);
       }
@@ -775,12 +826,11 @@ int main(int argc, char** argv) {
   }();
 
   {
-    struct sigaction sa{};
+    struct sigaction sa {};
     sa.sa_handler = handle_term;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
-    if (sigaction(SIGINT, &sa, nullptr) != 0 ||
-        sigaction(SIGTERM, &sa, nullptr) != 0) {
+    if (sigaction(SIGINT, &sa, nullptr) != 0 || sigaction(SIGTERM, &sa, nullptr) != 0) {
       const int saved_errno = errno;
       std::cerr << "[WARN] sigaction failed: " << std::strerror(saved_errno)
                 << "; falling back to std::signal\n";
@@ -793,8 +843,8 @@ int main(int argc, char** argv) {
             << "  center=" << cfg.center_freq << " Hz" << "  rate=" << cfg.sample_rate << " Sps"
             << "  gain=" << cfg.gain << "\n"
             << "  block_len=" << cfg.block_len << "  analysis_len=" << cfg.analysis_len
-            << "  conf_threshold=" << cfg.conf_threshold
-            << "  snr_min_db=" << cfg.snr_min_db << "\n"
+            << "  conf_threshold=" << cfg.conf_threshold << "  snr_min_db=" << cfg.snr_min_db
+            << "\n"
             << "  db=" << cfg.db_path << "\n"
             << "  snapshots=" << cfg.snapshot_dir << "\n"
             << "  metrics=" << cfg.metrics_file << "\n"
@@ -843,13 +893,19 @@ int main(int argc, char** argv) {
   std::atomic<std::uint64_t> cap_dropped{0};
   std::atomic<std::uint64_t> cap_overflow{0};
   std::atomic<std::uint64_t> proc_dropped{0};
+  // Set by capture_loop (release) after its main loop exits; read by proc_loop
+  // (acquire) to detect that no further SampleBlocks will be pushed.
+  std::atomic<bool> cap_exiting{false};
+  // Set by proc_loop (release) after its main loop exits; read by output_loop
+  // (acquire) to detect that no further ClassificationResults will be pushed.
+  std::atomic<bool> proc_exiting{false};
 
   // Initialise to "now" so the main loop doesn't see a stale value before the
   // threads have had a chance to run their first iteration.
-  const auto startup_time_ns = static_cast<std::uint64_t>(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
-          .count());
+  const auto startup_time_ns =
+      static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     std::chrono::steady_clock::now().time_since_epoch())
+                                     .count());
   std::atomic<std::uint64_t> cap_progress{startup_time_ns};
   std::atomic<std::uint64_t> proc_progress{startup_time_ns};
   std::atomic<std::uint64_t> out_progress{startup_time_ns};
@@ -860,7 +916,8 @@ int main(int argc, char** argv) {
       {
         std::unique_lock<std::mutex> lk(snap_mu);
         snap_cv.wait(lk, [&] { return !snap_queue.empty() || st.stop_requested(); });
-        if (snap_queue.empty()) break;
+        if (snap_queue.empty())
+          break;
         task = std::move(snap_queue.front());
         snap_queue.pop_front();
       }
@@ -889,17 +946,17 @@ int main(int argc, char** argv) {
 #endif
 
   std::jthread cap_thread([&](std::stop_token st) {
-    capture_loop(st, *sdr, cap_to_proc, cfg, cap_dropped, cap_overflow, cap_progress);
+    capture_loop(st, *sdr, cap_to_proc, cfg, cap_dropped, cap_overflow, cap_progress, cap_exiting);
   });
 
   std::jthread proc_thread([&](std::stop_token st) {
     proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_mu, snap_cv, snap_queue, snap_dropped,
-              proc_dropped, proc_progress);
+              proc_dropped, proc_progress, cap_exiting, proc_exiting);
   });
 
   std::jthread out_thread([&](std::stop_token st) {
     output_loop(st, proc_to_out, *db, cfg, snap_errors, snap_dropped, cap_dropped, cap_overflow,
-                proc_dropped, out_progress, metrics_snapshot);
+                proc_dropped, out_progress, proc_exiting, metrics_snapshot);
   });
 
 #ifdef HAVE_HTTPLIB
@@ -913,11 +970,12 @@ int main(int argc, char** argv) {
         http_svr = std::move(svr);
         http_thread = std::move(thr);
       } else {
-        std::cerr << "[WARN] Failed to bind Prometheus HTTP server on port "
-                  << cfg.prometheus_port << "\n";
+        std::cerr << "[WARN] Failed to bind Prometheus HTTP server on port " << cfg.prometheus_port
+                  << "\n";
         // If bind succeeded but thread creation somehow failed, stop the server
         // before discarding the unique_ptr.
-        if (svr) svr->stop();
+        if (svr)
+          svr->stop();
       }
     } catch (const std::exception& e) {
       std::cerr << "[WARN] Exception while starting Prometheus HTTP server on port "
@@ -941,12 +999,11 @@ int main(int argc, char** argv) {
   // cfg.read_timeout_us is already clamped to [1, kMaxReadTimeoutUs] (300 s)
   // by parse_config() in config.hpp, so the cast to uint64 is safe and no
   // duplicate upper-cap constant is needed here.
-  constexpr std::uint64_t kUsToNs = 1'000ULL;         // µs → ns
-  constexpr std::uint64_t kStaleMultiplier = 3;         // stale = 3 × read_timeout
+  constexpr std::uint64_t kUsToNs = 1'000ULL;               // µs → ns
+  constexpr std::uint64_t kStaleMultiplier = 3;             // stale = 3 × read_timeout
   constexpr std::uint64_t kStaleMinNs = 10'000'000'000ULL;  // 10 s floor
   const std::uint64_t kStaleNs = std::max(
-      static_cast<std::uint64_t>(cfg.read_timeout_us) * kUsToNs * kStaleMultiplier,
-      kStaleMinNs);
+      static_cast<std::uint64_t>(cfg.read_timeout_us) * kUsToNs * kStaleMultiplier, kStaleMinNs);
 
   // Derive the watchdog ping cadence from $WATCHDOG_USEC (set by systemd when
   // WatchdogSec is active). sd_notify(3) recommends pinging at most every
@@ -976,11 +1033,11 @@ int main(int argc, char** argv) {
           const long parsed_pid = std::strtol(wd_pid, &pid_end, 10);
           // Reject negative, zero, or out-of-range values before comparing so
           // that a malformed WATCHDOG_PID cannot wrap-cast to a valid pid_t.
-          for_us = (pid_end != wd_pid && *pid_end == '\0') &&
-                   (parsed_pid > 0) &&
+          for_us = (pid_end != wd_pid && *pid_end == '\0') && (parsed_pid > 0) &&
                    (parsed_pid == static_cast<long>(getpid()));
         }
-        if (for_us) watchdog_usec = static_cast<std::uint64_t>(val_ll);
+        if (for_us)
+          watchdog_usec = static_cast<std::uint64_t>(val_ll);
       }
     }
   }
@@ -997,8 +1054,7 @@ int main(int argc, char** argv) {
   }
   const bool watchdog_active = (watchdog_usec > 0);
   const std::chrono::nanoseconds poll_interval =
-      watchdog_active ? std::chrono::microseconds(watchdog_usec / 2)
-                      : std::chrono::seconds(2);
+      watchdog_active ? std::chrono::microseconds(watchdog_usec / 2) : std::chrono::seconds(2);
 
   while (!g_shutdown.load(std::memory_order_relaxed)) {
     std::this_thread::sleep_for(poll_interval);
@@ -1006,21 +1062,20 @@ int main(int argc, char** argv) {
     // output) have made recent progress (within kStaleNs) so a genuinely hung
     // thread stops heartbeats.
     if (watchdog_active) {
-      const auto now_ns = static_cast<std::uint64_t>(
-          std::chrono::duration_cast<std::chrono::nanoseconds>(
-              std::chrono::steady_clock::now().time_since_epoch())
-              .count());
-      const auto cap_last  = cap_progress.load(std::memory_order_relaxed);
+      const auto now_ns =
+          static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                         std::chrono::steady_clock::now().time_since_epoch())
+                                         .count());
+      const auto cap_last = cap_progress.load(std::memory_order_relaxed);
       const auto proc_last = proc_progress.load(std::memory_order_relaxed);
-      const auto out_last  = out_progress.load(std::memory_order_relaxed);
+      const auto out_last = out_progress.load(std::memory_order_relaxed);
       // Use addition rather than subtraction to avoid unsigned underflow when a
       // thread updates its timestamp between the now_ns capture and the load.
       // All three pipeline threads (capture, process, output) must be healthy
       // so a stalled output thread (e.g. blocked SQLite write) stops heartbeats.
-      const bool threads_healthy =
-          (cap_last + kStaleNs > now_ns) &&
-          (proc_last + kStaleNs > now_ns) &&
-          (out_last  + kStaleNs > now_ns);
+      const bool threads_healthy = (cap_last + kStaleNs > now_ns) &&
+                                   (proc_last + kStaleNs > now_ns) &&
+                                   (out_last + kStaleNs > now_ns);
       if (threads_healthy) {
         sd_notify(0, "WATCHDOG=1");
       }
