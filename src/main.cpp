@@ -197,8 +197,10 @@ std::ptrdiff_t SoapySdrSource::read_samples(std::span<std::complex<float>> buf) 
   long long time_ns = 0;
   const int n = SoapySDRDevice_readStream(dev_, stream_, buffs, buf.size(), &flags, &time_ns,
                                           read_timeout_us_);
-  if (n == SOAPY_SDR_TIMEOUT || n == SOAPY_SDR_OVERFLOW)
+  if (n == SOAPY_SDR_TIMEOUT)
     return 0;
+  if (n == SOAPY_SDR_OVERFLOW)
+    return -2;
   if (n < 0)
     return -1;
   return static_cast<std::ptrdiff_t>(n);
@@ -375,6 +377,7 @@ struct SnapTask {
 static void capture_loop(std::stop_token st, ISdrSource& sdr,
                          SpscRingBuffer<SampleBlock, 64>& out_buf, const Config& cfg,
                          std::atomic<std::uint64_t>& cap_dropped,
+                         std::atomic<std::uint64_t>& cap_overflow,
                          std::atomic<std::uint64_t>& cap_progress, std::atomic<bool>& cap_exiting) {
   std::vector<std::complex<float>> buf(cfg.block_len);
 
@@ -392,6 +395,11 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
                                        .count()),
         std::memory_order_relaxed);
     if (n <= 0) {
+      if (n == -2) {
+        // Hardware overflow: stream alive but samples were lost.
+        cap_overflow.fetch_add(1, std::memory_order_relaxed);
+        continue;
+      }
       if (n < 0) {
         std::cerr << "[CAPTURE] fatal read error\n";
         g_shutdown.store(true, std::memory_order_relaxed);
@@ -617,6 +625,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
                         Database& db, const Config& cfg, std::atomic<std::uint64_t>& snap_errors,
                         std::atomic<std::uint64_t>& snap_dropped,
                         std::atomic<std::uint64_t>& cap_dropped,
+                        std::atomic<std::uint64_t>& cap_overflow,
                         std::atomic<std::uint64_t>& proc_dropped,
                         std::atomic<std::uint64_t>& out_progress,
                         const std::atomic<bool>& proc_exiting,
@@ -766,6 +775,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
       metrics.snap_errors = snap_errors.load(std::memory_order_relaxed);
       metrics.snap_dropped = snap_dropped.load(std::memory_order_relaxed);
       metrics.frames_cap_dropped = cap_dropped.load(std::memory_order_relaxed);
+      metrics.sdr_overflow = cap_overflow.load(std::memory_order_relaxed);
       metrics.frames_proc_dropped = proc_dropped.load(std::memory_order_relaxed);
       write_prometheus_textfile(cfg.metrics_file, metrics);
       if (metrics_snapshot) {
@@ -788,6 +798,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   metrics.snap_errors = snap_errors.load(std::memory_order_relaxed);
   metrics.snap_dropped = snap_dropped.load(std::memory_order_relaxed);
   metrics.frames_cap_dropped = cap_dropped.load(std::memory_order_relaxed);
+  metrics.sdr_overflow = cap_overflow.load(std::memory_order_relaxed);
   metrics.frames_proc_dropped = proc_dropped.load(std::memory_order_relaxed);
   write_prometheus_textfile(cfg.metrics_file, metrics);
 }
@@ -880,6 +891,7 @@ int main(int argc, char** argv) {
   std::atomic<std::uint64_t> snap_errors{0};
   std::atomic<std::uint64_t> snap_dropped{0};
   std::atomic<std::uint64_t> cap_dropped{0};
+  std::atomic<std::uint64_t> cap_overflow{0};
   std::atomic<std::uint64_t> proc_dropped{0};
   // Set by capture_loop (release) after its main loop exits; read by proc_loop
   // (acquire) to detect that no further SampleBlocks will be pushed.
@@ -934,7 +946,7 @@ int main(int argc, char** argv) {
 #endif
 
   std::jthread cap_thread([&](std::stop_token st) {
-    capture_loop(st, *sdr, cap_to_proc, cfg, cap_dropped, cap_progress, cap_exiting);
+    capture_loop(st, *sdr, cap_to_proc, cfg, cap_dropped, cap_overflow, cap_progress, cap_exiting);
   });
 
   std::jthread proc_thread([&](std::stop_token st) {
@@ -943,8 +955,8 @@ int main(int argc, char** argv) {
   });
 
   std::jthread out_thread([&](std::stop_token st) {
-    output_loop(st, proc_to_out, *db, cfg, snap_errors, snap_dropped, cap_dropped, proc_dropped,
-                out_progress, proc_exiting, metrics_snapshot);
+    output_loop(st, proc_to_out, *db, cfg, snap_errors, snap_dropped, cap_dropped, cap_overflow,
+                proc_dropped, out_progress, proc_exiting, metrics_snapshot);
   });
 
 #ifdef HAVE_HTTPLIB

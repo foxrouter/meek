@@ -41,8 +41,10 @@ class ISdrSource {
   ISdrSource& operator=(const ISdrSource&) = delete;
 
   /// Read up to buf.size() IQ samples into buf.
-  /// Returns the number of samples actually read (may be less than requested).
-  /// Returns 0 on timeout or non-fatal error; < 0 on fatal error.
+  /// Returns  0 on timeout (non-fatal; caller should continue).
+  /// Returns -2 on hardware overflow (SOAPY_SDR_OVERFLOW); samples were lost
+  ///            but the stream is still alive — caller should count and continue.
+  /// Returns -1 on any other fatal error; caller should abort.
   [[nodiscard]] virtual std::ptrdiff_t read_samples(std::span<std::complex<float>> buf) = 0;
 
   [[nodiscard]] virtual double center_freq_hz() const noexcept = 0;
