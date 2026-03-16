@@ -126,10 +126,27 @@ run sudo install -m 755 -o root -g root "${REPO_ROOT}/ops/canary.sh" \
     "${MONITOR_SHARE}/ops/canary.sh"
 run sudo systemctl enable --now rf-adapt-intel-monitor.timer
 
-# Reload and restart
+# Reload and enable (create the WantedBy symlink without starting yet)
 run sudo systemctl daemon-reload
-run sudo systemctl enable --now "${SERVICE}"
-run sudo systemctl restart "${SERVICE}"
+run sudo systemctl enable "${SERVICE}"
+
+# Start the service; failure here is non-fatal because Restart=always will
+# retry automatically once the SDR device is attached and the binary is
+# installed.  A missing SDR at deploy time is expected on freshly imaged
+# nodes and should not abort an otherwise-successful installation.
+if $DRY_RUN; then
+  echo "[dry-run] sudo systemctl start ${SERVICE}"
+else
+  _start_rc=0
+  sudo systemctl start "${SERVICE}" || _start_rc=$?
+  if [[ ${_start_rc} -ne 0 ]]; then
+    echo ""
+    echo "[WARN] ${SERVICE} failed to start (exit ${_start_rc})."
+    echo "       This is usually caused by a missing SDR device or binary."
+    echo "       The service is enabled and will retry automatically (Restart=always)."
+    echo "       When the device is ready, run: sudo systemctl start ${SERVICE}"
+  fi
+fi
 
 echo ""
 echo "=== Service status ==="
