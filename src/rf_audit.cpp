@@ -31,11 +31,10 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <nlohmann/json.hpp>
 #include <span>
 #include <string>
 #include <vector>
-
-#include <nlohmann/json.hpp>
 
 #include "meek/band_profiles.hpp"
 #include "meek/classifier.hpp"
@@ -49,7 +48,7 @@ using json = nlohmann::json;
 // ---------------------------------------------------------------------------
 
 static std::vector<std::complex<float>> read_cf32(const std::string& path,
-                                                   std::size_t max_samples) {
+                                                  std::size_t max_samples) {
   std::ifstream f(path, std::ios::binary | std::ios::ate);
   if (!f) {
     std::cerr << "rf_audit: cannot open '" << path << "'\n";
@@ -62,13 +61,13 @@ static std::vector<std::complex<float>> read_cf32(const std::string& path,
   }
   const auto bytes = static_cast<std::size_t>(end_pos);
   if (bytes % 8 != 0) {
-    std::cerr << "rf_audit: file size not a multiple of 8 bytes: '" << path
-              << "'\n";
+    std::cerr << "rf_audit: file size not a multiple of 8 bytes: '" << path << "'\n";
     return {};
   }
   f.seekg(0);
   std::size_t n = bytes / 8;
-  if (max_samples > 0 && n > max_samples) n = max_samples;
+  if (max_samples > 0 && n > max_samples)
+    n = max_samples;
 
   std::vector<float> raw(n * 2);
   if (!f.read(reinterpret_cast<char*>(raw.data()),
@@ -86,17 +85,15 @@ static std::vector<std::complex<float>> read_cf32(const std::string& path,
 // ---------------------------------------------------------------------------
 
 static void print_usage(const char* prog) {
-  std::cerr
-      << "Usage: " << prog
-      << " [options] <file.cf32> [file2.cf32 ...]\n"
-      << "\n"
-      << "  --sample-rate FS     Sample rate in Hz (default: 2048000)\n"
-      << "  --center-freq HZ     Centre frequency for band matching (default: 0)\n"
-      << "  --block-size N       Analyse first N samples per file (0=all)\n"
-      << "  --snr-min DB         SNR gate in dB (default: 0.0)\n"
-      << "  --conf-threshold T   Min confidence to flag as candidate (default: 0.0)\n"
-      << "  --pretty             Pretty-print JSON\n"
-      << "  --help               Show this message\n";
+  std::cerr << "Usage: " << prog << " [options] <file.cf32> [file2.cf32 ...]\n"
+            << "\n"
+            << "  --sample-rate FS     Sample rate in Hz (default: 2048000)\n"
+            << "  --center-freq HZ     Centre frequency for band matching (default: 0)\n"
+            << "  --block-size N       Analyse first N samples per file (0=all)\n"
+            << "  --snr-min DB         SNR gate in dB (default: 0.0)\n"
+            << "  --conf-threshold T   Min confidence to flag as candidate (default: 0.0)\n"
+            << "  --pretty             Pretty-print JSON\n"
+            << "  --help               Show this message\n";
 }
 
 int main(int argc, char** argv) {
@@ -211,8 +208,7 @@ int main(int argc, char** argv) {
     j["p90"] = cr.p90;
     j["snr_gate_pass"] = cr.snr_gate_pass;
     j["bw_gate_pass"] = cr.bw_gate_pass;
-    j["is_candidate"] = (cr.confidence >= conf_threshold &&
-                          cr.snr_gate_pass && cr.bw_gate_pass);
+    j["is_candidate"] = (cr.confidence >= conf_threshold && cr.snr_gate_pass && cr.bw_gate_pass);
     if (!cr.band_name.empty()) {
       j["band"] = cr.band_name;
       j["band_notes"] = cr.band_notes;

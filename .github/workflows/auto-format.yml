@@ -1,0 +1,88 @@
+name: Auto-format C++
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  clang-format:
+    name: Apply clang-format to changed C++ files
+    runs-on: ubuntu-24.04
+    # Push-back only works for same-repo PRs; the default token cannot push
+    # to a fork. For fork PRs we still run the format check but skip the commit.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Check out by the commit SHA so the step works for both same-repo
+          # and fork PRs (github.head_ref is empty for fork PRs).  fetch-depth:0
+          # ensures the full branch history is available for git diff.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang-format-18
+          sudo ln -sf /usr/bin/clang-format-18 /usr/local/bin/clang-format
+
+      - name: Fetch base ref so git diff has both sides
+        run: |
+          # The shallow clone may not contain the base commit yet.
+          # Fetch the base branch so that git diff "$BASE" "$HEAD" succeeds.
+          git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
+
+      - name: Detect changed C++ files
+        id: changed
+        run: |
+          BASE=${{ github.event.pull_request.base.sha }}
+          HEAD=${{ github.event.pull_request.head.sha }}
+          # --diff-filter=ACMRT excludes deleted (D) files so clang-format
+          # won't try to open a path that no longer exists in the working tree.
+          # -z / xargs -0 uses NUL delimiters throughout to safely handle
+          # filenames that contain spaces, tabs, or other whitespace.
+          git diff --name-only -z --diff-filter=ACMRT "$BASE" "$HEAD" \
+            | grep -zE '\.(cpp|hpp)$' > /tmp/changed_cpp_files.txt || true
+          if [ -s /tmp/changed_cpp_files.txt ]; then
+            echo "has_files=true" >> "$GITHUB_OUTPUT"
+            echo "Found changed C++ files:"
+            xargs -0 -a /tmp/changed_cpp_files.txt printf '%s\n'
+          else
+            echo "has_files=false" >> "$GITHUB_OUTPUT"
+            echo "No C++ files changed."
+          fi
+
+      - name: Run clang-format on changed files
+        if: steps.changed.outputs.has_files == 'true'
+        run: |
+          xargs -0 -a /tmp/changed_cpp_files.txt clang-format -i
+
+      - name: Commit and push formatting fixes
+        # Only push back on same-repo PRs; the default GITHUB_TOKEN cannot
+        # write to a fork branch.
+        if: >-
+          steps.changed.outputs.has_files == 'true' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet; then
+            xargs -0 -a /tmp/changed_cpp_files.txt git add --
+            git commit -m "style: apply clang-format to PR changes"
+            # Push to the named head branch with an explicit refspec so that
+            # the detached-HEAD checkout (by SHA) still updates the right ref.
+            git push origin "HEAD:refs/heads/${{ github.head_ref }}"
+          else
+            echo "No formatting changes needed."
+          fi
+
+      - name: Fail if formatting changes remain
+        if: steps.changed.outputs.has_files == 'true'
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::clang-format violations found. Run clang-format locally and amend your commit."
+            git diff --stat
+            exit 1
+          fi
