@@ -133,12 +133,14 @@ run sudo systemctl enable --now rf-adapt-intel-monitor.timer
 # Enable process-worker (create the WantedBy symlink without starting yet)
 run sudo systemctl enable "${SERVICE}"
 
-# Try-restart the service so that:
-#   - If already running: the updated unit is applied immediately (rolling out
-#     any unit/drop-in changes without a manual restart).
-#   - If stopped/inactive: try-restart is a no-op; a separate start is issued
-#     so the service comes up on freshly provisioned nodes.
-# Failure in either case is non-fatal; a missing SDR device or binary at
+# Roll out unit changes on already-running instances and ensure the service
+# is running on freshly provisioned nodes:
+#   1. try-restart: restarts the service if it is currently active, applying
+#      any unit/drop-in changes immediately.  If the service is
+#      stopped/inactive it exits 0 (no-op), so step 2 is always needed.
+#   2. start: starts the service if it is not yet running (idempotent when
+#      already active after step 1).
+# Failures in both steps are non-fatal; a missing SDR device or binary at
 # deploy time is expected on freshly imaged nodes.
 # NOTE: Restart=always retries automatically, but StartLimitBurst=5 within
 # StartLimitIntervalSec=120s caps consecutive fast failures.  If the start
@@ -148,15 +150,9 @@ if $DRY_RUN; then
   echo "[dry-run] sudo systemctl try-restart ${SERVICE}"
   echo "[dry-run] sudo systemctl start ${SERVICE}"
 else
+  sudo systemctl try-restart "${SERVICE}" || true
   _start_rc=0
-  sudo systemctl try-restart "${SERVICE}" || _start_rc=$?
-  if [[ ${_start_rc} -ne 0 ]]; then
-    # try-restart failed while the service was active — attempt a plain start
-    # as a fallback (handles the race where the unit became inactive between
-    # the try-restart check and the restart).
-    _start_rc=0
-    sudo systemctl start "${SERVICE}" || _start_rc=$?
-  fi
+  sudo systemctl start "${SERVICE}" || _start_rc=$?
   if [[ ${_start_rc} -ne 0 ]]; then
     echo ""
     echo "[WARN] ${SERVICE} failed to start (exit ${_start_rc})."
