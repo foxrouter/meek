@@ -163,10 +163,6 @@ install_deps() {
   else
     # Build tools — only needed on nodes that compile rf_adapt_intel
     pkgs+=(build-essential cmake pkg-config libsqlite3-dev libsystemd-dev)
-    # GCC 13 is required for C++23 stdlib features on Bookworm (default is GCC 12)
-    if [[ "${PLATFORM}" == "bookworm" ]]; then
-      pkgs+=(gcc-13 g++-13)
-    fi
     # SoapySDR — only needed on SDR nodes (compile-time headers + runtime + utilities)
     pkgs+=(libsoapysdr-dev soapysdr-tools)
     # SDR hardware packages — only needed on nodes with an attached RTL-SDR dongle
@@ -233,15 +229,9 @@ EOF"
 build_worker() {
   log "Building rf_adapt_intel..."
   local build_dir="${REPO_ROOT}/build"
-  local cmake_extra_args=()
-  # On Bookworm the default compiler is GCC 12; select GCC 13 explicitly so the
-  # C++23 stdlib feature probe (check_cxx_source_compiles) succeeds.
-  if [[ "${PLATFORM}" == "bookworm" ]]; then
-    cmake_extra_args+=(-DCMAKE_CXX_COMPILER=g++-13)
-  fi
 
   run mkdir -p "${build_dir}"
-  run cmake -S "${REPO_ROOT}" -B "${build_dir}" -DCMAKE_BUILD_TYPE=Release "${cmake_extra_args[@]}"
+  run cmake -S "${REPO_ROOT}" -B "${build_dir}" -DCMAKE_BUILD_TYPE=Release
   run cmake --build "${build_dir}" -- -j"$(nproc)"
 
   info "Build complete."

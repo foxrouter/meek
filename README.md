@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/foxrouter/meek/actions/workflows/ci.yml/badge.svg)](https://github.com/foxrouter/meek/actions/workflows/ci.yml)
 
-A C++23 RF signal-processing worker that captures IQ samples via SoapySDR,
+A C++20 RF signal-processing worker that captures IQ samples via SoapySDR,
 classifies modulation (GMSK/FSK/PSK/QAM/OOK), and persists results to SQLite.
 Deployed as a hardened systemd service on embedded Linux (Raspberry Pi and Ubuntu server).
 
@@ -144,7 +144,7 @@ Key design decisions:
 
 | Component | Minimum version | Notes |
 |---|---|---|
-| GCC or Clang | C++23 capable | see [Compiler requirements](#compiler-requirements) |
+| GCC or Clang | C++20 capable | see [Compiler requirements](#compiler-requirements) |
 | CMake | 3.25 | Build system |
 | SoapySDR | any | `libsoapysdr-dev` on Debian/Ubuntu |
 | SQLite 3 | any | `libsqlite3-dev` |
@@ -152,27 +152,19 @@ Key design decisions:
 | liquid-dsp | optional | Advanced demodulation — see [Optional decoder setup](#optional-decoder-setup-opssetupsh) |
 
 ### Compiler requirements
-- GCC ≥ 13 or Clang ≥ 17 (C++23 stdlib required)
-- On Raspberry Pi OS Bookworm: `sudo apt install gcc-13 g++-13`
-- Pass `-DCMAKE_CXX_COMPILER=g++-13` to cmake on Bookworm nodes
+- GCC ≥ 12 or Clang ≥ 14 (C++20 stdlib required)
+- On Raspberry Pi OS Bookworm the default GCC (12) satisfies this requirement
 
-On Raspberry Pi OS Bookworm (installs GCC 13 alongside the default GCC 12):
+On Raspberry Pi OS Bookworm:
 
 ```bash
-sudo apt install -y build-essential cmake pkg-config gcc-13 g++-13 \
+sudo apt install -y build-essential cmake pkg-config \
     libsoapysdr-dev soapysdr-tools soapysdr-module-rtlsdr \
     libsqlite3-dev python3 python3-numpy \
     rtl-sdr librtlsdr-dev inotify-tools rsync
 ```
 
-Then configure with the GCC 13 compiler explicitly:
-
-```bash
-rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-13
-cmake --build build -- -j$(nproc)
-```
-
-On Ubuntu Noble (24.04) or later (default GCC is already ≥ 13):
+On Ubuntu Noble (24.04) or later (default GCC is already ≥ 12):
 
 ```bash
 sudo apt install -y build-essential cmake pkg-config \
@@ -182,10 +174,6 @@ sudo apt install -y build-essential cmake pkg-config \
 ```
 
 ## Build
-
-> **Raspberry Pi OS Bookworm:** the default compiler is GCC 12 and will be
-> rejected by the feature probe. Follow the [Compiler requirements](#compiler-requirements)
-> steps above to install GCC 13 and pass `-DCMAKE_CXX_COMPILER=g++-13`.
 
 ```bash
 mkdir build && cd build
@@ -267,7 +255,7 @@ so the `process-worker` systemd service picks them up automatically.
 
 ## Offline IQ metrics (`tools/iq_metrics.cpp`)
 
-`iq_metrics` is a standalone C++23 tool that reads raw CF32 IQ snapshot files
+`iq_metrics` is a standalone C++20 tool that reads raw CF32 IQ snapshot files
 and computes four signal metrics: `avg_power`, `snr_db`, `spectral_flatness`,
 and `est_bw_hz`.  It mirrors the Python reference in
 `tools/autotune_thresholds.py` and is validated against it by
