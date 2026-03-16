@@ -80,7 +80,7 @@ int main() {
 ]=] _STDCXX_FEATURES_AVAILABLE)
   cmake_pop_check_state()
   if(NOT _STDCXX_FEATURES_AVAILABLE)
-    # Provide targeted guidance for the most common failure: GCC < 10 or old Clang.
+    # Provide targeted guidance for the most common failure: GCC < 12.
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
        AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "12.0")
       message(FATAL_ERROR
