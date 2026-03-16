@@ -16,10 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # For same-repo PRs, check out the head branch by name so that a
-          # subsequent `git push` targets the correct ref. For fork PRs this
-          # value is still populated but the push step is skipped entirely.
-          ref: ${{ github.head_ref }}
+          # Check out by the commit SHA so the step works for both same-repo
+          # and fork PRs (github.head_ref is empty for fork PRs).  fetch-depth:0
+          # ensures the full branch history is available for git diff.
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Install clang-format
@@ -27,6 +27,12 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends clang-format-18
           sudo ln -sf /usr/bin/clang-format-18 /usr/local/bin/clang-format
+
+      - name: Fetch base ref so git diff has both sides
+        run: |
+          # The shallow clone may not contain the base commit yet.
+          # Fetch the base branch so that git diff "$BASE" "$HEAD" succeeds.
+          git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
 
       - name: Detect changed C++ files
         id: changed
@@ -65,7 +71,9 @@ jobs:
           if ! git diff --quiet; then
             xargs -0 -a /tmp/changed_cpp_files.txt git add --
             git commit -m "style: apply clang-format to PR changes [skip ci]"
-            git push
+            # Push to the named head branch with an explicit refspec so that
+            # the detached-HEAD checkout (by SHA) still updates the right ref.
+            git push origin "HEAD:refs/heads/${{ github.head_ref }}"
           else
             echo "No formatting changes needed."
           fi
