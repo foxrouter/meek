@@ -124,16 +124,21 @@ run sudo install -m 644 -o root -g root "${MONITOR_TMR_SRC}" \
 run sudo mkdir -p "${MONITOR_SHARE}/ops"
 run sudo install -m 755 -o root -g root "${REPO_ROOT}/ops/canary.sh" \
     "${MONITOR_SHARE}/ops/canary.sh"
+
+# Reload first so both the updated monitor unit (no Wants= dependency) and the
+# main service unit are picked up before any `enable --now` fires the timer.
+run sudo systemctl daemon-reload
 run sudo systemctl enable --now rf-adapt-intel-monitor.timer
 
-# Reload and enable (create the WantedBy symlink without starting yet)
-run sudo systemctl daemon-reload
+# Enable process-worker (create the WantedBy symlink without starting yet)
 run sudo systemctl enable "${SERVICE}"
 
-# Start the service; failure here is non-fatal because Restart=always will
-# retry automatically once the SDR device is attached and the binary is
-# installed.  A missing SDR at deploy time is expected on freshly imaged
-# nodes and should not abort an otherwise-successful installation.
+# Start the service; failure here is non-fatal.  A missing SDR device or
+# binary at deploy time is expected on freshly imaged nodes.
+# NOTE: Restart=always retries automatically, but StartLimitBurst=5 within
+# StartLimitIntervalSec=120s caps consecutive fast failures.  If the start
+# limit is hit, run the following to unblock automatic restarts:
+#   sudo systemctl reset-failed process-worker && sudo systemctl start process-worker
 if $DRY_RUN; then
   echo "[dry-run] sudo systemctl start ${SERVICE}"
 else
@@ -143,8 +148,11 @@ else
     echo ""
     echo "[WARN] ${SERVICE} failed to start (exit ${_start_rc})."
     echo "       This is usually caused by a missing SDR device or binary."
-    echo "       The service is enabled and will retry automatically (Restart=always)."
-    echo "       When the device is ready, run: sudo systemctl start ${SERVICE}"
+    echo "       The service is enabled and will retry (Restart=always,"
+    echo "       StartLimitBurst=5 per 120 s window)."
+    echo "       If the start limit is reached, unblock with:"
+    echo "         sudo systemctl reset-failed ${SERVICE}"
+    echo "         sudo systemctl start ${SERVICE}"
   fi
 fi
 
