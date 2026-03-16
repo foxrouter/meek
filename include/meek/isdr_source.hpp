@@ -41,7 +41,6 @@ class ISdrSource {
   ISdrSource& operator=(const ISdrSource&) = delete;
 
   /// Read up to buf.size() IQ samples into buf.
-  /// Returns the number of samples actually read (may be less than requested).
   /// Returns  0 on timeout (non-fatal; caller should continue).
   /// Returns -2 on hardware overflow (SOAPY_SDR_OVERFLOW); samples were lost
   ///            but the stream is still alive — caller should count and continue.
