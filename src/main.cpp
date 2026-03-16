@@ -840,7 +840,8 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "rf_adapt_intel v3 (C++23)\n"
-            << "  center=" << cfg.center_freq << " Hz" << "  rate=" << cfg.sample_rate << " Sps"
+            << "  center=" << cfg.center_freq << " Hz"
+            << "  rate=" << cfg.sample_rate << " Sps"
             << "  gain=" << cfg.gain << "\n"
             << "  block_len=" << cfg.block_len << "  analysis_len=" << cfg.analysis_len
             << "  conf_threshold=" << cfg.conf_threshold << "  snr_min_db=" << cfg.snr_min_db
