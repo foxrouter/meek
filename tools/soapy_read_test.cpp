@@ -3,6 +3,7 @@
 #include <SoapySDR/Device.h>
 #include <SoapySDR/Errors.h>
 #include <SoapySDR/Formats.h>
+
 #include <chrono>
 #include <complex>
 #include <cstdint>
@@ -15,7 +16,7 @@ int main(int argc, char** argv) {
   double srate = 1000000;
   double gain = 20;
   size_t block_len = 4096;
-  long long timeout_us = 500000; // 500 ms
+  long long timeout_us = 500000;  // 500 ms
 
   if (argc >= 2)
     center = std::stod(argv[1]);
@@ -43,8 +44,8 @@ int main(int argc, char** argv) {
   SoapySDRDevice_setGainMode(dev, SOAPY_SDR_RX, 0, 0);
   SoapySDRDevice_setGain(dev, SOAPY_SDR_RX, 0, gain);
 
-  SoapySDRStream* rxStream = SoapySDRDevice_setupStream(
-      dev, SOAPY_SDR_RX, SOAPY_SDR_CF32, nullptr, 0, nullptr);
+  SoapySDRStream* rxStream =
+      SoapySDRDevice_setupStream(dev, SOAPY_SDR_RX, SOAPY_SDR_CF32, nullptr, 0, nullptr);
   if (!rxStream) {
     std::cerr << "Failed to setup RX stream\n";
     SoapySDRDevice_unmake(dev);
@@ -59,8 +60,7 @@ int main(int argc, char** argv) {
     auto t0 = std::chrono::steady_clock::now();
     int flags = 0;
     long long ts = 0;
-    int ret = SoapySDRDevice_readStream(dev, rxStream, buffs, block_len,
-                                        &flags, &ts, timeout_us);
+    int ret = SoapySDRDevice_readStream(dev, rxStream, buffs, block_len, &flags, &ts, timeout_us);
     auto t1 = std::chrono::steady_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
     std::cout << "[" << i << "] ret=" << ret << " err=\"" << SoapySDR_errToStr(ret) << "\""
