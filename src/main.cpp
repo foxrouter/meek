@@ -270,8 +270,9 @@ static void prune_old_snapshots(const std::string& dir, int retention_days) {
 
 struct JsonLog {
   // max_bytes: rotate when log file reaches this size (0 = disabled).
-  explicit JsonLog(const std::string& path, std::uintmax_t max_bytes = 50ULL * 1024 * 1024)
-      : path_(path), max_bytes_(max_bytes) {
+  explicit JsonLog(const std::string& path, std::uintmax_t max_bytes = 50ULL * 1024 * 1024,
+                   int keep_backups = 5)
+      : path_(path), max_bytes_(max_bytes), keep_backups_(keep_backups) {
     if (path_.empty())
       return;
     try {
