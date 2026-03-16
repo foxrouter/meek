@@ -20,15 +20,15 @@ namespace meek {
 // ---------------------------------------------------------------------------
 
 struct BandProfile {
-  std::string_view name;          // short ID e.g. "ADS-B"
-  std::string_view description;   // human-readable label
-  double center_hz;               // nominal centre frequency (Hz)
-  double tolerance_hz;            // ±match window (Hz)
-  double expected_bw_hz;          // expected occupied bandwidth (Hz)
-  ModClass expected_mod;          // classifier prior hint
-  double snr_min_db;  // band-specific SNR gate (-999 = use global default)
-  double prior_boost;  // score boost added to expected_mod class [0,1]
-  std::string_view notes;          // extra info shown in decision trace / logs
+  std::string_view name;         // short ID e.g. "ADS-B"
+  std::string_view description;  // human-readable label
+  double center_hz;              // nominal centre frequency (Hz)
+  double tolerance_hz;           // ±match window (Hz)
+  double expected_bw_hz;         // expected occupied bandwidth (Hz)
+  ModClass expected_mod;         // classifier prior hint
+  double snr_min_db;             // band-specific SNR gate (-999 = use global default)
+  double prior_boost;            // score boost added to expected_mod class [0,1]
+  std::string_view notes;        // extra info shown in decision trace / logs
 };
 
 // Sentinel value meaning "use the global default SNR gate".

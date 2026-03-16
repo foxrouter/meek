@@ -71,7 +71,8 @@ namespace detail {
 
 inline std::int64_t env_ll(const char* name, std::int64_t def) noexcept {
   const char* v = std::getenv(name);
-  if (!v) return def;
+  if (!v)
+    return def;
   try {
     return std::stoll(v);
   } catch (...) {
@@ -81,7 +82,8 @@ inline std::int64_t env_ll(const char* name, std::int64_t def) noexcept {
 
 inline double env_d(const char* name, double def) noexcept {
   const char* v = std::getenv(name);
-  if (!v) return def;
+  if (!v)
+    return def;
   try {
     return std::stod(v);
   } catch (...) {
@@ -120,36 +122,40 @@ inline std::string env_str(const char* name, const char* def) {
       throw std::invalid_argument(std::string("invalid value for ") + name + ": '" + raw + "'");
     }
   };
-  if (argc >= 2) cfg.center_freq = parse_arg("center_freq_Hz", argv[1]);
-  if (argc >= 3) cfg.sample_rate = parse_arg("sample_rate_Sps", argv[2]);
-  if (argc >= 4) cfg.gain = parse_arg("gain", argv[3]);
+  if (argc >= 2)
+    cfg.center_freq = parse_arg("center_freq_Hz", argv[1]);
+  if (argc >= 3)
+    cfg.sample_rate = parse_arg("sample_rate_Sps", argv[2]);
+  if (argc >= 4)
+    cfg.gain = parse_arg("gain", argv[3]);
 
   // Capture
-  cfg.block_len = static_cast<std::size_t>(
-      detail::env_ll("RF_BLOCK_LEN", detail::env_ll("BLOCK_LEN", 4096)));
+  cfg.block_len =
+      static_cast<std::size_t>(detail::env_ll("RF_BLOCK_LEN", detail::env_ll("BLOCK_LEN", 4096)));
 
   // RF_ANALYSIS_LEN: clamp in signed space before casting to avoid negative
   // values wrapping when converted to size_t. Must be at least
   // kMinClassifyBlockSamples and no more than block_len (wider window adds
   // no benefit and would exceed the buffer).
   std::int64_t analysis_len_ll = detail::env_ll("RF_ANALYSIS_LEN", 4096);
-  const std::int64_t min_analysis_ll =
-      static_cast<std::int64_t>(kMinClassifyBlockSamples);
-  const std::int64_t max_analysis_ll =
-      static_cast<std::int64_t>(cfg.block_len);
-  if (analysis_len_ll < min_analysis_ll) analysis_len_ll = min_analysis_ll;
-  if (analysis_len_ll > max_analysis_ll) analysis_len_ll = max_analysis_ll;
+  const std::int64_t min_analysis_ll = static_cast<std::int64_t>(kMinClassifyBlockSamples);
+  const std::int64_t max_analysis_ll = static_cast<std::int64_t>(cfg.block_len);
+  if (analysis_len_ll < min_analysis_ll)
+    analysis_len_ll = min_analysis_ll;
+  if (analysis_len_ll > max_analysis_ll)
+    analysis_len_ll = max_analysis_ll;
   cfg.analysis_len = static_cast<std::size_t>(analysis_len_ll);
   cfg.read_timeout_us =
-      detail::env_ll("RF_READ_TIMEOUT_US",
-                     detail::env_ll("READ_TIMEOUT_US", 500'000));
+      detail::env_ll("RF_READ_TIMEOUT_US", detail::env_ll("READ_TIMEOUT_US", 500'000));
   // Clamp to [1, kMaxReadTimeoutUs] so negative/zero/enormous values cannot
   // wrap or overflow when used as a SoapySDR timeout or to derive the watchdog
   // stale window.  1 µs is effectively instant; 300 s matches the upper cap
   // used by the watchdog stale-window calculation in src/main.cpp.
   constexpr std::int64_t kMaxReadTimeoutUs = 300'000'000LL;  // 300 s
-  if (cfg.read_timeout_us < 1) cfg.read_timeout_us = 1;
-  if (cfg.read_timeout_us > kMaxReadTimeoutUs) cfg.read_timeout_us = kMaxReadTimeoutUs;
+  if (cfg.read_timeout_us < 1)
+    cfg.read_timeout_us = 1;
+  if (cfg.read_timeout_us > kMaxReadTimeoutUs)
+    cfg.read_timeout_us = kMaxReadTimeoutUs;
 
   // Processing
   cfg.min_power = detail::env_d("RF_MIN_POWER", 5e-6);
@@ -187,24 +193,17 @@ inline std::string env_str(const char* name, const char* def) {
   }
 
   // Output paths
-  cfg.db_path = detail::env_str("RF_DB_PATH",
-                                "/var/lib/rf-adapt-intel/rf_adapt_intel.db");
-  cfg.snapshot_dir =
-      detail::env_str("RF_SNAPSHOT_DIR", "/var/lib/rf-adapt-intel/snapshots");
-  cfg.metrics_file =
-      detail::env_str("RF_METRICS_FILE", "/var/lib/rf-adapt-intel/metrics.prom");
-  cfg.heartbeat_file =
-      detail::env_str("RF_HEARTBEAT_FILE", "/var/lib/rf-adapt-intel/heartbeat");
-  cfg.worker_log =
-      detail::env_str("RF_WORKER_LOG", "/var/lib/rf-adapt-intel/worker.log");
+  cfg.db_path = detail::env_str("RF_DB_PATH", "/var/lib/rf-adapt-intel/rf_adapt_intel.db");
+  cfg.snapshot_dir = detail::env_str("RF_SNAPSHOT_DIR", "/var/lib/rf-adapt-intel/snapshots");
+  cfg.metrics_file = detail::env_str("RF_METRICS_FILE", "/var/lib/rf-adapt-intel/metrics.prom");
+  cfg.heartbeat_file = detail::env_str("RF_HEARTBEAT_FILE", "/var/lib/rf-adapt-intel/heartbeat");
+  cfg.worker_log = detail::env_str("RF_WORKER_LOG", "/var/lib/rf-adapt-intel/worker.log");
 
   // Retention
-  cfg.snapshot_retention_days =
-      static_cast<int>(detail::env_ll("RF_SNAPSHOT_RETENTION_DAYS", 0));
+  cfg.snapshot_retention_days = static_cast<int>(detail::env_ll("RF_SNAPSHOT_RETENTION_DAYS", 0));
 
   // Prometheus HTTP port (0 = disabled)
-  cfg.prometheus_port = static_cast<std::uint16_t>(
-      detail::env_ll("RF_PROMETHEUS_PORT", 0));
+  cfg.prometheus_port = static_cast<std::uint16_t>(detail::env_ll("RF_PROMETHEUS_PORT", 0));
 
   return cfg;
 }
