@@ -43,8 +43,7 @@ class SpscRingBuffer {
   /// Push a copy of item.  Returns true on success, false if the buffer is
   /// full.  The item is only copied after the full-check passes.
   /// Called from the producer thread only.
-  [[nodiscard]] bool push(const T& item) noexcept(
-      std::is_nothrow_copy_assignable_v<T>) {
+  [[nodiscard]] bool push(const T& item) noexcept(std::is_nothrow_copy_assignable_v<T>) {
     const std::size_t head = head_.load(std::memory_order_relaxed);
     const std::size_t next = (head + 1) & kMask;
     if (next == tail_.load(std::memory_order_acquire)) {
@@ -58,8 +57,7 @@ class SpscRingBuffer {
   /// Push by move.  Returns true on success, false if the buffer is full.
   /// The item is only moved after the full-check passes; on false the caller's
   /// value remains valid.
-  [[nodiscard]] bool push(T&& item) noexcept(
-      std::is_nothrow_move_assignable_v<T>) {
+  [[nodiscard]] bool push(T&& item) noexcept(std::is_nothrow_move_assignable_v<T>) {
     const std::size_t head = head_.load(std::memory_order_relaxed);
     const std::size_t next = (head + 1) & kMask;
     if (next == tail_.load(std::memory_order_acquire)) {
@@ -89,7 +87,9 @@ class SpscRingBuffer {
     return (h - t) & kMask;
   }
 
-  [[nodiscard]] bool empty_approx() const noexcept { return size_approx() == 0; }
+  [[nodiscard]] bool empty_approx() const noexcept {
+    return size_approx() == 0;
+  }
 
   /// Effective usable capacity (one slot reserved as sentinel).
   [[nodiscard]] static constexpr std::size_t capacity() noexcept {

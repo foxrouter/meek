@@ -1,0 +1,60 @@
+name: Auto-format C++
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  clang-format:
+    name: Apply clang-format to changed C++ files
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch the PR branch with full history so we can diff against base
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang-format-18
+          sudo ln -sf /usr/bin/clang-format-18 /usr/local/bin/clang-format
+
+      - name: Detect changed C++ files
+        id: changed
+        run: |
+          BASE=${{ github.event.pull_request.base.sha }}
+          HEAD=${{ github.event.pull_request.head.sha }}
+          FILES=$(git diff --name-only "$BASE" "$HEAD" \
+            | grep -E '\.(cpp|hpp)$' || true)
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          if [ -n "$FILES" ]; then
+            echo "Found changed C++ files:"
+            echo "$FILES"
+          else
+            echo "No C++ files changed."
+          fi
+
+      - name: Run clang-format on changed files
+        if: steps.changed.outputs.files != ''
+        run: |
+          # Word-split intentional: each file is a separate argument
+          # shellcheck disable=SC2086
+          clang-format -i ${{ steps.changed.outputs.files }}
+
+      - name: Commit and push formatting fixes
+        if: steps.changed.outputs.files != ''
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet; then
+            git add ${{ steps.changed.outputs.files }}
+            git commit -m "style: apply clang-format to PR changes [skip ci]"
+            git push
+          else
+            echo "No formatting changes needed."
+          fi

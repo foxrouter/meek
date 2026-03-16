@@ -48,11 +48,11 @@ enum class ModClass : std::uint8_t {
 // ---------------------------------------------------------------------------
 
 enum class DemodStatus : std::uint8_t {
-  UNKNOWN = 0,   // demod not attempted / status not set
-  SKIPPED,       // demod was intentionally skipped (e.g. mod_class == ModClass::UNKNOWN)
-  OK,            // demod succeeded
-  CRC_FAIL,      // demod ran but CRC check failed
-  LOCK_FAIL,     // carrier/timing lock was not achieved
+  UNKNOWN = 0,  // demod not attempted / status not set
+  SKIPPED,      // demod was intentionally skipped (e.g. mod_class == ModClass::UNKNOWN)
+  OK,           // demod succeeded
+  CRC_FAIL,     // demod ran but CRC check failed
+  LOCK_FAIL,    // carrier/timing lock was not achieved
 };
 
 [[nodiscard]] constexpr const char* demod_status_name(DemodStatus s) noexcept {
@@ -123,9 +123,9 @@ struct ClassificationResult {
   // demod_lock_ms are populated only when demod_status is OK, CRC_FAIL, or
   // LOCK_FAIL.  All fields default to zero/UNKNOWN when demod was not run.
   DemodStatus demod_status{DemodStatus::UNKNOWN};
-  float       demod_cfo_hz{0.0f};       // carrier frequency offset (Hz)
-  float       demod_phase_error{0.0f};  // RMS phase error (radians)
-  int         demod_lock_ms{0};         // time to carrier lock (ms); 0 = not locked
+  float demod_cfo_hz{0.0f};       // carrier frequency offset (Hz)
+  float demod_phase_error{0.0f};  // RMS phase error (radians)
+  int demod_lock_ms{0};           // time to carrier lock (ms); 0 = not locked
 };
 
 // Minimum number of IQ samples required for a meaningful block classification.

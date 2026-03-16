@@ -113,20 +113,19 @@ inline std::unique_ptr<Database> Database::open(const std::string& path) {
   {
     const int bt_rc = sqlite3_busy_timeout(raw, 5000);
     if (bt_rc != SQLITE_OK) {
-      std::cerr << "[DB] sqlite3_busy_timeout failed: " << sqlite3_errstr(bt_rc)
-                << " (rc=" << bt_rc << ") - SQLITE_BUSY errors may reach callers immediately\n";
+      std::cerr << "[DB] sqlite3_busy_timeout failed: " << sqlite3_errstr(bt_rc) << " (rc=" << bt_rc
+                << ") - SQLITE_BUSY errors may reach callers immediately\n";
     }
   }
   // Increase page cache to reduce write stalls under burst classification.
   // Negative value is in KiB: -8000 = 8000 KiB (~8 MiB).
   {
     char* cache_err = nullptr;
-    const int cache_rc = sqlite3_exec(raw, "PRAGMA cache_size = -8000;",
-                                      nullptr, nullptr, &cache_err);
+    const int cache_rc =
+        sqlite3_exec(raw, "PRAGMA cache_size = -8000;", nullptr, nullptr, &cache_err);
     if (cache_rc != SQLITE_OK) {
       std::cerr << "[DB] cache_size pragma failed: "
-                << (cache_err ? cache_err : sqlite3_errmsg(raw))
-                << " - using default page cache\n";
+                << (cache_err ? cache_err : sqlite3_errmsg(raw)) << " - using default page cache\n";
       sqlite3_free(cache_err);
     }
   }
@@ -199,8 +198,7 @@ inline bool Database::apply_schema() {
   {
     char* idx_err = nullptr;
     if (sqlite3_exec(db_, kIndexes, nullptr, nullptr, &idx_err) != SQLITE_OK) {
-      std::cerr << "[DB] apply indexes: "
-                << (idx_err ? idx_err : sqlite3_errmsg(db_)) << "\n";
+      std::cerr << "[DB] apply indexes: " << (idx_err ? idx_err : sqlite3_errmsg(db_)) << "\n";
       sqlite3_free(idx_err);
       // Roll back any partial transaction so the connection is not left with
       // schema locks held before migrations and prepare_statements() run.
@@ -221,8 +219,8 @@ inline bool Database::apply_schema() {
   // the column is genuinely absent.
   {
     char* mig_err = nullptr;
-    const int mig_rc = sqlite3_exec(db_, "ALTER TABLE signals ADD COLUMN notes TEXT;",
-                                    nullptr, nullptr, &mig_err);
+    const int mig_rc =
+        sqlite3_exec(db_, "ALTER TABLE signals ADD COLUMN notes TEXT;", nullptr, nullptr, &mig_err);
     if (mig_rc != SQLITE_OK) {
       const std::string msg = mig_err ? mig_err : sqlite3_errmsg(db_);
       sqlite3_free(mig_err);
@@ -239,8 +237,8 @@ inline bool Database::apply_schema() {
   // insert_method statement unless the column is added here at startup.
   {
     char* mig_err = nullptr;
-    const int mig_rc = sqlite3_exec(db_, "ALTER TABLE methods ADD COLUMN params TEXT;",
-                                    nullptr, nullptr, &mig_err);
+    const int mig_rc = sqlite3_exec(db_, "ALTER TABLE methods ADD COLUMN params TEXT;", nullptr,
+                                    nullptr, &mig_err);
     if (mig_rc != SQLITE_OK) {
       const std::string msg = mig_err ? mig_err : sqlite3_errmsg(db_);
       sqlite3_free(mig_err);
