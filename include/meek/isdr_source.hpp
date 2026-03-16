@@ -46,8 +46,7 @@ class ISdrSource {
   /// Returns -2 on hardware overflow (SOAPY_SDR_OVERFLOW); samples were lost
   ///            but the stream is still alive — caller should count and continue.
   /// Returns -1 on any other fatal error; caller should abort.
-  [[nodiscard]] virtual std::ptrdiff_t read_samples(
-      std::span<std::complex<float>> buf) = 0;
+  [[nodiscard]] virtual std::ptrdiff_t read_samples(std::span<std::complex<float>> buf) = 0;
 
   [[nodiscard]] virtual double center_freq_hz() const noexcept = 0;
   [[nodiscard]] virtual double sample_rate_hz() const noexcept = 0;
@@ -81,8 +80,7 @@ class SoapySdrSource final : public ISdrSource {
 
   ~SoapySdrSource() override;
 
-  [[nodiscard]] std::ptrdiff_t read_samples(
-      std::span<std::complex<float>> buf) override;
+  [[nodiscard]] std::ptrdiff_t read_samples(std::span<std::complex<float>> buf) override;
 
   [[nodiscard]] double center_freq_hz() const noexcept override {
     return center_freq_hz_;
@@ -90,8 +88,12 @@ class SoapySdrSource final : public ISdrSource {
   [[nodiscard]] double sample_rate_hz() const noexcept override {
     return sample_rate_hz_;
   }
-  [[nodiscard]] bool is_open() const noexcept override { return dev_ != nullptr; }
-  [[nodiscard]] std::string description() const override { return description_; }
+  [[nodiscard]] bool is_open() const noexcept override {
+    return dev_ != nullptr;
+  }
+  [[nodiscard]] std::string description() const override {
+    return description_;
+  }
 
  private:
   SoapySDRDevice* dev_{nullptr};
@@ -103,8 +105,7 @@ class SoapySdrSource final : public ISdrSource {
 };
 
 // Verify that SoapySdrSource satisfies the concept.
-static_assert(SdrSourceConcept<SoapySdrSource>,
-              "SoapySdrSource does not satisfy SdrSourceConcept");
+static_assert(SdrSourceConcept<SoapySdrSource>, "SoapySdrSource does not satisfy SdrSourceConcept");
 
 #endif  // HAVE_SOAPY
 
