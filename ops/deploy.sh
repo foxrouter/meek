@@ -124,12 +124,57 @@ run sudo install -m 644 -o root -g root "${MONITOR_TMR_SRC}" \
 run sudo mkdir -p "${MONITOR_SHARE}/ops"
 run sudo install -m 755 -o root -g root "${REPO_ROOT}/ops/canary.sh" \
     "${MONITOR_SHARE}/ops/canary.sh"
+
+# Reload first so both the updated monitor unit (no Wants= dependency) and the
+# main service unit are picked up before any `enable --now` fires the timer.
+run sudo systemctl daemon-reload
 run sudo systemctl enable --now rf-adapt-intel-monitor.timer
 
-# Reload and restart
-run sudo systemctl daemon-reload
-run sudo systemctl enable --now "${SERVICE}"
-run sudo systemctl restart "${SERVICE}"
+# Enable process-worker (create the WantedBy symlink without starting yet)
+run sudo systemctl enable "${SERVICE}"
+
+# Roll out unit changes on already-running instances and ensure the service
+# is running on freshly provisioned nodes.  We skip start/restart when the
+# ExecStart binary is absent to avoid consuming StartLimitBurst on a
+# guaranteed failure (the unit is still enabled and will start automatically
+# once the binary is installed).
+_EXEC_BIN=/usr/local/bin/rf_adapt_intel
+if $DRY_RUN; then
+  if [[ -x "${_EXEC_BIN}" ]]; then
+    echo "[dry-run] sudo systemctl try-restart ${SERVICE}"
+    echo "[dry-run] sudo systemctl start ${SERVICE}"
+  else
+    echo "[dry-run] skip start — ${_EXEC_BIN} not found; unit enabled, will start after install"
+  fi
+elif [[ ! -x "${_EXEC_BIN}" ]]; then
+  echo ""
+  echo "[WARN] ${_EXEC_BIN} not found — skipping start of ${SERVICE}."
+  echo "       The unit is enabled and will start automatically once the binary is installed."
+else
+  # Binary is present.
+  #   1. try-restart: if already active, restart immediately so unit/drop-in
+  #      changes take effect.  No-op (exits 0) when inactive.
+  #   2. start: always issued so the service comes up on freshly provisioned
+  #      nodes; idempotent when already running after step 1.
+  # Failures are non-fatal.
+  # NOTE: Restart=always retries automatically, but StartLimitBurst=5 within
+  # StartLimitIntervalSec=120s caps consecutive fast failures.  If the start
+  # limit is hit, run the following to unblock automatic restarts:
+  #   sudo systemctl reset-failed ${SERVICE} && sudo systemctl start ${SERVICE}
+  sudo systemctl try-restart "${SERVICE}" || true
+  _start_rc=0
+  sudo systemctl start "${SERVICE}" || _start_rc=$?
+  if [[ ${_start_rc} -ne 0 ]]; then
+    echo ""
+    echo "[WARN] ${SERVICE} failed to start (exit ${_start_rc})."
+    echo "       This is usually caused by a missing SDR device or a unit misconfiguration."
+    echo "       The service is enabled and will retry (Restart=always,"
+    echo "       StartLimitBurst=5 per 120 s window)."
+    echo "       If the start limit is reached, unblock with:"
+    echo "         sudo systemctl reset-failed ${SERVICE}"
+    echo "         sudo systemctl start ${SERVICE}"
+  fi
+fi
 
 echo ""
 echo "=== Service status ==="

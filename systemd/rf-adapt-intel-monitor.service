@@ -1,9 +1,9 @@
 [Unit]
 Description=rf_adapt_intel canary status monitor (oneshot)
 Documentation=https://github.com/foxrouter/meek
-# Require the main service to be present but do not hard-depend on it being
-# active so the monitor still runs even when process-worker is stopped.
-Wants=process-worker.service
+# Do NOT use Wants=process-worker.service here: the timer fires at boot and
+# during deploy before process-worker is ready, causing a cascading start
+# failure.  canary.sh --status gracefully handles an inactive process-worker.
 
 [Service]
 Type=oneshot
