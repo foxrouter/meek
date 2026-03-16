@@ -70,10 +70,19 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if ! git diff --quiet; then
             xargs -0 -a /tmp/changed_cpp_files.txt git add --
-            git commit -m "style: apply clang-format to PR changes [skip ci]"
+            git commit -m "style: apply clang-format to PR changes"
             # Push to the named head branch with an explicit refspec so that
             # the detached-HEAD checkout (by SHA) still updates the right ref.
             git push origin "HEAD:refs/heads/${{ github.head_ref }}"
           else
             echo "No formatting changes needed."
+          fi
+
+      - name: Fail if formatting changes remain
+        if: steps.changed.outputs.has_files == 'true'
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::clang-format violations found. Run clang-format locally and amend your commit."
+            git diff --stat
+            exit 1
           fi
