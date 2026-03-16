@@ -11,10 +11,14 @@ jobs:
   clang-format:
     name: Apply clang-format to changed C++ files
     runs-on: ubuntu-24.04
+    # Push-back only works for same-repo PRs; the default token cannot push
+    # to a fork. For fork PRs we still run the format check but skip the commit.
     steps:
       - uses: actions/checkout@v4
         with:
-          # Fetch the PR branch with full history so we can diff against base
+          # For same-repo PRs, check out the head branch by name so that a
+          # subsequent `git push` targets the correct ref. For fork PRs this
+          # value is still populated but the push step is skipped entirely.
           ref: ${{ github.head_ref }}
           fetch-depth: 0
 
@@ -29,12 +33,16 @@ jobs:
         run: |
           BASE=${{ github.event.pull_request.base.sha }}
           HEAD=${{ github.event.pull_request.head.sha }}
-          git diff --name-only "$BASE" "$HEAD" \
-            | grep -E '\.(cpp|hpp)$' > /tmp/changed_cpp_files.txt || true
+          # --diff-filter=ACMRT excludes deleted (D) files so clang-format
+          # won't try to open a path that no longer exists in the working tree.
+          # -z / xargs -0 uses NUL delimiters throughout to safely handle
+          # filenames that contain spaces, tabs, or other whitespace.
+          git diff --name-only -z --diff-filter=ACMRT "$BASE" "$HEAD" \
+            | grep -zE '\.(cpp|hpp)$' > /tmp/changed_cpp_files.txt || true
           if [ -s /tmp/changed_cpp_files.txt ]; then
             echo "has_files=true" >> "$GITHUB_OUTPUT"
             echo "Found changed C++ files:"
-            cat /tmp/changed_cpp_files.txt
+            xargs -0 -a /tmp/changed_cpp_files.txt printf '%s\n'
           else
             echo "has_files=false" >> "$GITHUB_OUTPUT"
             echo "No C++ files changed."
@@ -43,15 +51,19 @@ jobs:
       - name: Run clang-format on changed files
         if: steps.changed.outputs.has_files == 'true'
         run: |
-          xargs -a /tmp/changed_cpp_files.txt clang-format -i
+          xargs -0 -a /tmp/changed_cpp_files.txt clang-format -i
 
       - name: Commit and push formatting fixes
-        if: steps.changed.outputs.has_files == 'true'
+        # Only push back on same-repo PRs; the default GITHUB_TOKEN cannot
+        # write to a fork branch.
+        if: >-
+          steps.changed.outputs.has_files == 'true' &&
+          github.event.pull_request.head.repo.full_name == github.repository
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if ! git diff --quiet; then
-            xargs -a /tmp/changed_cpp_files.txt git add --
+            xargs -0 -a /tmp/changed_cpp_files.txt git add --
             git commit -m "style: apply clang-format to PR changes [skip ci]"
             git push
           else
