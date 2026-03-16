@@ -270,8 +270,9 @@ static void prune_old_snapshots(const std::string& dir, int retention_days) {
 
 struct JsonLog {
   // max_bytes: rotate when log file reaches this size (0 = disabled).
-  explicit JsonLog(const std::string& path, std::uintmax_t max_bytes = 50ULL * 1024 * 1024)
-      : path_(path), max_bytes_(max_bytes) {
+  explicit JsonLog(const std::string& path, std::uintmax_t max_bytes = 50ULL * 1024 * 1024,
+                   int keep_backups = 5)
+      : path_(path), max_bytes_(max_bytes), keep_backups_(keep_backups) {
     if (path_.empty())
       return;
     try {
@@ -308,6 +309,7 @@ struct JsonLog {
   std::ofstream ofs_;
   std::uintmax_t max_bytes_{0};
   std::uintmax_t bytes_written_{0};
+  int keep_backups_{5};
   bool failed_{false};
 
   void open_append() {
@@ -327,10 +329,31 @@ struct JsonLog {
   void rotate() noexcept {
     try {
       ofs_.close();
-      const std::string backup = path_ + ".1";
-      // Use error_code overload to avoid throwing from a noexcept function.
       std::error_code ec;
-      std::filesystem::rename(path_, backup, ec);
+      const int n = keep_backups_ > 0 ? keep_backups_ : 1;
+      // Remove the oldest backup (.N) so the shift loop never silently drops it
+      // on filesystems where rename() cannot atomically replace a destination.
+      const std::string oldest = path_ + "." + std::to_string(n);
+      std::filesystem::remove(oldest, ec);  // ignore error; file may not exist
+      // Shift existing numbered backups up: .n-1 → .n, …, .1 → .2
+      for (int i = n; i >= 2; --i) {
+        ec.clear();
+        const std::string src = path_ + "." + std::to_string(i - 1);
+        const std::string dst = path_ + "." + std::to_string(i);
+        if (!std::filesystem::exists(src, ec) || ec)
+          continue;
+        ec.clear();
+        std::filesystem::rename(src, dst, ec);
+        if (ec) {
+          std::cerr << "[LOG] Rotation rename " << src << " -> " << dst << " failed ("
+                    << ec.message() << ")\n";
+        }
+      }
+      // Rename the active log to .1.
+      const std::string backup1 = path_ + ".1";
+      // Use error_code overload to avoid throwing from a noexcept function.
+      ec.clear();
+      std::filesystem::rename(path_, backup1, ec);
       if (ec) {
         std::cerr << "[LOG] Rotation rename failed (" << ec.message()
                   << "); reopening original log: " << path_ << "\n";
@@ -344,7 +367,7 @@ struct JsonLog {
       }
       open_append();
       if (!failed_ && ofs_) {
-        std::cerr << "[LOG] Rotated worker log -> " << backup << "\n";
+        std::cerr << "[LOG] Rotated worker log -> " << backup1 << "\n";
       } else {
         std::cerr << "[LOG] Rotation reopen failed for: " << path_ << "\n";
       }
@@ -646,7 +669,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   // arrive.  The active path always writes (no throttle) and resets this
   // variable so the 250 ms window restarts cleanly after a burst of items.
   auto last_idle_out_progress = std::chrono::steady_clock::now();
-  JsonLog jlog(cfg.worker_log);
+  JsonLog jlog(cfg.worker_log, 50ULL * 1024 * 1024, cfg.worker_log_max_backups);
 
   // Set to true once we have performed an acquire-load of proc_exiting=true,
   // establishing visibility of all ClassificationResults pushed by proc_loop.
