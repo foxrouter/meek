@@ -29,30 +29,29 @@ jobs:
         run: |
           BASE=${{ github.event.pull_request.base.sha }}
           HEAD=${{ github.event.pull_request.head.sha }}
-          FILES=$(git diff --name-only "$BASE" "$HEAD" \
-            | grep -E '\.(cpp|hpp)$' || true)
-          echo "files=$FILES" >> "$GITHUB_OUTPUT"
-          if [ -n "$FILES" ]; then
+          git diff --name-only "$BASE" "$HEAD" \
+            | grep -E '\.(cpp|hpp)$' > /tmp/changed_cpp_files.txt || true
+          if [ -s /tmp/changed_cpp_files.txt ]; then
+            echo "has_files=true" >> "$GITHUB_OUTPUT"
             echo "Found changed C++ files:"
-            echo "$FILES"
+            cat /tmp/changed_cpp_files.txt
           else
+            echo "has_files=false" >> "$GITHUB_OUTPUT"
             echo "No C++ files changed."
           fi
 
       - name: Run clang-format on changed files
-        if: steps.changed.outputs.files != ''
+        if: steps.changed.outputs.has_files == 'true'
         run: |
-          # Word-split intentional: each file is a separate argument
-          # shellcheck disable=SC2086
-          clang-format -i ${{ steps.changed.outputs.files }}
+          xargs -a /tmp/changed_cpp_files.txt clang-format -i
 
       - name: Commit and push formatting fixes
-        if: steps.changed.outputs.files != ''
+        if: steps.changed.outputs.has_files == 'true'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if ! git diff --quiet; then
-            git add ${{ steps.changed.outputs.files }}
+            xargs -a /tmp/changed_cpp_files.txt git add --
             git commit -m "style: apply clang-format to PR changes [skip ci]"
             git push
           else
