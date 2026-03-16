@@ -134,29 +134,40 @@ run sudo systemctl enable --now rf-adapt-intel-monitor.timer
 run sudo systemctl enable "${SERVICE}"
 
 # Roll out unit changes on already-running instances and ensure the service
-# is running on freshly provisioned nodes:
-#   1. try-restart: restarts the service if it is currently active, applying
-#      any unit/drop-in changes immediately.  If the service is
-#      stopped/inactive it exits 0 (no-op), so step 2 is always needed.
-#   2. start: starts the service if it is not yet running (idempotent when
-#      already active after step 1).
-# Failures in both steps are non-fatal; a missing SDR device or binary at
-# deploy time is expected on freshly imaged nodes.
-# NOTE: Restart=always retries automatically, but StartLimitBurst=5 within
-# StartLimitIntervalSec=120s caps consecutive fast failures.  If the start
-# limit is hit, run the following to unblock automatic restarts:
-#   sudo systemctl reset-failed ${SERVICE} && sudo systemctl start ${SERVICE}
+# is running on freshly provisioned nodes.  We skip start/restart when the
+# ExecStart binary is absent to avoid consuming StartLimitBurst on a
+# guaranteed failure (the unit is still enabled and will start automatically
+# once the binary is installed).
+_EXEC_BIN=/usr/local/bin/rf_adapt_intel
 if $DRY_RUN; then
-  echo "[dry-run] sudo systemctl try-restart ${SERVICE}"
-  echo "[dry-run] sudo systemctl start ${SERVICE}"
+  if [[ -x "${_EXEC_BIN}" ]]; then
+    echo "[dry-run] sudo systemctl try-restart ${SERVICE}"
+    echo "[dry-run] sudo systemctl start ${SERVICE}"
+  else
+    echo "[dry-run] skip start — ${_EXEC_BIN} not found; unit enabled, will start after install"
+  fi
+elif [[ ! -x "${_EXEC_BIN}" ]]; then
+  echo ""
+  echo "[WARN] ${_EXEC_BIN} not found — skipping start of ${SERVICE}."
+  echo "       The unit is enabled and will start automatically once the binary is installed."
 else
+  # Binary is present.
+  #   1. try-restart: if already active, restart immediately so unit/drop-in
+  #      changes take effect.  No-op (exits 0) when inactive.
+  #   2. start: always issued so the service comes up on freshly provisioned
+  #      nodes; idempotent when already running after step 1.
+  # Failures are non-fatal.
+  # NOTE: Restart=always retries automatically, but StartLimitBurst=5 within
+  # StartLimitIntervalSec=120s caps consecutive fast failures.  If the start
+  # limit is hit, run the following to unblock automatic restarts:
+  #   sudo systemctl reset-failed ${SERVICE} && sudo systemctl start ${SERVICE}
   sudo systemctl try-restart "${SERVICE}" || true
   _start_rc=0
   sudo systemctl start "${SERVICE}" || _start_rc=$?
   if [[ ${_start_rc} -ne 0 ]]; then
     echo ""
     echo "[WARN] ${SERVICE} failed to start (exit ${_start_rc})."
-    echo "       This is usually caused by a missing SDR device or binary."
+    echo "       This is usually caused by a missing SDR device or a unit misconfiguration."
     echo "       The service is enabled and will retry (Restart=always,"
     echo "       StartLimitBurst=5 per 120 s window)."
     echo "       If the start limit is reached, unblock with:"
