@@ -160,29 +160,24 @@ check_db_staleness() {
     echo "  [WARN] DB file not found: ${DB_PATH}"
     return 1
   fi
-  local last_ts sqlite_rc=0
-  # Run sqlite3, redirecting stderr to stdout so any error message is captured
-  # in last_ts.  The '|| sqlite_rc=$?' idiom is the standard bash/set-e safe
-  # way to capture a non-zero exit code without aborting the script: the ||
-  # clause only executes when the LHS fails, and $? at that point holds the
-  # exit code of the command substitution (i.e. sqlite3's exit code).
-  last_ts=$(sqlite3 "${DB_PATH}" \
-    "SELECT MAX(timestamp) FROM signals;" 2>&1) || sqlite_rc=$?
+  local last_epoch sqlite_rc=0
+  # Query epoch seconds directly from SQLite using strftime('%s',...) so the
+  # result is a UTC-based integer and is not affected by the host timezone.
+  # stderr is merged into stdout so any sqlite3 error message is captured.
+  # The '|| sqlite_rc=$?' idiom captures the exit code under set -e.
+  last_epoch=$(sqlite3 "${DB_PATH}" \
+    "SELECT strftime('%s', MAX(timestamp)) FROM signals;" 2>&1) || sqlite_rc=$?
   if [[ ${sqlite_rc} -ne 0 ]]; then
-    echo "  [WARN] DB query failed (rc=${sqlite_rc}): ${last_ts}"
+    echo "  [WARN] DB query failed (rc=${sqlite_rc}): ${last_epoch}"
     echo "         This may indicate a corrupt DB, missing table, or permission issue."
     return 1
   fi
-  if [[ -z "${last_ts}" ]]; then
+  if [[ -z "${last_epoch}" ]]; then
     echo "  [WARN] No signals found in DB — service may never have written any detections."
     return 1
   fi
-  echo "  Latest detection: ${last_ts}"
-  # Compute age; fall back gracefully when date -d is unavailable (macOS: date -j -f).
-  local last_epoch now_epoch age_s
-  last_epoch=$(date -d "${last_ts}" +%s 2>/dev/null \
-    || date -j -f "%Y-%m-%d %H:%M:%S" "${last_ts}" +%s 2>/dev/null \
-    || echo 0)
+  echo "  Latest detection epoch: ${last_epoch}"
+  local now_epoch age_s
   now_epoch=$(date +%s)
   age_s=$(( now_epoch - last_epoch ))
   local age_h=$(( age_s / 3600 ))

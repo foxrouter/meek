@@ -118,13 +118,13 @@ case "$*" in
 esac
 EOF
 
-  # stub: sqlite3 — returns a configurable last timestamp.
-  # Default: a recent timestamp (today).
+  # stub: sqlite3 — returns a configurable last epoch timestamp.
+  # Default: current epoch (fresh DB).
   cat > "${_STUB_DIR}/sqlite3" <<'EOF'
 #!/usr/bin/env bash
-# Stub sqlite3: returns STUB_LAST_TS (defaults to current date/time).
-LAST_TS="${STUB_LAST_TS:-$(date '+%Y-%m-%d %H:%M:%S')}"
-echo "${LAST_TS}"
+# Stub sqlite3: returns STUB_LAST_EPOCH (defaults to current epoch seconds).
+LAST_EPOCH="${STUB_LAST_EPOCH:-$(date '+%s')}"
+echo "${LAST_EPOCH}"
 exit 0
 EOF
 
@@ -148,7 +148,7 @@ run_canary() {
     RF_DB_PATH="${_TMP}/rf.db" \
     STUB_ACTIVE_STATE="${STUB_ACTIVE_STATE:-active}" \
     STUB_IS_ACTIVE="${STUB_IS_ACTIVE:-0}" \
-    STUB_LAST_TS="${STUB_LAST_TS:-$(date '+%Y-%m-%d %H:%M:%S')}" \
+    STUB_LAST_EPOCH="${STUB_LAST_EPOCH:-$(date '+%s')}" \
     bash "${CANARY}" "$@" 2>&1
 }
 
@@ -217,7 +217,7 @@ test_status_shows_heartbeat_stale() {
   assert_contains "--status: stale heartbeat warning" "Heartbeat STALE" "${out}"
 }
 
-test_status_shows_db_staleness_skip_no_sqlite3() {
+test_status_shows_db_query_failure() {
   setup_env
   # Simulate a broken/failing sqlite3 by placing a stub that exits non-zero.
   # With the updated check_db_staleness(), a non-zero exit code now produces
@@ -252,14 +252,14 @@ test_status_shows_db_fresh() {
 test_status_shows_db_stale() {
   setup_env
   touch "${_TMP}/rf.db"
-  # Return a timestamp from 2 days ago
-  local stale_ts
-  stale_ts=$(date -d "2 days ago" '+%Y-%m-%d %H:%M:%S' 2>/dev/null \
-    || date -v -2d '+%Y-%m-%d %H:%M:%S' 2>/dev/null \
-    || echo "2000-01-01 00:00:00")
+  # Return an epoch from 2 days ago (UTC-safe: SQLite now returns epoch seconds).
+  local stale_epoch
+  stale_epoch=$(date -d "2 days ago" '+%s' 2>/dev/null \
+    || date -v -2d '+%s' 2>/dev/null \
+    || echo "0")
   local out rc=0
-  # Use a 1-second DB_STALE_S threshold so any past timestamp triggers it
-  out="$(RF_DB_STALE_S=1 STUB_LAST_TS="${stale_ts}" run_canary --status)" || rc=$?
+  # Use a 1-second DB_STALE_S threshold so any past epoch triggers it
+  out="$(RF_DB_STALE_S=1 STUB_LAST_EPOCH="${stale_epoch}" run_canary --status)" || rc=$?
   teardown_env
   assert_exit "--status (stale DB) exits 0" 0 "${rc}"
   assert_contains "--status: stale DB warning" "DB writes STALE" "${out}"
@@ -317,7 +317,7 @@ test_status_exits_zero_no_files
 test_status_shows_heartbeat_missing_warning
 test_status_shows_heartbeat_fresh
 test_status_shows_heartbeat_stale
-test_status_shows_db_staleness_skip_no_sqlite3
+test_status_shows_db_query_failure
 test_status_shows_db_fresh
 test_status_shows_db_stale
 test_heal_active_service_no_restart
