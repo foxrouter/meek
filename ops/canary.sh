@@ -163,17 +163,29 @@ check_db_staleness() {
   local last_epoch sqlite_rc=0
   # Query epoch seconds directly from SQLite using strftime('%s',...) so the
   # result is a UTC-based integer and is not affected by the host timezone.
-  # stderr is merged into stdout so any sqlite3 error message is captured.
-  # The '|| sqlite_rc=$?' idiom captures the exit code under set -e.
-  last_epoch=$(sqlite3 "${DB_PATH}" \
+  # -batch -noheader -init /dev/null prevent ~/.sqliterc from enabling headers
+  # or column mode, which would produce non-numeric output and abort bash
+  # arithmetic under set -e.  stderr is merged into stdout so any error message
+  # is captured.  The '|| sqlite_rc=$?' idiom captures the exit code under set -e.
+  last_epoch=$(sqlite3 -batch -noheader -init /dev/null "${DB_PATH}" \
     "SELECT strftime('%s', MAX(timestamp)) FROM signals;" 2>&1) || sqlite_rc=$?
   if [[ ${sqlite_rc} -ne 0 ]]; then
     echo "  [WARN] DB query failed (rc=${sqlite_rc}): ${last_epoch}"
     echo "         This may indicate a corrupt DB, missing table, or permission issue."
     return 1
   fi
-  if [[ -z "${last_epoch}" ]]; then
-    echo "  [WARN] No signals found in DB — service may never have written any detections."
+  # Validate that the result is a plain integer before bash arithmetic.
+  # A non-numeric value (e.g. from a residual ~/.sqliterc header) would cause
+  # age_s=$(( now_epoch - last_epoch )) to abort the script under set -e.
+  # This check also covers the NULL/empty case (strftime returns NULL when the
+  # table is empty, which sqlite3 prints as an empty string).
+  if ! [[ "${last_epoch}" =~ ^[0-9]+$ ]]; then
+    if [[ -z "${last_epoch}" ]]; then
+      echo "  [WARN] No signals found in DB — service may never have written any detections."
+    else
+      echo "  [WARN] DB query returned non-numeric epoch: '${last_epoch}'"
+      echo "         Check for headers or extra output from sqlite3 init files."
+    fi
     return 1
   fi
   echo "  Latest detection epoch: ${last_epoch}"
@@ -390,8 +402,18 @@ do_heal() {
       # StartLimitBurst was exhausted or the process exited with an error and
       # systemd gave up retrying.  Reset the failure counter and restart.
       log "Service is in FAILED state. Resetting failure counter and restarting..."
-      run systemctl reset-failed "${SERVICE}"
-      run systemctl start "${SERVICE}"
+      local rc=0
+      # Capture rc explicitly so a systemctl error doesn't abort the monitor
+      # under set -e and put the monitor itself into a start-limited state.
+      run systemctl reset-failed "${SERVICE}" || rc=$?
+      if [[ ${rc} -ne 0 ]]; then
+        warn "systemctl reset-failed exited ${rc} — continuing anyway."
+        rc=0
+      fi
+      run systemctl start "${SERVICE}" || rc=$?
+      if [[ ${rc} -ne 0 ]]; then
+        warn "systemctl start exited ${rc} — service may still be failing."
+      fi
       log "Recovery attempted. New state:"
       if ! $DRY_RUN; then
         systemctl show -p ActiveState --value "${SERVICE}" 2>/dev/null \
@@ -402,7 +424,11 @@ do_heal() {
     inactive)
       # Service is stopped (not failed, just not running).  Start it.
       log "Service is INACTIVE. Starting..."
-      run systemctl start "${SERVICE}"
+      local rc=0
+      run systemctl start "${SERVICE}" || rc=$?
+      if [[ ${rc} -ne 0 ]]; then
+        warn "systemctl start exited ${rc} — service may still be failing."
+      fi
       log "Start attempted. New state:"
       if ! $DRY_RUN; then
         systemctl show -p ActiveState --value "${SERVICE}" 2>/dev/null \

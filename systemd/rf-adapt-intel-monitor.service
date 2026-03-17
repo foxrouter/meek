@@ -13,6 +13,8 @@ Type=oneshot
 ExecStart=/usr/bin/env bash /usr/local/share/rf-adapt-intel/ops/canary.sh --heal
 StandardOutput=append:/var/lib/rf-adapt-intel/monitor.log
 StandardError=append:/var/lib/rf-adapt-intel/monitor.log
-# Runs as root: canary.sh --heal needs systemctl reset-failed/start privileges.
-# WorkingDirectory must be writable by root (it is, as it is also the StateDirectory).
+# Requires root: canary.sh --heal needs systemctl reset-failed/start privileges.
+# StateDirectory ensures /var/lib/rf-adapt-intel exists even before process-worker
+# has run for the first time (or after a clean install).
+StateDirectory=rf-adapt-intel
 WorkingDirectory=/var/lib/rf-adapt-intel
