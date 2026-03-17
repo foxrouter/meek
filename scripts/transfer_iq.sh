@@ -39,14 +39,21 @@ DB_DEST="${DB_DEST:-}"
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
+require_arg() {
+  if [[ $# -lt 2 || -z "${2:-}" ]]; then
+    echo "[ERROR] Option '$1' requires an argument." >&2
+    exit 1
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --source)     SOURCE_DIR="$2"; shift ;;
-    --dest)       DEST="$2";       shift ;;
-    --db-source)  DB_SOURCE="$2";  shift ;;
-    --db-dest)    DB_DEST="$2";    shift ;;
-    --bwlimit)    BW_KBPS="$2";    shift ;;
-    --retries)    MAX_RETRIES="$2"; shift ;;
+    --source)     require_arg "$@"; SOURCE_DIR="$2"; shift ;;
+    --dest)       require_arg "$@"; DEST="$2";       shift ;;
+    --db-source)  require_arg "$@"; DB_SOURCE="$2";  shift ;;
+    --db-dest)    require_arg "$@"; DB_DEST="$2";    shift ;;
+    --bwlimit)    require_arg "$@"; BW_KBPS="$2";    shift ;;
+    --retries)    require_arg "$@"; MAX_RETRIES="$2"; shift ;;
     --watch)      WATCH_MODE=1 ;;
     --dry-run)    DRY_RUN=true ;;
     -h|--help)
@@ -105,6 +112,9 @@ run_rsync() {
 # ---------------------------------------------------------------------------
 # Sync the SQLite classifications DB to Brian.
 # Skipped silently when DB_DEST is empty.
+# The WAL-mode sidecar files (*.db-wal, *.db-shm) are included when present
+# so the remote copy is consistent.  Rsync respects the same --bwlimit as the
+# IQ file transfers.
 # ---------------------------------------------------------------------------
 sync_db() {
   if [[ -z "${DB_DEST}" ]]; then
@@ -114,19 +124,32 @@ sync_db() {
     log "WARN DB file not found, skipping DB sync: ${DB_SOURCE}"
     return 0
   fi
+
+  # Destination directory (handles user@host:path syntax understood by rsync)
+  local db_dest_dir
+  db_dest_dir="$(dirname "${DB_DEST}")"
+
+  # Collect local DB files: main db plus WAL/SHM sidecars if present
+  local db_files=("${DB_SOURCE}")
+  [[ -f "${DB_SOURCE}-wal" ]] && db_files+=("${DB_SOURCE}-wal")
+  [[ -f "${DB_SOURCE}-shm" ]] && db_files+=("${DB_SOURCE}-shm")
+
   local attempt=1
   while [[ "${attempt}" -le "${MAX_RETRIES}" ]]; do
     if $DRY_RUN; then
-      log "[dry-run] rsync -av '${DB_SOURCE}' '${DB_DEST}'"
+      log "[dry-run] rsync -az --bwlimit=${BW_KBPS} ${db_files[*]} '${db_dest_dir}/'"
       return 0
     fi
-    if rsync -av --timeout=30 "${DB_SOURCE}" "${DB_DEST}" 2>&1 | tee -a "${TRANSFER_LOG}"; then
-      log "OK DB synced: $(basename "${DB_SOURCE}") -> ${DB_DEST}"
+    if rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
+        "${db_files[@]}" "${db_dest_dir}/" 2>&1 | tee -a "${TRANSFER_LOG}"; then
+      log "OK DB synced: $(basename "${DB_SOURCE}") (${#db_files[@]} file(s)) -> ${db_dest_dir}/"
       return 0
     fi
     log "WARN DB sync attempt ${attempt}/${MAX_RETRIES} failed"
+    if [[ "${attempt}" -lt "${MAX_RETRIES}" ]]; then
+      sleep $(( attempt * 5 ))
+    fi
     attempt=$(( attempt + 1 ))
-    sleep $(( attempt * 5 ))
   done
   log "ERROR DB sync failed after ${MAX_RETRIES} attempts"
   return 1

@@ -390,7 +390,9 @@ Promotion criteria (all must be met before `--promote`):
 Transfer IQ snapshot files from Ray (edge SDR) to Brian (central server) via
 rsync with retries, bandwidth limiting, and logging.  After each transfer batch
 the SQLite classifications DB is synced to Brian so that the reporting node
-always has up-to-date classification data.
+receives recent classification data.  The sync includes the WAL/SHM sidecar
+files (`*.db-wal`, `*.db-shm`) when present so the remote copy is consistent.
+DB sync failures are logged but do not abort IQ transfers.
 
 ```bash
 # One-shot transfer of all files in the snapshot directory
