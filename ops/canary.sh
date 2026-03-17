@@ -83,6 +83,19 @@ run() {
   fi
 }
 
+run_allow_fail() {
+  # Like run(), but tolerates a non-zero exit code (safe under set -euo pipefail).
+  # Uses 'if "$@"' to suppress errexit inside the function; returns the command's
+  # exit code so the caller can inspect it.  Always pair with '|| rc=$?' at the
+  # call site so that set -e does not abort the script when the function itself
+  # returns non-zero.
+  if $DRY_RUN; then
+    echo "[dry-run] $*"
+    return 0
+  fi
+  if "$@"; then return 0; else return $?; fi
+}
+
 require_root() {
   # RF_CANARY_SKIP_ROOT_CHECK=1 bypasses the root check in automated tests.
   if [[ "${RF_CANARY_SKIP_ROOT_CHECK:-}" == "1" ]]; then
@@ -451,14 +464,15 @@ do_heal() {
       # systemd gave up retrying.  Reset the failure counter and restart.
       log "Service is in FAILED state. Resetting failure counter and restarting..."
       local rc=0
-      # Capture rc explicitly so a systemctl error doesn't abort the monitor
-      # under set -e and put the monitor itself into a start-limited state.
-      run systemctl reset-failed "${SERVICE}" || rc=$?
+      # run_allow_fail (not run) is used here so that a non-zero exit from
+      # systemctl does not abort the script inside run() under set -euo pipefail
+      # before '|| rc=$?' can capture the status.
+      run_allow_fail systemctl reset-failed "${SERVICE}" || rc=$?
       if [[ ${rc} -ne 0 ]]; then
         warn "systemctl reset-failed exited ${rc} — continuing anyway."
         rc=0
       fi
-      run systemctl start "${SERVICE}" || rc=$?
+      run_allow_fail systemctl start "${SERVICE}" || rc=$?
       if [[ ${rc} -ne 0 ]]; then
         warn "systemctl start exited ${rc} — service may still be failing."
       fi
@@ -473,7 +487,7 @@ do_heal() {
       # Service is stopped (not failed, just not running).  Start it.
       log "Service is INACTIVE. Starting..."
       local rc=0
-      run systemctl start "${SERVICE}" || rc=$?
+      run_allow_fail systemctl start "${SERVICE}" || rc=$?
       if [[ ${rc} -ne 0 ]]; then
         warn "systemctl start exited ${rc} — service may still be failing."
       fi

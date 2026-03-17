@@ -92,8 +92,10 @@ EOF
 #!/usr/bin/env bash
 # Stub systemctl: honours STUB_ACTIVE_STATE for show -p ActiveState queries
 # and STUB_IS_ACTIVE for is-active checks.
+# Set STUB_SYSTEMCTL_FAIL=1 to make reset-failed/start return non-zero.
 ACTIVE_STATE="${STUB_ACTIVE_STATE:-active}"
 IS_ACTIVE="${STUB_IS_ACTIVE:-0}"
+FAIL_RC="${STUB_SYSTEMCTL_FAIL:-0}"
 
 case "$*" in
   *"is-active"*)
@@ -105,7 +107,7 @@ case "$*" in
     ;;
   *"reset-failed"*|*"start"*|*"daemon-reload"*|*"restart"*)
     echo "[stub] systemctl $*"
-    exit 0
+    exit "${FAIL_RC}"
     ;;
   *"show -p MainPID"*|*"MainPID"*)
     echo "0"
@@ -149,6 +151,7 @@ run_canary() {
     STUB_ACTIVE_STATE="${STUB_ACTIVE_STATE:-active}" \
     STUB_IS_ACTIVE="${STUB_IS_ACTIVE:-0}" \
     STUB_LAST_EPOCH="${STUB_LAST_EPOCH:-$(date '+%s')}" \
+    STUB_SYSTEMCTL_FAIL="${STUB_SYSTEMCTL_FAIL:-0}" \
     bash "${CANARY}" "$@" 2>&1
 }
 
@@ -331,6 +334,23 @@ test_heal_dry_run_no_systemctl_side_effects() {
   assert_not_contains "--heal --dry-run: no stub systemctl side-effects" "[stub] systemctl" "${out}"
 }
 
+test_heal_systemctl_fails_exits_zero() {
+  # Verify that run_allow_fail() makes do_heal() resilient: even when systemctl
+  # reset-failed and start return non-zero, --heal must exit 0 (not abort) and
+  # emit a warning.  Without run_allow_fail the script would exit inside run()
+  # under set -euo pipefail before the || rc=$? guard could fire.
+  setup_env
+  local out rc=0
+  out="$(STUB_ACTIVE_STATE=failed STUB_IS_ACTIVE=3 STUB_SYSTEMCTL_FAIL=1 \
+        run_canary --heal)" || rc=$?
+  teardown_env
+  assert_exit "--heal exits 0 even when systemctl returns non-zero" 0 "${rc}"
+  assert_contains "--heal: warns on systemctl reset-failed failure" \
+    "reset-failed exited 1" "${out}"
+  assert_contains "--heal: warns on systemctl start failure" \
+    "start exited 1" "${out}"
+}
+
 test_invalid_stale_heartbeat_s_falls_back_to_default() {
   setup_env
   echo "ok $(date +%s)" > "${_TMP}/heartbeat"
@@ -371,6 +391,7 @@ test_heal_active_service_no_restart
 test_heal_failed_service_resets_and_starts
 test_heal_inactive_service_starts
 test_heal_dry_run_no_systemctl_side_effects
+test_heal_systemctl_fails_exits_zero
 test_invalid_stale_heartbeat_s_falls_back_to_default
 test_invalid_db_stale_s_falls_back_to_default
 
