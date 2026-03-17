@@ -459,7 +459,7 @@ do_heal() {
       log "Recovery attempted. New state:"
       if ! $DRY_RUN; then
         systemctl show -p ActiveState --value "${SERVICE}" 2>/dev/null \
-          | awk '{print "  ActiveState: " $0}'
+          | awk '{print "  ActiveState: " $0}' || true
         log "Monitor with: sudo journalctl -u ${SERVICE} -n 20 --no-pager"
       fi
       ;;
@@ -474,7 +474,7 @@ do_heal() {
       log "Start attempted. New state:"
       if ! $DRY_RUN; then
         systemctl show -p ActiveState --value "${SERVICE}" 2>/dev/null \
-          | awk '{print "  ActiveState: " $0}'
+          | awk '{print "  ActiveState: " $0}' || true
       fi
       ;;
     activating|deactivating|reloading)
