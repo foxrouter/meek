@@ -10,7 +10,7 @@ Type=oneshot
 # Run canary.sh --heal: prints full status then auto-recovers if the service
 # is in a failed or inactive state (e.g. after hitting StartLimitBurst).
 # Requires root so it can call `systemctl reset-failed` and `systemctl start`.
-ExecStart=/usr/bin/bash /usr/local/share/rf-adapt-intel/ops/canary.sh --heal
+ExecStart=/usr/bin/env bash /usr/local/share/rf-adapt-intel/ops/canary.sh --heal
 # Log to journald (no file path needed) so this unit is robust on a clean
 # install where /var/lib/rf-adapt-intel may not yet exist.  Retrieve logs via:
 #   journalctl -u rf-adapt-intel-monitor.service
