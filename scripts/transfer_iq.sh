@@ -21,6 +21,7 @@
 #   DB_SOURCE       Local path to the SQLite DB to sync (default /var/lib/rf-adapt-intel/rf_adapt_intel.db).
 #   DB_DEST         rsync destination for the DB, e.g. rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/rf_adapt_intel.db
 #                   If unset, DB sync is skipped.
+#   DB_SYNC_INTERVAL  Minimum seconds between DB syncs in watch mode (default 60).
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
@@ -35,6 +36,7 @@ WATCH_MODE="${IQ_WATCH:-0}"
 DRY_RUN=false
 DB_SOURCE="${DB_SOURCE:-/var/lib/rf-adapt-intel/rf_adapt_intel.db}"
 DB_DEST="${DB_DEST:-}"
+DB_SYNC_INTERVAL="${DB_SYNC_INTERVAL:-60}"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -112,10 +114,10 @@ run_rsync() {
 # ---------------------------------------------------------------------------
 # Sync the SQLite classifications DB to Brian.
 # Skipped silently when DB_DEST is empty.
-# The WAL-mode sidecar files (*.db-wal, *.db-shm) are synced to the matching
-# destination paths (DB_DEST-wal, DB_DEST-shm) when present, to reduce the
-# chance of the remote copy being unusable.  Note: rsyncing a live WAL-mode DB
-# is still inherently racy; use sqlite3 VACUUM INTO for a guaranteed snapshot.
+# A consistent snapshot is created via "sqlite3 VACUUM INTO" before rsyncing
+# so the remote copy is not affected by concurrent WAL-mode writes.  When
+# sqlite3 is unavailable the function falls back to rsyncing the live DB and
+# sidecar files, which is inherently racy.
 # Rsync respects the same --bwlimit as the IQ file transfers.
 # ---------------------------------------------------------------------------
 sync_db() {
@@ -127,29 +129,56 @@ sync_db() {
     return 0
   fi
 
+  # Build a consistent snapshot to rsync (avoids WAL-mode raciness).
+  # Use the same directory as DB_SOURCE so the snapshot stays on the same
+  # filesystem (sufficient space, no cross-device copy) and avoids TMPDIR.
+  local snap_file=""
+  if command -v sqlite3 &>/dev/null; then
+    snap_file="$(mktemp --tmpdir="$(dirname "${DB_SOURCE}")" --suffix=.db)"
+    if ! sqlite3 "${DB_SOURCE}" "VACUUM INTO '${snap_file}'" 2>&1 | tee -a "${TRANSFER_LOG}"; then
+      log "WARN VACUUM INTO failed; falling back to live-file rsync"
+      rm -f "${snap_file}"
+      snap_file=""
+    fi
+  else
+    log "WARN sqlite3 not found; rsyncing live DB files (may be racy in WAL mode)"
+  fi
+
   local attempt=1
   while [[ "${attempt}" -le "${MAX_RETRIES}" ]]; do
     if $DRY_RUN; then
-      log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}' '${DB_DEST}'"
-      [[ -f "${DB_SOURCE}-wal" ]] && \
-        log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-wal' '${DB_DEST}-wal'"
-      [[ -f "${DB_SOURCE}-shm" ]] && \
-        log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-shm' '${DB_DEST}-shm'"
+      if [[ -n "${snap_file}" ]]; then
+        log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${snap_file}' '${DB_DEST}'"
+      else
+        log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}' '${DB_DEST}'"
+        [[ -f "${DB_SOURCE}-wal" ]] && \
+          log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-wal' '${DB_DEST}-wal'"
+        [[ -f "${DB_SOURCE}-shm" ]] && \
+          log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-shm' '${DB_DEST}-shm'"
+      fi
+      rm -f "${snap_file}"
       return 0
     fi
     local ok=true
-    rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-        "${DB_SOURCE}" "${DB_DEST}" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
-    if $ok && [[ -f "${DB_SOURCE}-wal" ]]; then
+    if [[ -n "${snap_file}" ]]; then
       rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-          "${DB_SOURCE}-wal" "${DB_DEST}-wal" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
-    fi
-    if $ok && [[ -f "${DB_SOURCE}-shm" ]]; then
+          "${snap_file}" "${DB_DEST}" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
+    else
+      # Fallback: sync live DB and sidecars (racy but better than nothing).
       rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-          "${DB_SOURCE}-shm" "${DB_DEST}-shm" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
+          "${DB_SOURCE}" "${DB_DEST}" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
+      if $ok && [[ -f "${DB_SOURCE}-wal" ]]; then
+        rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
+            "${DB_SOURCE}-wal" "${DB_DEST}-wal" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
+      fi
+      if $ok && [[ -f "${DB_SOURCE}-shm" ]]; then
+        rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
+            "${DB_SOURCE}-shm" "${DB_DEST}-shm" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
+      fi
     fi
     if $ok; then
       log "OK DB synced: $(basename "${DB_SOURCE}") -> ${DB_DEST}"
+      rm -f "${snap_file}"
       return 0
     fi
     log "WARN DB sync attempt ${attempt}/${MAX_RETRIES} failed"
@@ -158,8 +187,24 @@ sync_db() {
     fi
     attempt=$(( attempt + 1 ))
   done
+  rm -f "${snap_file}"
   log "ERROR DB sync failed after ${MAX_RETRIES} attempts"
   return 1
+}
+
+# Sync the DB only when DB_SYNC_INTERVAL seconds have elapsed since the last
+# sync.  _last_db_sync must live in the caller's shell (not a subshell).
+_last_db_sync=0
+sync_db_if_due() {
+  local now
+  now=$(date +%s)
+  if (( now - _last_db_sync >= DB_SYNC_INTERVAL )); then
+    # Record the start time before syncing so the interval counts from when
+    # this sync began, not after it finishes (avoids immediate re-trigger
+    # when sync takes longer than DB_SYNC_INTERVAL).
+    _last_db_sync=${now}
+    sync_db || true
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -193,17 +238,18 @@ watch_and_transfer() {
   fi
   log "Watching ${SOURCE_DIR} for new IQ files (Ctrl-C to stop)..."
   mkdir -p "${SOURCE_DIR}"
+  # Use process substitution (not a pipe) so the while loop runs in this shell
+  # and shares _last_db_sync state with sync_db_if_due.
   # --format '%w%f' gives full path; -e close_write triggers after file is done
-  inotifywait -m -r -e close_write --format '%w%f' "${SOURCE_DIR}" \
-  | while IFS= read -r new_file; do
-      case "${new_file}" in
-        *.cf32|*.raw)
-          log "New file detected: $(basename "${new_file}")"
-          run_rsync "${new_file}" || true
-          sync_db || true
-          ;;
-      esac
-    done
+  while IFS= read -r new_file; do
+    case "${new_file}" in
+      *.cf32|*.raw)
+        log "New file detected: $(basename "${new_file}")"
+        run_rsync "${new_file}" || true
+        sync_db_if_due
+        ;;
+    esac
+  done < <(inotifywait -m -r -e close_write --format '%w%f' "${SOURCE_DIR}")
 }
 
 # ---------------------------------------------------------------------------

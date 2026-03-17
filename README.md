@@ -390,11 +390,15 @@ Promotion criteria (all must be met before `--promote`):
 Transfer IQ snapshot files from Ray (edge SDR) to Brian (central server) via
 rsync with retries, bandwidth limiting, and logging.  After each transfer batch
 the SQLite classifications DB is synced to Brian so that the reporting node
-receives recent classification data.  When present, the WAL/SHM sidecar files
-(`*.db-wal`, `*.db-shm`) are synced to matching destination paths to reduce the
-chance of the remote copy being unusable; a fully consistent snapshot requires
-a prior `sqlite3 VACUUM INTO` or similar checkpoint step.
-DB sync failures are logged but do not abort IQ transfers.
+receives recent classification data.  When `sqlite3` is available a consistent
+snapshot is created via `VACUUM INTO` before rsyncing; otherwise the script
+falls back to rsyncing the live DB and WAL/SHM sidecars (which may be racy
+under write load).  DB sync failures are logged but do not abort IQ transfers.
+
+Key environment variables and CLI flags for DB sync:
+- `DB_SOURCE` / `--db-source` — local path to the SQLite DB (default: `/var/lib/rf-adapt-intel/rf_adapt_intel.db`)
+- `DB_DEST` / `--db-dest` — rsync destination for the DB snapshot; DB sync is skipped when unset
+- `DB_SYNC_INTERVAL` — minimum seconds between DB syncs in watch mode (default: 60)
 
 ```bash
 # One-shot transfer of all files in the snapshot directory
