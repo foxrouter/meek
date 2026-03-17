@@ -361,9 +361,9 @@ EOF
   service_reload
 
   log "Canary mode active."
-  log "Monitor with: sudo bash ops/canary.sh --status"
-  log "Promote when criteria met: sudo bash ops/canary.sh --promote"
-  log "Rollback at any time: sudo bash ops/canary.sh --rollback"
+  log "Monitor with: sudo bash ${SCRIPT_PATH} --status"
+  log "Promote when criteria met: sudo bash ${SCRIPT_PATH} --promote"
+  log "Rollback at any time: sudo bash ${SCRIPT_PATH} --rollback"
 }
 
 # ---------------------------------------------------------------------------
@@ -378,8 +378,9 @@ check_promotion_criteria() {
   local total rejected fp_pct
   total="$(get_metric rf_frames_total)"
   rejected="$(get_metric rf_frames_rejected)"
-  if [[ "${total}" =~ ^[0-9]+(\.[0-9]+)?$ ]] && [[ "${total%.*}" -gt 0 ]]; then
-    fp_pct=$(awk "BEGIN { printf \"%.2f\", ${rejected} / ${total} * 100 }")
+  if [[ "${total}" =~ ^[0-9]+(\.[0-9]+)?$ ]] && [[ "${total%.*}" -gt 0 ]] \
+      && [[ "${rejected}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    fp_pct=$(awk "BEGIN { printf \"%.2f\", ${rejected} / ${total} * 100 }" || true)
     if awk "BEGIN { exit !(${fp_pct} < 3.0) }"; then
       echo "  [PASS] FP/rejection rate: ${fp_pct}% < 3%"
     else
@@ -387,7 +388,7 @@ check_promotion_criteria() {
       failed=$(( failed + 1 ))
     fi
   else
-    echo "  [SKIP] FP/rejection rate: insufficient data (total=${total})"
+    echo "  [SKIP] FP/rejection rate: insufficient data (total=${total}, rejected=${rejected})"
   fi
 
   # --- Criterion 2: CPU usage < 80 % ----------------------------------------
@@ -520,7 +521,7 @@ do_promote() {
   if ! check_promotion_criteria; then
     echo ""
     log "One or more acceptance criteria FAILED. Promotion blocked."
-    log "Resolve the issues above, then re-run: sudo bash ops/canary.sh --promote"
+    log "Resolve the issues above, then re-run: sudo bash ${SCRIPT_PATH} --promote"
     exit 1
   fi
 
