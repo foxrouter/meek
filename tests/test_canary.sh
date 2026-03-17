@@ -384,6 +384,30 @@ test_invalid_db_stale_s_falls_back_to_default() {
   assert_contains "--status: falls back to default (86400)" "using default 86400" "${out}"
 }
 
+test_promotion_skips_fp_when_rejected_missing() {
+  setup_env
+  # Write a metrics file that intentionally omits rf_frames_rejected.
+  # check_promotion_criteria() must emit [SKIP] for the FP criterion and must
+  # NOT emit [PASS] (which would happen if a missing metric were silently
+  # treated as 0 by awk, making the rate appear to pass the < 3% gate).
+  cat > "${_TMP}/metrics.prom" <<'EOF'
+# HELP rf_frames_total Total IQ frames processed by classifier
+# TYPE rf_frames_total counter
+rf_frames_total 1234
+# HELP rf_frames_candidate Frames above confidence threshold
+# TYPE rf_frames_candidate counter
+rf_frames_candidate 100
+EOF
+  local out rc=0
+  out="$(run_canary --status)" || rc=$?
+  teardown_env
+  assert_exit "--status missing rejected metric exits 0" 0 "${rc}"
+  assert_contains "--status: [SKIP] FP rate when rejected metric missing" \
+    "[SKIP] FP/rejection rate" "${out}"
+  assert_not_contains "--status: no false [PASS] for FP rate when metric missing" \
+    "[PASS] FP/rejection rate" "${out}"
+}
+
 # ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
@@ -405,6 +429,7 @@ test_heal_dry_run_no_systemctl_side_effects
 test_heal_systemctl_fails_exits_zero
 test_invalid_stale_heartbeat_s_falls_back_to_default
 test_invalid_db_stale_s_falls_back_to_default
+test_promotion_skips_fp_when_rejected_missing
 
 echo ""
 echo "Results: ${_PASS} passed, ${_FAIL} failed."

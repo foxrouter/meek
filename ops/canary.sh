@@ -375,20 +375,26 @@ check_promotion_criteria() {
   local failed=0   # count of failed criteria; 0 = all OK
 
   # --- Criterion 1: FP/rejection rate < 3 % ---------------------------------
-  local total rejected fp_pct
+  # Validate both metrics are numeric BEFORE computation so that a missing or
+  # non-numeric rf_frames_rejected can never silently produce [PASS] (some awk
+  # implementations treat a missing operand as 0, which would make the rate
+  # appear to be 0% and pass the < 3% gate incorrectly).
+  local total rejected
   total="$(get_metric rf_frames_total)"
   rejected="$(get_metric rf_frames_rejected)"
-  if [[ "${total}" =~ ^[0-9]+(\.[0-9]+)?$ ]] && [[ "${total%.*}" -gt 0 ]] \
-      && [[ "${rejected}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-    fp_pct=$(awk "BEGIN { printf \"%.2f\", ${rejected} / ${total} * 100 }" || true)
-    if awk "BEGIN { exit !(${fp_pct} < 3.0) }"; then
+  if ! [[ "${total}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || ! [[ "${rejected}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "  [SKIP] FP/rejection rate: metrics unavailable (total=${total}, rejected=${rejected})"
+  elif [[ "${total%.*}" -le 0 ]]; then
+    echo "  [SKIP] FP/rejection rate: no frames processed yet (total=${total})"
+  else
+    local fp_pct
+    fp_pct=$(awk "BEGIN { printf \"%.2f\", ${rejected} / ${total} * 100 }")
+    if [[ "${fp_pct}" =~ ^[0-9]+\.[0-9]+$ ]] && awk "BEGIN { exit !(${fp_pct} < 3.0) }"; then
       echo "  [PASS] FP/rejection rate: ${fp_pct}% < 3%"
     else
-      echo "  [FAIL] FP/rejection rate: ${fp_pct}% >= 3%"
+      echo "  [FAIL] FP/rejection rate: ${fp_pct:-N/A}% >= 3%"
       failed=$(( failed + 1 ))
     fi
-  else
-    echo "  [SKIP] FP/rejection rate: insufficient data (total=${total}, rejected=${rejected})"
   fi
 
   # --- Criterion 2: CPU usage < 80 % ----------------------------------------
