@@ -397,8 +397,11 @@ do_heal() {
   require_root
   log "=== Heal check: ${SERVICE} ==="
 
-  # Print full status for the log (monitor.log captures stdout/stderr).
-  do_status
+  # Print full status; output goes to journald via the monitor service unit.
+  # Use || true so a non-zero exit from any best-effort section in do_status
+  # (e.g. grep returning 1 on a missing metrics label) never aborts do_heal
+  # under set -e before the recovery logic runs.
+  do_status || true
 
   echo ""
   echo "--- Service state ---"
