@@ -2,11 +2,15 @@
 # ops/canary.sh — Canary procedure for rf_adapt_intel (process-worker service).
 #
 # Usage:
-#   sudo bash ops/canary.sh [--promote | --rollback | --status] [--dry-run]
+#   sudo bash ops/canary.sh [--promote | --rollback | --status | --heal] [--dry-run]
 #
 # Phases:
 #   (default)   Enable canary mode: set RF_SNR_MIN_DB=0 and deploy drop-in.
-#   --status    Show current FP/FN counters, CPU/memory, and lock-fail metrics.
+#   --status    Show current FP/FN counters, CPU/memory, heartbeat and DB
+#               staleness, and lock-fail metrics.
+#   --heal      Print status then auto-recover if service is stopped/failed:
+#               calls 'systemctl reset-failed' + 'systemctl start' as needed.
+#               Requires root.  Run by rf-adapt-intel-monitor.timer every 30 min.
 #   --promote   Promote canary config to production (remove canary drop-in).
 #   --rollback  Restore production config from backup and reload service.
 #
@@ -18,6 +22,11 @@
 #   via tests/test_snr_sweep.py; it is not polled from Prometheus directly.
 set -euo pipefail
 
+# Resolve the script's own absolute path (for copy/paste hints).
+SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null \
+  || readlink -f "${BASH_SOURCE[0]}" 2>/dev/null \
+  || echo "${BASH_SOURCE[0]}")"
+
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
@@ -28,7 +37,13 @@ DROP_IN_DIR="/etc/systemd/system/${SERVICE}.service.d"
 CANARY_DROP_IN="${DROP_IN_DIR}/canary.conf"
 METRICS_FILE="${RF_METRICS_FILE:-/var/lib/rf-adapt-intel/metrics.prom}"
 WORKER_LOG="${RF_WORKER_LOG:-/var/lib/rf-adapt-intel/worker.log}"
+HEARTBEAT_FILE="${RF_HEARTBEAT_FILE:-/var/lib/rf-adapt-intel/heartbeat}"
+DB_PATH="${RF_DB_PATH:-/var/lib/rf-adapt-intel/rf_adapt_intel.db}"
 BACKUP_DIR="/root/rf_adapt_intel_backup"
+# Heartbeat is written every 30 s by output_loop; warn after 5 minutes of silence.
+STALE_HEARTBEAT_S="${RF_STALE_HEARTBEAT_S:-300}"
+# Warn when no signals have been written to the DB for more than 24 hours.
+DB_STALE_S="${RF_DB_STALE_S:-86400}"
 DRY_RUN=false
 ACTION="canary"
 
@@ -40,6 +55,7 @@ while [[ $# -gt 0 ]]; do
     --promote)   ACTION="promote" ;;
     --rollback)  ACTION="rollback" ;;
     --status)    ACTION="status" ;;
+    --heal)      ACTION="heal" ;;
     --dry-run)   DRY_RUN=true ;;
     -h|--help)
       sed -n '2,/^set -/{ /^set -/d; s/^# \{0,1\}//; p }' "${BASH_SOURCE[0]}"
@@ -67,12 +83,54 @@ run() {
   fi
 }
 
+run_allow_fail() {
+  # Like run(), but tolerates a non-zero exit code (safe under set -euo pipefail).
+  # Uses 'if "$@"' to suppress errexit inside the function; returns the command's
+  # exit code so the caller can inspect it.  Always pair with '|| rc=$?' at the
+  # call site so that set -e does not abort the script when the function itself
+  # returns non-zero.
+  if $DRY_RUN; then
+    echo "[dry-run] $*"
+    return 0
+  fi
+  if "$@"; then return 0; else return $?; fi
+}
+
 require_root() {
+  # RF_CANARY_SKIP_ROOT_CHECK=1 bypasses the root check in automated tests.
+  if [[ "${RF_CANARY_SKIP_ROOT_CHECK:-}" == "1" ]]; then
+    return 0
+  fi
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "[ERROR] This script must be run as root (sudo)." >&2
     exit 1
   fi
 }
+
+# validate_int_param VAR_NAME current_value default_value
+# If current_value is not a plain non-negative integer, emit a warning and
+# reset the named variable to default_value so downstream arithmetic is safe.
+# Modifies the named variable in the caller's scope via printf -v.
+# VAR_NAME must consist of alphanumeric characters and underscores only.
+validate_int_param() {
+  local var_name="$1"
+  local current="$2"
+  local default="$3"
+  # Guard against arbitrary variable assignment via printf -v.
+  if [[ ! "${var_name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    warn "validate_int_param: invalid variable name '${var_name}' (ignored)"
+    return
+  fi
+  if [[ ! "${current}" =~ ^[0-9]+$ ]]; then
+    warn "${var_name}='${current}' is not a valid integer; using default ${default}"
+    printf -v "${var_name}" '%s' "${default}"
+  fi
+}
+
+# Validate integer threshold env-vars so downstream arithmetic never aborts
+# under set -e when a caller passes a non-integer like "24h" or "5m".
+validate_int_param STALE_HEARTBEAT_S "${STALE_HEARTBEAT_S}" 300
+validate_int_param DB_STALE_S        "${DB_STALE_S}"        86400
 
 service_reload() {
   run systemctl daemon-reload
@@ -95,7 +153,115 @@ get_metric() {
 }
 
 # ---------------------------------------------------------------------------
-# ACTION: status — print current FP/FN rates and resource usage
+# Staleness checks — used by do_status and do_heal
+# ---------------------------------------------------------------------------
+
+# check_heartbeat_staleness — warn if the heartbeat file is older than
+# STALE_HEARTBEAT_S seconds or missing.
+# Returns: 0 OK, 1 stale/missing, 2 stat unavailable (cannot determine mtime).
+check_heartbeat_staleness() {
+  echo ""
+  echo "--- Heartbeat (${HEARTBEAT_FILE}) ---"
+  if [[ ! -f "${HEARTBEAT_FILE}" ]]; then
+    echo "  [WARN] Heartbeat file not found: ${HEARTBEAT_FILE}"
+    echo "         The output thread may never have run (service not started?)."
+    return 1
+  fi
+  local mtime now age_s
+  # GNU stat uses -c '%Y'; BSD/macOS stat uses -f '%m'. Try GNU first, then
+  # BSD; if neither works emit a distinct [SKIP] rather than treating mtime as
+  # epoch 0 (which would produce a spurious "STALE" warning on macOS/BSD).
+  mtime=$(stat -c '%Y' "${HEARTBEAT_FILE}" 2>/dev/null \
+    || stat -f '%m' "${HEARTBEAT_FILE}" 2>/dev/null \
+    || echo "")
+  if [[ -z "${mtime}" ]]; then
+    echo "  [SKIP] Cannot read heartbeat file mtime — stat unavailable on this platform."
+    return 2
+  fi
+  now=$(date +%s)
+  age_s=$(( now - mtime ))
+  # Guard against clock skew: mtime in the future gives a negative age.
+  # Clamp to 0 and emit a distinct warning so the operator is alerted.
+  if [[ ${age_s} -lt 0 ]]; then
+    echo "  [WARN] Heartbeat mtime is in the future (clock skew? mtime=${mtime}, now=${now})."
+    age_s=0
+  fi
+  echo "  Last heartbeat: ${age_s}s ago  (threshold: ${STALE_HEARTBEAT_S}s)"
+  if [[ ${age_s} -gt ${STALE_HEARTBEAT_S} ]]; then
+    echo "  [WARN] Heartbeat STALE — output thread may be blocked or service stopped."
+    return 1
+  fi
+  echo "  [OK] Heartbeat is fresh."
+  return 0
+}
+
+# check_db_staleness — warn if no signals have been written to the DB within
+# DB_STALE_S seconds.  Requires sqlite3 to be installed.
+# Returns: 0 if recent data found, 1 if stale/no data/query error/missing DB,
+#          2 if sqlite3 is unavailable.
+check_db_staleness() {
+  echo ""
+  echo "--- DB write staleness (${DB_PATH}) ---"
+  if ! command -v sqlite3 &>/dev/null; then
+    echo "  [SKIP] sqlite3 not found — cannot check DB staleness."
+    return 2
+  fi
+  if [[ ! -f "${DB_PATH}" ]]; then
+    echo "  [WARN] DB file not found: ${DB_PATH}"
+    return 1
+  fi
+  local last_epoch sqlite_rc=0
+  # Query epoch seconds directly from SQLite using strftime('%s',...) so the
+  # result is a UTC-based integer and is not affected by the host timezone.
+  # -batch -noheader -init /dev/null prevent ~/.sqliterc from enabling headers
+  # or column mode, which would produce non-numeric output and abort bash
+  # arithmetic under set -e.  stderr is merged into stdout so any error message
+  # is captured.  The '|| sqlite_rc=$?' idiom captures the exit code under set -e.
+  last_epoch=$(sqlite3 -batch -noheader -init /dev/null "${DB_PATH}" \
+    "SELECT strftime('%s', MAX(timestamp)) FROM signals;" 2>&1) || sqlite_rc=$?
+  if [[ ${sqlite_rc} -ne 0 ]]; then
+    echo "  [WARN] DB query failed (rc=${sqlite_rc}): ${last_epoch}"
+    echo "         This may indicate a corrupt DB, missing table, or permission issue."
+    return 1
+  fi
+  # Validate that the result is a plain integer before bash arithmetic.
+  # A non-numeric value (e.g. from a residual ~/.sqliterc header) would cause
+  # age_s=$(( now_epoch - last_epoch )) to abort the script under set -e.
+  # This check also covers the NULL/empty case (strftime returns NULL when the
+  # table is empty, which sqlite3 prints as an empty string).
+  if ! [[ "${last_epoch}" =~ ^[0-9]+$ ]]; then
+    if [[ -z "${last_epoch}" ]]; then
+      echo "  [WARN] No signals found in DB — service may never have written any detections."
+    else
+      echo "  [WARN] DB query returned non-numeric epoch: '${last_epoch}'"
+      echo "         Check for headers or extra output from sqlite3 init files."
+    fi
+    return 1
+  fi
+  echo "  Latest detection epoch: ${last_epoch}"
+  local now_epoch age_s
+  now_epoch=$(date +%s)
+  age_s=$(( now_epoch - last_epoch ))
+  # Guard against clock skew or future timestamps in the DB giving a negative
+  # age. Clamp to 0 and emit a distinct warning so the operator is alerted.
+  if [[ ${age_s} -lt 0 ]]; then
+    echo "  [WARN] DB timestamp is in the future (clock skew? last_epoch=${last_epoch}, now=${now_epoch})."
+    age_s=0
+  fi
+  local age_h=$(( age_s / 3600 ))
+  echo "  Age: ${age_s}s (${age_h}h)  (threshold: ${DB_STALE_S}s / $(( DB_STALE_S / 3600 ))h)"
+  if [[ ${age_s} -gt ${DB_STALE_S} ]]; then
+    echo "  [WARN] DB writes STALE — no detections in ${age_h}h."
+    echo "         Check: sudo systemctl status ${SERVICE}"
+    echo "         Heal:  sudo bash ${SCRIPT_PATH} --heal"
+    return 1
+  fi
+  echo "  [OK] DB writes are recent."
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# ACTION: status — print current FP/FN rates, CPU/memory, staleness checks
 # ---------------------------------------------------------------------------
 do_status() {
   log "=== Canary Status ==="
@@ -110,14 +276,17 @@ do_status() {
     echo "  rf_frames_rejected:  ${rejected}"
     echo "  rf_frames_candidate: ${candidates}"
     # Compute FP rate proxy (rejected / total)
-    if [[ "${total}" =~ ^[0-9]+$ ]] && [[ "${total}" -gt 0 ]]; then
+    if [[ "${total}" =~ ^[0-9]+$ ]] && [[ "${total}" -gt 0 ]] \
+        && [[ "${rejected}" =~ ^[0-9]+$ ]]; then
       local fp_pct
-      fp_pct=$(awk "BEGIN { printf \"%.1f\", ${rejected} / ${total} * 100 }")
+      fp_pct=$(awk "BEGIN { printf \"%.1f\", ${rejected} / ${total} * 100 }" || true)
       echo "  Rejection rate: ${fp_pct}% (target < 3% for canary)"
     fi
     echo ""
-    echo "  Per-class frames:"
-    grep 'rf_class_frames' "${METRICS_FILE}" | sed 's/^/    /'
+    echo "  Per-class frames (rf_classifications_total):"
+    # Anchor to '^rf_classifications_total{' so # HELP / # TYPE header lines are excluded.
+    # Use || true so grep returning 1 (no matches) does not abort under set -e.
+    grep '^rf_classifications_total{' "${METRICS_FILE}" | sed 's/^/    /' || true
   else
     warn "Metrics file not found: ${METRICS_FILE}"
   fi
@@ -136,6 +305,9 @@ do_status() {
   else
     warn "Service ${SERVICE} is not active."
   fi
+
+  check_heartbeat_staleness || true
+  check_db_staleness || true
 
   echo ""
   echo "--- Last 5 worker.log entries ---"
@@ -189,9 +361,9 @@ EOF
   service_reload
 
   log "Canary mode active."
-  log "Monitor with: sudo bash ops/canary.sh --status"
-  log "Promote when criteria met: sudo bash ops/canary.sh --promote"
-  log "Rollback at any time: sudo bash ops/canary.sh --rollback"
+  log "Monitor with: sudo bash ${SCRIPT_PATH} --status"
+  log "Promote when criteria met: sudo bash ${SCRIPT_PATH} --promote"
+  log "Rollback at any time: sudo bash ${SCRIPT_PATH} --rollback"
 }
 
 # ---------------------------------------------------------------------------
@@ -203,19 +375,26 @@ check_promotion_criteria() {
   local failed=0   # count of failed criteria; 0 = all OK
 
   # --- Criterion 1: FP/rejection rate < 3 % ---------------------------------
-  local total rejected fp_pct
+  # Validate both metrics are numeric BEFORE computation so that a missing or
+  # non-numeric rf_frames_rejected can never silently produce [PASS] (some awk
+  # implementations treat a missing operand as 0, which would make the rate
+  # appear to be 0% and pass the < 3% gate incorrectly).
+  local total rejected
   total="$(get_metric rf_frames_total)"
   rejected="$(get_metric rf_frames_rejected)"
-  if [[ "${total}" =~ ^[0-9]+(\.[0-9]+)?$ ]] && [[ "${total%.*}" -gt 0 ]]; then
+  if ! [[ "${total}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || ! [[ "${rejected}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "  [SKIP] FP/rejection rate: metrics unavailable (total=${total}, rejected=${rejected})"
+  elif [[ "${total%.*}" -le 0 ]]; then
+    echo "  [SKIP] FP/rejection rate: no frames processed yet (total=${total})"
+  else
+    local fp_pct
     fp_pct=$(awk "BEGIN { printf \"%.2f\", ${rejected} / ${total} * 100 }")
-    if awk "BEGIN { exit !(${fp_pct} < 3.0) }"; then
+    if [[ "${fp_pct}" =~ ^[0-9]+\.[0-9]+$ ]] && awk "BEGIN { exit !(${fp_pct} < 3.0) }"; then
       echo "  [PASS] FP/rejection rate: ${fp_pct}% < 3%"
     else
-      echo "  [FAIL] FP/rejection rate: ${fp_pct}% >= 3%"
+      echo "  [FAIL] FP/rejection rate: ${fp_pct:-N/A}% >= 3%"
       failed=$(( failed + 1 ))
     fi
-  else
-    echo "  [SKIP] FP/rejection rate: insufficient data (total=${total})"
   fi
 
   # --- Criterion 2: CPU usage < 80 % ----------------------------------------
@@ -256,6 +435,86 @@ check_promotion_criteria() {
 }
 
 # ---------------------------------------------------------------------------
+# ACTION: heal — print status then recover a stopped/failed service
+# ---------------------------------------------------------------------------
+# Intended to be called periodically by rf-adapt-intel-monitor.timer (every
+# 30 min).  Requires root because systemctl reset-failed/start are privileged
+# operations.
+#
+# Recovery logic:
+#   failed   → systemctl reset-failed + start   (hit StartLimitBurst)
+#   inactive → systemctl start                  (e.g. manually stopped)
+#   active   → no action needed
+# ---------------------------------------------------------------------------
+do_heal() {
+  require_root
+  log "=== Heal check: ${SERVICE} ==="
+
+  # Print full status; output goes to journald via the monitor service unit.
+  # Use || true so a non-zero exit from any best-effort section in do_status
+  # (e.g. grep returning 1 on a missing metrics label) never aborts do_heal
+  # under set -e before the recovery logic runs.
+  do_status || true
+
+  echo ""
+  echo "--- Service state ---"
+  local active_state
+  active_state=$(systemctl show -p ActiveState --value "${SERVICE}" 2>/dev/null \
+    || echo "unknown")
+  echo "  ActiveState: ${active_state}"
+
+  case "${active_state}" in
+    active)
+      log "Service is running — no recovery needed."
+      ;;
+    failed)
+      # StartLimitBurst was exhausted or the process exited with an error and
+      # systemd gave up retrying.  Reset the failure counter and restart.
+      log "Service is in FAILED state. Resetting failure counter and restarting..."
+      local rc=0
+      # run_allow_fail (not run) is used here so that a non-zero exit from
+      # systemctl does not abort the script inside run() under set -euo pipefail
+      # before '|| rc=$?' can capture the status.
+      run_allow_fail systemctl reset-failed "${SERVICE}" || rc=$?
+      if [[ ${rc} -ne 0 ]]; then
+        warn "systemctl reset-failed exited ${rc} — continuing anyway."
+        rc=0
+      fi
+      run_allow_fail systemctl start "${SERVICE}" || rc=$?
+      if [[ ${rc} -ne 0 ]]; then
+        warn "systemctl start exited ${rc} — service may still be failing."
+      fi
+      log "Recovery attempted. New state:"
+      if ! $DRY_RUN; then
+        systemctl show -p ActiveState --value "${SERVICE}" 2>/dev/null \
+          | awk '{print "  ActiveState: " $0}' || true
+        log "Monitor with: sudo journalctl -u ${SERVICE} -n 20 --no-pager"
+      fi
+      ;;
+    inactive)
+      # Service is stopped (not failed, just not running).  Start it.
+      log "Service is INACTIVE. Starting..."
+      local rc=0
+      run_allow_fail systemctl start "${SERVICE}" || rc=$?
+      if [[ ${rc} -ne 0 ]]; then
+        warn "systemctl start exited ${rc} — service may still be failing."
+      fi
+      log "Start attempted. New state:"
+      if ! $DRY_RUN; then
+        systemctl show -p ActiveState --value "${SERVICE}" 2>/dev/null \
+          | awk '{print "  ActiveState: " $0}' || true
+      fi
+      ;;
+    activating|deactivating|reloading)
+      log "Service is transitioning (${active_state}) — skipping intervention."
+      ;;
+    *)
+      warn "Unknown ActiveState '${active_state}' — no action taken."
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # ACTION: promote — promote canary to production (automated gate)
 # ---------------------------------------------------------------------------
 do_promote() {
@@ -268,7 +527,7 @@ do_promote() {
   if ! check_promotion_criteria; then
     echo ""
     log "One or more acceptance criteria FAILED. Promotion blocked."
-    log "Resolve the issues above, then re-run: sudo bash ops/canary.sh --promote"
+    log "Resolve the issues above, then re-run: sudo bash ${SCRIPT_PATH} --promote"
     exit 1
   fi
 
@@ -319,6 +578,7 @@ do_rollback() {
 case "${ACTION}" in
   canary)   do_canary ;;
   status)   do_status ;;
+  heal)     do_heal ;;
   promote)  do_promote ;;
   rollback) do_rollback ;;
   *)

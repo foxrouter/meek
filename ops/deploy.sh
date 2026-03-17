@@ -120,6 +120,13 @@ run sudo install -m 644 -o root -g root "${MONITOR_SVC_SRC}" \
     "/etc/systemd/system/rf-adapt-intel-monitor.service"
 run sudo install -m 644 -o root -g root "${MONITOR_TMR_SRC}" \
     "/etc/systemd/system/rf-adapt-intel-monitor.timer"
+# Install monitor service hardening drop-in
+MONITOR_DROPIN_SRC="${REPO_ROOT}/systemd/rf-adapt-intel-monitor.service.d"
+MONITOR_DROPIN_DST="/etc/systemd/system/rf-adapt-intel-monitor.service.d"
+run sudo mkdir -p "${MONITOR_DROPIN_DST}"
+run sudo install -m 644 -o root -g root \
+    "${MONITOR_DROPIN_SRC}/hardening.conf" \
+    "${MONITOR_DROPIN_DST}/hardening.conf"
 # Install ops scripts into /usr/local/share for the monitor service to call
 run sudo mkdir -p "${MONITOR_SHARE}/ops"
 run sudo install -m 755 -o root -g root "${REPO_ROOT}/ops/canary.sh" \
