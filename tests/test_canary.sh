@@ -328,6 +328,7 @@ test_heal_dry_run_no_systemctl_side_effects() {
   assert_contains "--heal --dry-run: shows dry-run prefix" "[dry-run]" "${out}"
   # In dry-run mode the stub systemctl should not be called with real args
   assert_contains "--heal --dry-run: mentions reset-failed" "reset-failed" "${out}"
+  assert_not_contains "--heal --dry-run: no stub systemctl side-effects" "[stub] systemctl" "${out}"
 }
 
 test_invalid_stale_heartbeat_s_falls_back_to_default() {

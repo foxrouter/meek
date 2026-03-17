@@ -258,9 +258,10 @@ do_status() {
     echo "  rf_frames_rejected:  ${rejected}"
     echo "  rf_frames_candidate: ${candidates}"
     # Compute FP rate proxy (rejected / total)
-    if [[ "${total}" =~ ^[0-9]+$ ]] && [[ "${total}" -gt 0 ]]; then
+    if [[ "${total}" =~ ^[0-9]+$ ]] && [[ "${total}" -gt 0 ]] \
+        && [[ "${rejected}" =~ ^[0-9]+$ ]]; then
       local fp_pct
-      fp_pct=$(awk "BEGIN { printf \"%.1f\", ${rejected} / ${total} * 100 }")
+      fp_pct=$(awk "BEGIN { printf \"%.1f\", ${rejected} / ${total} * 100 }" || true)
       echo "  Rejection rate: ${fp_pct}% (target < 3% for canary)"
     fi
     echo ""
