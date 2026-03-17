@@ -284,8 +284,9 @@ do_status() {
     fi
     echo ""
     echo "  Per-class frames (rf_classifications_total):"
+    # Anchor to '^rf_classifications_total{' so # HELP / # TYPE header lines are excluded.
     # Use || true so grep returning 1 (no matches) does not abort under set -e.
-    grep 'rf_classifications_total' "${METRICS_FILE}" | sed 's/^/    /' || true
+    grep '^rf_classifications_total{' "${METRICS_FILE}" | sed 's/^/    /' || true
   else
     warn "Metrics file not found: ${METRICS_FILE}"
   fi

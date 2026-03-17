@@ -270,16 +270,24 @@ test_status_shows_db_stale() {
 
 test_status_with_metrics_file() {
   setup_env
-  # Write a minimal metrics file that matches the actual Prometheus output from
-  # render_prometheus_body() in include/meek/metrics.hpp.
+  # Write a metrics file that matches actual render_prometheus_body() output,
+  # including # HELP / # TYPE headers that appear in the real textfile.
   cat > "${_TMP}/metrics.prom" <<'EOF'
+# HELP rf_frames_total Total IQ frames processed by classifier
+# TYPE rf_frames_total counter
 rf_frames_total 1234
-rf_frames_rejected 42
-rf_frames_candidate 100
+# HELP rf_classifications_total Frames classified by modulation type
+# TYPE rf_classifications_total counter
 rf_classifications_total{class="cw_like"} 10
 rf_classifications_total{class="fsk_like"} 30
 rf_classifications_total{class="psk_qam_like"} 25
 rf_classifications_total{class="ook_am_like"} 35
+# HELP rf_frames_rejected Frames rejected by SNR/BW/power gates
+# TYPE rf_frames_rejected counter
+rf_frames_rejected 42
+# HELP rf_frames_candidate Frames above confidence threshold
+# TYPE rf_frames_candidate counter
+rf_frames_candidate 100
 EOF
   local out rc=0
   out="$(run_canary --status)" || rc=$?
@@ -289,6 +297,9 @@ EOF
   assert_contains "--status: shows per-class section header" "Per-class frames" "${out}"
   assert_contains "--status: shows cw_like class" "cw_like" "${out}"
   assert_not_contains "--status with metrics: no rf_class_frames in output" "rf_class_frames" "${out}"
+  # # HELP / # TYPE header lines must not appear in the per-class output section
+  assert_not_contains "--status with metrics: no HELP lines in per-class output" "# HELP rf_classifications_total" "${out}"
+  assert_not_contains "--status with metrics: no TYPE lines in per-class output" "# TYPE rf_classifications_total" "${out}"
 }
 
 test_heal_active_service_no_restart() {
