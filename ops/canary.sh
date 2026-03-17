@@ -89,6 +89,31 @@ require_root() {
   fi
 }
 
+# validate_int_param VAR_NAME current_value default_value
+# If current_value is not a plain non-negative integer, emit a warning and
+# reset the named variable to default_value so downstream arithmetic is safe.
+# Modifies the named variable in the caller's scope via printf -v.
+# VAR_NAME must consist of alphanumeric characters and underscores only.
+validate_int_param() {
+  local var_name="$1"
+  local current="$2"
+  local default="$3"
+  # Guard against arbitrary variable assignment via printf -v.
+  if [[ ! "${var_name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    warn "validate_int_param: invalid variable name '${var_name}' (ignored)"
+    return
+  fi
+  if [[ ! "${current}" =~ ^[0-9]+$ ]]; then
+    warn "${var_name}='${current}' is not a valid integer; using default ${default}"
+    printf -v "${var_name}" '%s' "${default}"
+  fi
+}
+
+# Validate integer threshold env-vars so downstream arithmetic never aborts
+# under set -e when a caller passes a non-integer like "24h" or "5m".
+validate_int_param STALE_HEARTBEAT_S "${STALE_HEARTBEAT_S}" 300
+validate_int_param DB_STALE_S        "${DB_STALE_S}"        86400
+
 service_reload() {
   run systemctl daemon-reload
   run systemctl restart "${SERVICE}"

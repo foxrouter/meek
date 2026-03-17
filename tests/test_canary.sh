@@ -330,6 +330,28 @@ test_heal_dry_run_no_systemctl_side_effects() {
   assert_contains "--heal --dry-run: mentions reset-failed" "reset-failed" "${out}"
 }
 
+test_invalid_stale_heartbeat_s_falls_back_to_default() {
+  setup_env
+  echo "ok $(date +%s)" > "${_TMP}/heartbeat"
+  local out rc=0
+  out="$(RF_STALE_HEARTBEAT_S=5m run_canary --status)" || rc=$?
+  teardown_env
+  assert_exit "--status with invalid RF_STALE_HEARTBEAT_S exits 0" 0 "${rc}"
+  assert_contains "--status: warns on invalid STALE_HEARTBEAT_S" "STALE_HEARTBEAT_S" "${out}"
+  assert_contains "--status: falls back to default (300)" "using default 300" "${out}"
+}
+
+test_invalid_db_stale_s_falls_back_to_default() {
+  setup_env
+  touch "${_TMP}/rf.db"
+  local out rc=0
+  out="$(RF_DB_STALE_S=24h run_canary --status)" || rc=$?
+  teardown_env
+  assert_exit "--status with invalid RF_DB_STALE_S exits 0" 0 "${rc}"
+  assert_contains "--status: warns on invalid DB_STALE_S" "DB_STALE_S" "${out}"
+  assert_contains "--status: falls back to default (86400)" "using default 86400" "${out}"
+}
+
 # ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
@@ -348,6 +370,8 @@ test_heal_active_service_no_restart
 test_heal_failed_service_resets_and_starts
 test_heal_inactive_service_starts
 test_heal_dry_run_no_systemctl_side_effects
+test_invalid_stale_heartbeat_s_falls_back_to_default
+test_invalid_db_stale_s_falls_back_to_default
 
 echo ""
 echo "Results: ${_PASS} passed, ${_FAIL} failed."
