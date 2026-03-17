@@ -210,7 +210,7 @@ check_db_staleness() {
   if [[ ${age_s} -gt ${DB_STALE_S} ]]; then
     echo "  [WARN] DB writes STALE — no detections in ${age_h}h."
     echo "         Check: sudo systemctl status ${SERVICE}"
-    echo "         Heal:  sudo bash ops/canary.sh --heal"
+    echo "         Heal:  sudo bash ${BASH_SOURCE[0]} --heal"
     return 1
   fi
   echo "  [OK] DB writes are recent."
