@@ -2,11 +2,15 @@
 # ops/canary.sh — Canary procedure for rf_adapt_intel (process-worker service).
 #
 # Usage:
-#   sudo bash ops/canary.sh [--promote | --rollback | --status] [--dry-run]
+#   sudo bash ops/canary.sh [--promote | --rollback | --status | --heal] [--dry-run]
 #
 # Phases:
 #   (default)   Enable canary mode: set RF_SNR_MIN_DB=0 and deploy drop-in.
-#   --status    Show current FP/FN counters, CPU/memory, and lock-fail metrics.
+#   --status    Show current FP/FN counters, CPU/memory, heartbeat and DB
+#               staleness, and lock-fail metrics.
+#   --heal      Print status then auto-recover if service is stopped/failed:
+#               calls 'systemctl reset-failed' + 'systemctl start' as needed.
+#               Requires root.  Run by rf-adapt-intel-monitor.timer every 30 min.
 #   --promote   Promote canary config to production (remove canary drop-in).
 #   --rollback  Restore production config from backup and reload service.
 #
@@ -28,7 +32,13 @@ DROP_IN_DIR="/etc/systemd/system/${SERVICE}.service.d"
 CANARY_DROP_IN="${DROP_IN_DIR}/canary.conf"
 METRICS_FILE="${RF_METRICS_FILE:-/var/lib/rf-adapt-intel/metrics.prom}"
 WORKER_LOG="${RF_WORKER_LOG:-/var/lib/rf-adapt-intel/worker.log}"
+HEARTBEAT_FILE="${RF_HEARTBEAT_FILE:-/var/lib/rf-adapt-intel/heartbeat}"
+DB_PATH="${RF_DB_PATH:-/var/lib/rf-adapt-intel/rf_adapt_intel.db}"
 BACKUP_DIR="/root/rf_adapt_intel_backup"
+# Heartbeat is written every 30 s by output_loop; warn after 5 minutes of silence.
+STALE_HEARTBEAT_S="${RF_STALE_HEARTBEAT_S:-300}"
+# Warn when no signals have been written to the DB for more than 24 hours.
+DB_STALE_S="${RF_DB_STALE_S:-86400}"
 DRY_RUN=false
 ACTION="canary"
 
@@ -40,6 +50,7 @@ while [[ $# -gt 0 ]]; do
     --promote)   ACTION="promote" ;;
     --rollback)  ACTION="rollback" ;;
     --status)    ACTION="status" ;;
+    --heal)      ACTION="heal" ;;
     --dry-run)   DRY_RUN=true ;;
     -h|--help)
       sed -n '2,/^set -/{ /^set -/d; s/^# \{0,1\}//; p }' "${BASH_SOURCE[0]}"
@@ -95,7 +106,75 @@ get_metric() {
 }
 
 # ---------------------------------------------------------------------------
-# ACTION: status — print current FP/FN rates and resource usage
+# Staleness checks — used by do_status and do_heal
+# ---------------------------------------------------------------------------
+
+# check_heartbeat_staleness — warn if the heartbeat file is older than
+# STALE_HEARTBEAT_S seconds or missing.  Returns 1 if stale/missing, 0 if OK.
+check_heartbeat_staleness() {
+  echo ""
+  echo "--- Heartbeat (${HEARTBEAT_FILE}) ---"
+  if [[ ! -f "${HEARTBEAT_FILE}" ]]; then
+    echo "  [WARN] Heartbeat file not found: ${HEARTBEAT_FILE}"
+    echo "         The output thread may never have run (service not started?)."
+    return 1
+  fi
+  local mtime now age_s
+  mtime=$(stat -c '%Y' "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
+  now=$(date +%s)
+  age_s=$(( now - mtime ))
+  echo "  Last heartbeat: ${age_s}s ago  (threshold: ${STALE_HEARTBEAT_S}s)"
+  if [[ ${age_s} -gt ${STALE_HEARTBEAT_S} ]]; then
+    echo "  [WARN] Heartbeat STALE — output thread may be blocked or service stopped."
+    return 1
+  fi
+  echo "  [OK] Heartbeat is fresh."
+  return 0
+}
+
+# check_db_staleness — warn if no signals have been written to the DB within
+# DB_STALE_S seconds.  Requires sqlite3 to be installed.
+# Returns 1 if stale/no data, 0 if OK, 2 if sqlite3 unavailable.
+check_db_staleness() {
+  echo ""
+  echo "--- DB write staleness (${DB_PATH}) ---"
+  if ! command -v sqlite3 &>/dev/null; then
+    echo "  [SKIP] sqlite3 not found — cannot check DB staleness."
+    return 2
+  fi
+  if [[ ! -f "${DB_PATH}" ]]; then
+    echo "  [WARN] DB file not found: ${DB_PATH}"
+    return 1
+  fi
+  local last_ts
+  last_ts=$(sqlite3 "${DB_PATH}" \
+    "SELECT MAX(timestamp) FROM signals;" 2>/dev/null || true)
+  if [[ -z "${last_ts}" ]]; then
+    echo "  [WARN] No signals found in DB — service may never have written any detections."
+    return 1
+  fi
+  echo "  Latest detection: ${last_ts}"
+  # Compute age; fall back gracefully when date -d is unavailable (macOS: date -j -f).
+  local last_epoch now_epoch age_s
+  last_epoch=$(date -d "${last_ts}" +%s 2>/dev/null \
+    || date -j -f "%Y-%m-%d %H:%M:%S" "${last_ts}" +%s 2>/dev/null \
+    || echo 0)
+  now_epoch=$(date +%s)
+  age_s=$(( now_epoch - last_epoch ))
+  local age_h=$(( age_s / 3600 ))
+  echo "  Age: ${age_s}s (${age_h}h)  (threshold: ${DB_STALE_S}s / $(( DB_STALE_S / 3600 ))h)"
+  if [[ ${age_s} -gt ${DB_STALE_S} ]]; then
+    echo "  [WARN] DB writes STALE — no detections in ${age_h}h."
+    echo "         Check: sudo systemctl status ${SERVICE}"
+    echo "         Heal:  sudo bash ops/canary.sh --heal"
+    return 1
+  fi
+  echo "  [OK] DB writes are recent."
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# ACTION: status — print current FP/FN rates, CPU/memory, staleness checks
 # ---------------------------------------------------------------------------
 do_status() {
   log "=== Canary Status ==="
@@ -136,6 +215,9 @@ do_status() {
   else
     warn "Service ${SERVICE} is not active."
   fi
+
+  check_heartbeat_staleness || true
+  check_db_staleness || true
 
   echo ""
   echo "--- Last 5 worker.log entries ---"
@@ -256,6 +338,68 @@ check_promotion_criteria() {
 }
 
 # ---------------------------------------------------------------------------
+# ACTION: heal — print status then recover a stopped/failed service
+# ---------------------------------------------------------------------------
+# Intended to be called periodically by rf-adapt-intel-monitor.timer (every
+# 30 min).  Requires root because systemctl reset-failed/start are privileged
+# operations.
+#
+# Recovery logic:
+#   failed   → systemctl reset-failed + start   (hit StartLimitBurst)
+#   inactive → systemctl start                  (e.g. manually stopped)
+#   active   → no action needed
+# ---------------------------------------------------------------------------
+do_heal() {
+  require_root
+  log "=== Heal check: ${SERVICE} ==="
+
+  # Print full status for the log (monitor.log captures stdout/stderr).
+  do_status
+
+  echo ""
+  echo "--- Service state ---"
+  local active_state
+  active_state=$(systemctl show -p ActiveState --value "${SERVICE}" 2>/dev/null \
+    || echo "unknown")
+  echo "  ActiveState: ${active_state}"
+
+  case "${active_state}" in
+    active)
+      log "Service is running — no recovery needed."
+      ;;
+    failed)
+      # StartLimitBurst was exhausted or the process exited with an error and
+      # systemd gave up retrying.  Reset the failure counter and restart.
+      log "Service is in FAILED state. Resetting failure counter and restarting..."
+      run systemctl reset-failed "${SERVICE}"
+      run systemctl start "${SERVICE}"
+      log "Recovery attempted. New state:"
+      if ! $DRY_RUN; then
+        systemctl show -p ActiveState --value "${SERVICE}" 2>/dev/null \
+          | awk '{print "  ActiveState: " $0}'
+        log "Monitor with: sudo journalctl -u ${SERVICE} -n 20 --no-pager"
+      fi
+      ;;
+    inactive)
+      # Service is stopped (not failed, just not running).  Start it.
+      log "Service is INACTIVE. Starting..."
+      run systemctl start "${SERVICE}"
+      log "Start attempted. New state:"
+      if ! $DRY_RUN; then
+        systemctl show -p ActiveState --value "${SERVICE}" 2>/dev/null \
+          | awk '{print "  ActiveState: " $0}'
+      fi
+      ;;
+    activating|deactivating|reloading)
+      log "Service is transitioning (${active_state}) — skipping intervention."
+      ;;
+    *)
+      warn "Unknown ActiveState '${active_state}' — no action taken."
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # ACTION: promote — promote canary to production (automated gate)
 # ---------------------------------------------------------------------------
 do_promote() {
@@ -319,6 +463,7 @@ do_rollback() {
 case "${ACTION}" in
   canary)   do_canary ;;
   status)   do_status ;;
+  heal)     do_heal ;;
   promote)  do_promote ;;
   rollback) do_rollback ;;
   *)
