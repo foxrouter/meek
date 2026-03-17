@@ -239,8 +239,9 @@ do_status() {
       echo "  Rejection rate: ${fp_pct}% (target < 3% for canary)"
     fi
     echo ""
-    echo "  Per-class frames:"
-    grep 'rf_class_frames' "${METRICS_FILE}" | sed 's/^/    /'
+    echo "  Per-class frames (rf_classifications_total):"
+    # Use || true so grep returning 1 (no matches) does not abort under set -e.
+    grep 'rf_classifications_total' "${METRICS_FILE}" | sed 's/^/    /' || true
   else
     warn "Metrics file not found: ${METRICS_FILE}"
   fi

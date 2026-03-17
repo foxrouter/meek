@@ -265,6 +265,29 @@ test_status_shows_db_stale() {
   assert_contains "--status: stale DB warning" "DB writes STALE" "${out}"
 }
 
+test_status_with_metrics_file() {
+  setup_env
+  # Write a minimal metrics file that matches the actual Prometheus output from
+  # render_prometheus_body() in include/meek/metrics.hpp.
+  cat > "${_TMP}/metrics.prom" <<'EOF'
+rf_frames_total 1234
+rf_frames_rejected 42
+rf_frames_candidate 100
+rf_classifications_total{class="cw_like"} 10
+rf_classifications_total{class="fsk_like"} 30
+rf_classifications_total{class="psk_qam_like"} 25
+rf_classifications_total{class="ook_am_like"} 35
+EOF
+  local out rc=0
+  out="$(run_canary --status)" || rc=$?
+  teardown_env
+  assert_exit "--status with metrics file exits 0" 0 "${rc}"
+  assert_contains "--status: shows rf_frames_total" "rf_frames_total" "${out}"
+  assert_contains "--status: shows per-class section header" "Per-class frames" "${out}"
+  assert_contains "--status: shows cw_like class" "cw_like" "${out}"
+  assert_not_contains "--status with metrics: no rf_class_frames in output" "rf_class_frames" "${out}"
+}
+
 test_heal_active_service_no_restart() {
   setup_env
   local out rc=0
@@ -320,6 +343,7 @@ test_status_shows_heartbeat_stale
 test_status_shows_db_query_failure
 test_status_shows_db_fresh
 test_status_shows_db_stale
+test_status_with_metrics_file
 test_heal_active_service_no_restart
 test_heal_failed_service_resets_and_starts
 test_heal_inactive_service_starts
