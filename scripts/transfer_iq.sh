@@ -2,9 +2,12 @@
 # scripts/transfer_iq.sh — Transfer IQ files from Ray (edge SDR) to Brian
 # (central processing server) via rsync/scp with retries, bandwidth limiting,
 # logging, and an optional inotifywait watcher for automatic triggering.
+# After each transfer batch the SQLite classifications DB is also synced so
+# that Brian's reporting node always has up-to-date classification data.
 #
 # Usage:
 #   bash scripts/transfer_iq.sh [--source <dir>] [--dest <user@host:path>]
+#                                [--db-source <file>] [--db-dest <user@host:file>]
 #                                [--bwlimit <kbps>] [--retries <n>]
 #                                [--watch] [--dry-run]
 #
@@ -15,6 +18,9 @@
 #   IQ_MAX_RETRIES  Maximum rsync retry attempts per file (default 3).
 #   IQ_TRANSFER_LOG Path to append transfer log lines (default /var/log/iq_transfer.log).
 #   IQ_WATCH        Set to 1 to enable inotifywait watcher mode.
+#   DB_SOURCE       Local path to the SQLite DB to sync (default /var/lib/rf-adapt-intel/rf_adapt_intel.db).
+#   DB_DEST         rsync destination for the DB, e.g. rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/rf_adapt_intel.db
+#                   If unset, DB sync is skipped.
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
@@ -27,18 +33,22 @@ MAX_RETRIES="${IQ_MAX_RETRIES:-3}"
 TRANSFER_LOG="${IQ_TRANSFER_LOG:-/var/log/iq_transfer.log}"
 WATCH_MODE="${IQ_WATCH:-0}"
 DRY_RUN=false
+DB_SOURCE="${DB_SOURCE:-/var/lib/rf-adapt-intel/rf_adapt_intel.db}"
+DB_DEST="${DB_DEST:-}"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --source)   SOURCE_DIR="$2"; shift ;;
-    --dest)     DEST="$2";       shift ;;
-    --bwlimit)  BW_KBPS="$2";   shift ;;
-    --retries)  MAX_RETRIES="$2"; shift ;;
-    --watch)    WATCH_MODE=1 ;;
-    --dry-run)  DRY_RUN=true ;;
+    --source)     SOURCE_DIR="$2"; shift ;;
+    --dest)       DEST="$2";       shift ;;
+    --db-source)  DB_SOURCE="$2";  shift ;;
+    --db-dest)    DB_DEST="$2";    shift ;;
+    --bwlimit)    BW_KBPS="$2";    shift ;;
+    --retries)    MAX_RETRIES="$2"; shift ;;
+    --watch)      WATCH_MODE=1 ;;
+    --dry-run)    DRY_RUN=true ;;
     -h|--help)
       sed -n '2,/^set -/{ /^set -/d; s/^# \{0,1\}//; p }' "${BASH_SOURCE[0]}"
       exit 0
@@ -93,6 +103,36 @@ run_rsync() {
 }
 
 # ---------------------------------------------------------------------------
+# Sync the SQLite classifications DB to Brian.
+# Skipped silently when DB_DEST is empty.
+# ---------------------------------------------------------------------------
+sync_db() {
+  if [[ -z "${DB_DEST}" ]]; then
+    return 0
+  fi
+  if [[ ! -f "${DB_SOURCE}" ]]; then
+    log "WARN DB file not found, skipping DB sync: ${DB_SOURCE}"
+    return 0
+  fi
+  local attempt=1
+  while [[ "${attempt}" -le "${MAX_RETRIES}" ]]; do
+    if $DRY_RUN; then
+      log "[dry-run] rsync -av '${DB_SOURCE}' '${DB_DEST}'"
+      return 0
+    fi
+    if rsync -av --timeout=30 "${DB_SOURCE}" "${DB_DEST}" 2>&1 | tee -a "${TRANSFER_LOG}"; then
+      log "OK DB synced: $(basename "${DB_SOURCE}") -> ${DB_DEST}"
+      return 0
+    fi
+    log "WARN DB sync attempt ${attempt}/${MAX_RETRIES} failed"
+    attempt=$(( attempt + 1 ))
+    sleep $(( attempt * 5 ))
+  done
+  log "ERROR DB sync failed after ${MAX_RETRIES} attempts"
+  return 1
+}
+
+# ---------------------------------------------------------------------------
 # Transfer all existing IQ files in SOURCE_DIR
 # ---------------------------------------------------------------------------
 transfer_dir() {
@@ -110,6 +150,7 @@ transfer_dir() {
     fi
   done < <(find "${SOURCE_DIR}" -maxdepth 1 -name '*.cf32' -o -name '*.raw' -print0 2>/dev/null | sort -z)
   log "Transfer sweep complete: ${count} OK, ${failed} failed"
+  sync_db || true
 }
 
 # ---------------------------------------------------------------------------
@@ -129,6 +170,7 @@ watch_and_transfer() {
         *.cf32|*.raw)
           log "New file detected: $(basename "${new_file}")"
           run_rsync "${new_file}" || true
+          sync_db || true
           ;;
       esac
     done
@@ -138,6 +180,9 @@ watch_and_transfer() {
 # Main
 # ---------------------------------------------------------------------------
 log "rf_adapt_intel IQ transfer: source=${SOURCE_DIR} dest=${DEST} bwlimit=${BW_KBPS}kbps"
+if [[ -n "${DB_DEST}" ]]; then
+  log "DB sync enabled: ${DB_SOURCE} -> ${DB_DEST}"
+fi
 
 if [[ "${WATCH_MODE}" == "1" ]]; then
   # Watch mode: first do an initial sweep, then watch for new files

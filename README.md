@@ -388,15 +388,24 @@ Promotion criteria (all must be met before `--promote`):
 ## IQ file transfer (`scripts/transfer_iq.sh`)
 
 Transfer IQ snapshot files from Ray (edge SDR) to Brian (central server) via
-rsync with retries, bandwidth limiting, and logging.
+rsync with retries, bandwidth limiting, and logging.  After each transfer batch
+the SQLite classifications DB is synced to Brian so that the reporting node
+always has up-to-date classification data.
 
 ```bash
 # One-shot transfer of all files in the snapshot directory
 IQ_DEST=rf_worker@192.168.1.10:/var/lib/rf-adapt-intel/incoming/ \
   bash scripts/transfer_iq.sh
 
+# Also sync the classifications DB to Brian after the sweep
+IQ_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/incoming/ \
+DB_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/rf_adapt_intel.db \
+  bash scripts/transfer_iq.sh
+
 # Continuous watcher: transfer new files as they arrive (requires inotify-tools)
-IQ_DEST=rf_worker@192.168.1.10:/var/lib/rf-adapt-intel/incoming/ \
+# DB is synced to Brian after each new IQ file is transferred
+IQ_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/incoming/ \
+DB_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/rf_adapt_intel.db \
   bash scripts/transfer_iq.sh --watch
 
 # Limit bandwidth to 512 kbps and use 5 retries
