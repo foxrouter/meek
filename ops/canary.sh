@@ -22,6 +22,11 @@
 #   via tests/test_snr_sweep.py; it is not polled from Prometheus directly.
 set -euo pipefail
 
+# Resolve the script's own absolute path (for copy/paste hints).
+SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null \
+  || readlink -f "${BASH_SOURCE[0]}" 2>/dev/null \
+  || echo "${BASH_SOURCE[0]}")"
+
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
@@ -235,7 +240,7 @@ check_db_staleness() {
   if [[ ${age_s} -gt ${DB_STALE_S} ]]; then
     echo "  [WARN] DB writes STALE — no detections in ${age_h}h."
     echo "         Check: sudo systemctl status ${SERVICE}"
-    echo "         Heal:  sudo bash ${BASH_SOURCE[0]} --heal"
+    echo "         Heal:  sudo bash ${SCRIPT_PATH} --heal"
     return 1
   fi
   echo "  [OK] DB writes are recent."
