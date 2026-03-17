@@ -112,9 +112,11 @@ run_rsync() {
 # ---------------------------------------------------------------------------
 # Sync the SQLite classifications DB to Brian.
 # Skipped silently when DB_DEST is empty.
-# The WAL-mode sidecar files (*.db-wal, *.db-shm) are included when present
-# so the remote copy is consistent.  Rsync respects the same --bwlimit as the
-# IQ file transfers.
+# The WAL-mode sidecar files (*.db-wal, *.db-shm) are synced to the matching
+# destination paths (DB_DEST-wal, DB_DEST-shm) when present, to reduce the
+# chance of the remote copy being unusable.  Note: rsyncing a live WAL-mode DB
+# is still inherently racy; use sqlite3 VACUUM INTO for a guaranteed snapshot.
+# Rsync respects the same --bwlimit as the IQ file transfers.
 # ---------------------------------------------------------------------------
 sync_db() {
   if [[ -z "${DB_DEST}" ]]; then
@@ -125,24 +127,29 @@ sync_db() {
     return 0
   fi
 
-  # Destination directory (handles user@host:path syntax understood by rsync)
-  local db_dest_dir
-  db_dest_dir="$(dirname "${DB_DEST}")"
-
-  # Collect local DB files: main db plus WAL/SHM sidecars if present
-  local db_files=("${DB_SOURCE}")
-  [[ -f "${DB_SOURCE}-wal" ]] && db_files+=("${DB_SOURCE}-wal")
-  [[ -f "${DB_SOURCE}-shm" ]] && db_files+=("${DB_SOURCE}-shm")
-
   local attempt=1
   while [[ "${attempt}" -le "${MAX_RETRIES}" ]]; do
     if $DRY_RUN; then
-      log "[dry-run] rsync -az --bwlimit=${BW_KBPS} ${db_files[*]} '${db_dest_dir}/'"
+      log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}' '${DB_DEST}'"
+      [[ -f "${DB_SOURCE}-wal" ]] && \
+        log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-wal' '${DB_DEST}-wal'"
+      [[ -f "${DB_SOURCE}-shm" ]] && \
+        log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-shm' '${DB_DEST}-shm'"
       return 0
     fi
-    if rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-        "${db_files[@]}" "${db_dest_dir}/" 2>&1 | tee -a "${TRANSFER_LOG}"; then
-      log "OK DB synced: $(basename "${DB_SOURCE}") (${#db_files[@]} file(s)) -> ${db_dest_dir}/"
+    local ok=true
+    rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
+        "${DB_SOURCE}" "${DB_DEST}" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
+    if $ok && [[ -f "${DB_SOURCE}-wal" ]]; then
+      rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
+          "${DB_SOURCE}-wal" "${DB_DEST}-wal" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
+    fi
+    if $ok && [[ -f "${DB_SOURCE}-shm" ]]; then
+      rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
+          "${DB_SOURCE}-shm" "${DB_DEST}-shm" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
+    fi
+    if $ok; then
+      log "OK DB synced: $(basename "${DB_SOURCE}") -> ${DB_DEST}"
       return 0
     fi
     log "WARN DB sync attempt ${attempt}/${MAX_RETRIES} failed"
@@ -171,7 +178,7 @@ transfer_dir() {
     else
       failed=$(( failed + 1 ))
     fi
-  done < <(find "${SOURCE_DIR}" -maxdepth 1 -name '*.cf32' -o -name '*.raw' -print0 2>/dev/null | sort -z)
+  done < <(find "${SOURCE_DIR}" -maxdepth 1 \( -name '*.cf32' -o -name '*.raw' \) -print0 2>/dev/null | sort -z)
   log "Transfer sweep complete: ${count} OK, ${failed} failed"
   sync_db || true
 }
