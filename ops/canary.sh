@@ -137,6 +137,12 @@ check_heartbeat_staleness() {
   fi
   now=$(date +%s)
   age_s=$(( now - mtime ))
+  # Guard against clock skew: mtime in the future gives a negative age.
+  # Clamp to 0 and emit a distinct warning so the operator is alerted.
+  if [[ ${age_s} -lt 0 ]]; then
+    echo "  [WARN] Heartbeat mtime is in the future (clock skew? mtime=${mtime}, now=${now})."
+    age_s=0
+  fi
   echo "  Last heartbeat: ${age_s}s ago  (threshold: ${STALE_HEARTBEAT_S}s)"
   if [[ ${age_s} -gt ${STALE_HEARTBEAT_S} ]]; then
     echo "  [WARN] Heartbeat STALE — output thread may be blocked or service stopped."
@@ -148,7 +154,8 @@ check_heartbeat_staleness() {
 
 # check_db_staleness — warn if no signals have been written to the DB within
 # DB_STALE_S seconds.  Requires sqlite3 to be installed.
-# Returns 1 if stale/no data, 0 if OK, 2 if sqlite3 unavailable.
+# Returns: 0 if recent data found, 1 if stale/no data/query error/missing DB,
+#          2 if sqlite3 is unavailable.
 check_db_staleness() {
   echo ""
   echo "--- DB write staleness (${DB_PATH}) ---"
@@ -192,6 +199,12 @@ check_db_staleness() {
   local now_epoch age_s
   now_epoch=$(date +%s)
   age_s=$(( now_epoch - last_epoch ))
+  # Guard against clock skew or future timestamps in the DB giving a negative
+  # age. Clamp to 0 and emit a distinct warning so the operator is alerted.
+  if [[ ${age_s} -lt 0 ]]; then
+    echo "  [WARN] DB timestamp is in the future (clock skew? last_epoch=${last_epoch}, now=${now_epoch})."
+    age_s=0
+  fi
   local age_h=$(( age_s / 3600 ))
   echo "  Age: ${age_s}s (${age_h}h)  (threshold: ${DB_STALE_S}s / $(( DB_STALE_S / 3600 ))h)"
   if [[ ${age_s} -gt ${DB_STALE_S} ]]; then
