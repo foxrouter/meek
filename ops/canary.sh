@@ -79,6 +79,10 @@ run() {
 }
 
 require_root() {
+  # RF_CANARY_SKIP_ROOT_CHECK=1 bypasses the root check in automated tests.
+  if [[ "${RF_CANARY_SKIP_ROOT_CHECK:-}" == "1" ]]; then
+    return 0
+  fi
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "[ERROR] This script must be run as root (sudo)." >&2
     exit 1
@@ -110,7 +114,8 @@ get_metric() {
 # ---------------------------------------------------------------------------
 
 # check_heartbeat_staleness — warn if the heartbeat file is older than
-# STALE_HEARTBEAT_S seconds or missing.  Returns 1 if stale/missing, 0 if OK.
+# STALE_HEARTBEAT_S seconds or missing.
+# Returns: 0 OK, 1 stale/missing, 2 stat unavailable (cannot determine mtime).
 check_heartbeat_staleness() {
   echo ""
   echo "--- Heartbeat (${HEARTBEAT_FILE}) ---"
@@ -120,7 +125,16 @@ check_heartbeat_staleness() {
     return 1
   fi
   local mtime now age_s
-  mtime=$(stat -c '%Y' "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
+  # GNU stat uses -c '%Y'; BSD/macOS stat uses -f '%m'. Try GNU first, then
+  # BSD; if neither works emit a distinct [SKIP] rather than treating mtime as
+  # epoch 0 (which would produce a spurious "STALE" warning on macOS/BSD).
+  mtime=$(stat -c '%Y' "${HEARTBEAT_FILE}" 2>/dev/null \
+    || stat -f '%m' "${HEARTBEAT_FILE}" 2>/dev/null \
+    || echo "")
+  if [[ -z "${mtime}" ]]; then
+    echo "  [SKIP] Cannot read heartbeat file mtime — stat unavailable on this platform."
+    return 2
+  fi
   now=$(date +%s)
   age_s=$(( now - mtime ))
   echo "  Last heartbeat: ${age_s}s ago  (threshold: ${STALE_HEARTBEAT_S}s)"
@@ -146,9 +160,19 @@ check_db_staleness() {
     echo "  [WARN] DB file not found: ${DB_PATH}"
     return 1
   fi
-  local last_ts
+  local last_ts sqlite_rc=0
+  # Run sqlite3, redirecting stderr to stdout so any error message is captured
+  # in last_ts.  The '|| sqlite_rc=$?' idiom is the standard bash/set-e safe
+  # way to capture a non-zero exit code without aborting the script: the ||
+  # clause only executes when the LHS fails, and $? at that point holds the
+  # exit code of the command substitution (i.e. sqlite3's exit code).
   last_ts=$(sqlite3 "${DB_PATH}" \
-    "SELECT MAX(timestamp) FROM signals;" 2>/dev/null || true)
+    "SELECT MAX(timestamp) FROM signals;" 2>&1) || sqlite_rc=$?
+  if [[ ${sqlite_rc} -ne 0 ]]; then
+    echo "  [WARN] DB query failed (rc=${sqlite_rc}): ${last_ts}"
+    echo "         This may indicate a corrupt DB, missing table, or permission issue."
+    return 1
+  fi
   if [[ -z "${last_ts}" ]]; then
     echo "  [WARN] No signals found in DB — service may never have written any detections."
     return 1

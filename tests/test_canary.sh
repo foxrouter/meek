@@ -141,7 +141,7 @@ run_canary() {
   env \
     PATH="${_STUB_DIR}:${PATH}" \
     HOME="${_TMP}" \
-    EUID="0" \
+    RF_CANARY_SKIP_ROOT_CHECK=1 \
     RF_METRICS_FILE="${_TMP}/metrics.prom" \
     RF_WORKER_LOG="${_TMP}/worker.log" \
     RF_HEARTBEAT_FILE="${_TMP}/heartbeat" \
@@ -219,17 +219,14 @@ test_status_shows_heartbeat_stale() {
 
 test_status_shows_db_staleness_skip_no_sqlite3() {
   setup_env
-  # Simulate sqlite3 absence by placing a stub that exits non-zero before
-  # the real sqlite3 can be reached, while ensuring the DB file exists
-  # so the code reaches the sqlite3 check.
-  # Since `command -v sqlite3` will still find our stub (it is in PATH),
-  # we use a stub that returns empty output and exit 1 — this exercises the
-  # "no signals found" fallback rather than the strict "sqlite3 not found"
-  # branch.  The "truly absent sqlite3" path is an installation-time concern
-  # that cannot be simulated when sqlite3 is installed system-wide.
+  # Simulate a broken/failing sqlite3 by placing a stub that exits non-zero.
+  # With the updated check_db_staleness(), a non-zero exit code now produces
+  # a distinct "DB query failed" warning (separate from the empty-result path),
+  # which is the behaviour we want to test here.
   cat > "${_STUB_DIR}/sqlite3" <<'STUB_EOF'
 #!/usr/bin/env bash
-# Stub: simulate a broken/empty DB by returning nothing and failing.
+# Stub: simulate a failing sqlite3 query (rc=1, with an error message).
+echo "Error: no such table: signals" >&2
 exit 1
 STUB_EOF
   chmod +x "${_STUB_DIR}/sqlite3"
@@ -237,8 +234,8 @@ STUB_EOF
   local out rc=0
   out="$(run_canary --status)" || rc=$?
   teardown_env
-  assert_exit "--status (broken sqlite3) exits 0" 0 "${rc}"
-  assert_contains "--status: warns on empty DB result" "No signals found in DB" "${out}"
+  assert_exit "--status (failing sqlite3) exits 0" 0 "${rc}"
+  assert_contains "--status: reports DB query failure" "DB query failed" "${out}"
 }
 
 test_status_shows_db_fresh() {
