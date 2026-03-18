@@ -105,6 +105,25 @@ if [[ -n "${DB_DEST}" ]]; then
     fi
     unset _before_dcolon _after_last_open
   fi
+  # Reject remote destinations with an empty path component (e.g. user@host:).
+  # rsync would write the snapshot into the remote home directory (not a named
+  # file), and the WAL/SHM cleanup would target just '-wal'/'-shm' with no
+  # preceding path, which is clearly wrong.
+  if [[ "${DB_DEST}" =~ ^([^/@]*@)?\[([^]]*)\]:(.*)$ ]]; then
+    # IPv6 bracket form: path is the third capture group.
+    if [[ -z "${BASH_REMATCH[3]}" ]]; then
+      echo "[ERROR] DB_DEST '${DB_DEST}' has an empty remote path; specify a full file path." >&2
+      echo "  Example: DB_DEST=rf_worker@[::1]:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
+      exit 1
+    fi
+  elif [[ "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
+    # Standard remote form: [user@]host:path — path is everything after the colon.
+    if [[ -z "${DB_DEST#*:}" ]]; then
+      echo "[ERROR] DB_DEST '${DB_DEST}' has an empty remote path; specify a full file path." >&2
+      echo "  Example: DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
+      exit 1
+    fi
+  fi
   # For local paths (no remote colon), reject an existing directory even without
   # a trailing slash: rsync would place the snapshot in the directory using the
   # source file's basename, breaking the WAL/SHM cleanup logic that assumes
@@ -420,10 +439,15 @@ watch_and_transfer() {
   fi
   log "Watching ${SOURCE_DIR} for new IQ files (Ctrl-C to stop)..."
   mkdir -p "${SOURCE_DIR}"
-  # Use process substitution (not a pipe) so the while loop runs in this shell
-  # and shares _last_db_sync state with sync_db_if_due.
-  # --format '%w%f' gives full path; -e close_write triggers after file is done
-  while IFS= read -r new_file; do
+  # Run inotifywait as a coprocess so:
+  #  1. the while loop runs in this shell and shares _last_db_sync state
+  #     with sync_db_if_due (same as the previous process-substitution form), and
+  #  2. we can detect unexpected termination (inotify queue overflow, missing
+  #     directory, permission error) via the coprocess exit status after the loop.
+  # --format '%w%f' gives full path; -e close_write triggers after file is done.
+  coproc _IQ_WATCH (inotifywait -m -r -e close_write --format '%w%f' "${SOURCE_DIR}")
+  local _inotify_pid="${_IQ_WATCH_PID}"
+  while IFS= read -r new_file <&"${_IQ_WATCH[0]}"; do
     case "${new_file}" in
       *.cf32|*.raw)
         log "New file detected: $(basename "${new_file}")"
@@ -431,7 +455,16 @@ watch_and_transfer() {
         sync_db_if_due
         ;;
     esac
-  done < <(inotifywait -m -r -e close_write --format '%w%f' "${SOURCE_DIR}")
+  done
+  # Reap the coprocess and check its exit status.  SIGINT (exit 130) and SIGTERM
+  # (exit 143) are expected; any other non-zero exit means inotifywait terminated
+  # due to an error (e.g., inotify queue overflow, source directory removed).
+  local _inotify_rc=0
+  wait "${_inotify_pid}" 2>/dev/null || _inotify_rc=$?
+  if [[ ${_inotify_rc} -ne 0 && ${_inotify_rc} -ne 130 && ${_inotify_rc} -ne 143 ]]; then
+    log "ERROR inotifywait terminated unexpectedly (exit code ${_inotify_rc}); stopping watcher" >&2
+    exit 1
+  fi
 }
 
 # ---------------------------------------------------------------------------
