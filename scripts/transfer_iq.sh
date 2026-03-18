@@ -81,6 +81,16 @@ if [[ -z "${DEST}" ]]; then
   exit 1
 fi
 
+# Validate integer parameters (may have been set via env or CLI).
+if ! [[ "${BW_KBPS}" =~ ^[0-9]+$ ]]; then
+  echo "[WARN] BW_KBPS/--bwlimit='${BW_KBPS}' is not a non-negative integer; using default 2048." >&2
+  BW_KBPS=2048
+fi
+if ! [[ "${MAX_RETRIES}" =~ ^[0-9]+$ ]]; then
+  echo "[WARN] MAX_RETRIES/--retries='${MAX_RETRIES}' is not a non-negative integer; using default 3." >&2
+  MAX_RETRIES=3
+fi
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -94,10 +104,20 @@ log() {
 
 # Run a command piping stdout+stderr to the transfer log.
 # The exit code reflects only the command's outcome; tee failures are non-fatal.
+# If TRANSFER_LOG is not writable, output is discarded to /dev/null so the
+# wrapped command never receives SIGPIPE from tee exiting early.
 run_logged() {
-  local cmd_rc
+  local cmd_rc _log_target
+  # Pre-flight: try to open/create the log file; fall back to /dev/null so
+  # tee always succeeds and never sends SIGPIPE to the wrapped command.
+  # Reject symlinks to avoid unintended writes to symlink targets.
+  if [[ ! -L "${TRANSFER_LOG}" ]] && touch "${TRANSFER_LOG}" 2>/dev/null; then
+    _log_target="${TRANSFER_LOG}"
+  else
+    _log_target="/dev/null"
+  fi
   set +o pipefail
-  "$@" 2>&1 | { tee -a "${TRANSFER_LOG}" 2>/dev/null || true; }
+  "$@" 2>&1 | { tee -a "${_log_target}" || true; }
   cmd_rc="${PIPESTATUS[0]}"
   set -o pipefail
   return "${cmd_rc}"
@@ -172,7 +192,7 @@ sync_db() {
       # worker writes.  Unlike VACUUM INTO, .backup can write to an existing file.
       if ! run_logged sqlite3 "${DB_SOURCE}" ".backup '${snap_file}'"; then
         log "WARN sqlite3 .backup failed; falling back to live-file rsync"
-        [[ -n "${snap_file}" ]] && rm -f "${snap_file}"
+        [[ -n "${snap_file}" ]] && rm -f -- "${snap_file}"
         snap_file=""
       else
         # mktemp creates files with mode 0600; copy source DB permissions so
@@ -234,7 +254,7 @@ sync_db() {
     fi
     if $ok; then
       log "OK DB synced: $(basename "${DB_SOURCE}") -> ${DB_DEST}"
-      rm -f "${snap_file}"
+      [[ -n "${snap_file}" ]] && rm -f -- "${snap_file}"
       return 0
     fi
     log "WARN DB sync attempt ${attempt}/${MAX_RETRIES} failed"
@@ -243,7 +263,7 @@ sync_db() {
     fi
     attempt=$(( attempt + 1 ))
   done
-  rm -f "${snap_file}"
+  [[ -n "${snap_file}" ]] && rm -f -- "${snap_file}"
   log "ERROR DB sync failed after ${MAX_RETRIES} attempts"
   return 1
 }
