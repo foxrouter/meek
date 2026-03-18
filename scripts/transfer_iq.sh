@@ -101,11 +101,11 @@ fi
 
 # Validate integer parameters (may have been set via env or CLI).
 if ! [[ "${BW_KBPS}" =~ ^[0-9]+$ ]]; then
-  echo "[WARN] BW_KBPS/--bwlimit='${BW_KBPS}' is not a non-negative integer; using default 2048." >&2
+  echo "[WARN] IQ_BW_KBPS/--bwlimit='${BW_KBPS}' is not a non-negative integer; using default 2048." >&2
   BW_KBPS=2048
 fi
 if ! [[ "${MAX_RETRIES}" =~ ^[0-9]+$ ]] || [[ "${MAX_RETRIES}" -lt 1 ]]; then
-  echo "[WARN] MAX_RETRIES/--retries='${MAX_RETRIES}' is not a positive integer; using default 3." >&2
+  echo "[WARN] IQ_MAX_RETRIES/--retries='${MAX_RETRIES}' is not a positive integer; using default 3." >&2
   MAX_RETRIES=3
 fi
 
@@ -207,13 +207,13 @@ sync_db() {
   if [[ -z "${DB_DEST}" ]]; then
     return 0
   fi
-  # Dry-run: log intended operations without any filesystem or SQLite work.
+  # Dry-run: log the intended operations without any filesystem or SQLite work.
+  # All three rsync commands are shown unconditionally so the output reflects
+  # the full intended behaviour regardless of which sidecar files currently exist.
   if $DRY_RUN; then
     log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}' '${DB_DEST}'"
-    [[ -f "${DB_SOURCE}-wal" ]] && \
-      log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-wal' '${DB_DEST}-wal'"
-    [[ -f "${DB_SOURCE}-shm" ]] && \
-      log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-shm' '${DB_DEST}-shm'"
+    log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-wal' '${DB_DEST}-wal'"
+    log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-shm' '${DB_DEST}-shm'"
     return 0
   fi
   if [[ ! -f "${DB_SOURCE}" ]]; then
@@ -260,12 +260,13 @@ sync_db() {
     if [[ -n "${snap_file}" ]]; then
       run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
           --delay-updates --timeout=30 -- "${snap_file}" "${DB_DEST}" || ok=false
-      # After a successful snapshot transfer, remove any stale WAL/SHM at
-      # the destination.  If those sidecars are left from a previous live-file
-      # sync, SQLite on the receiver would otherwise try to apply the old WAL
-      # data to the new consistent snapshot and produce corrupt or inconsistent
-      # reads.  Failures here are non-fatal: the main snapshot was already
-      # transferred successfully.
+      # After a successful snapshot transfer, remove any stale WAL/SHM at the
+      # destination.  If those sidecars are left from a previous live-file sync,
+      # SQLite on the receiver would apply the old WAL data to the new consistent
+      # snapshot, producing corrupt or inconsistent reads.
+      # Cleanup failure marks the sync as failed so the retry loop can attempt
+      # the full transfer again (including cleanup) rather than reporting success
+      # with stale sidecars still in place.
       if $ok; then
         # Determine whether DB_DEST is remote.  Support both the standard
         # [user@]host:/path form and the IPv6 bracket form [user@][addr]:/path.
@@ -295,11 +296,15 @@ sync_db() {
               -o ServerAliveInterval=5 \
               -o ServerAliveCountMax=2 \
               -- "${_db_dest_host}" \
-              "rm -f -- ${_wal_q} ${_shm_q}" 2>/dev/null || \
-            log "WARN could not remove stale WAL/SHM at destination (non-fatal)"
+              "rm -f -- ${_wal_q} ${_shm_q}" 2>/dev/null || {
+            log "WARN could not remove stale WAL/SHM at destination; marking sync as failed"
+            ok=false
+          }
         else
-          rm -f "${DB_DEST}-wal" "${DB_DEST}-shm" 2>/dev/null || \
-            log "WARN could not remove stale WAL/SHM at destination (non-fatal)"
+          rm -f "${DB_DEST}-wal" "${DB_DEST}-shm" 2>/dev/null || {
+            log "WARN could not remove stale WAL/SHM at destination; marking sync as failed"
+            ok=false
+          }
         fi
       fi
     else
