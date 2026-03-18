@@ -404,18 +404,18 @@ Key environment variables and CLI flags for DB sync:
 
 ```bash
 # One-shot transfer of all files in the snapshot directory
-IQ_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/incoming/ \
+IQ_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/incoming/ \
   bash scripts/transfer_iq.sh
 
 # Also sync the classifications DB to Brian after the sweep
-IQ_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/incoming/ \
-DB_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/rf_adapt_intel.db \
+IQ_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/incoming/ \
+DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db \
   bash scripts/transfer_iq.sh
 
 # Continuous watcher: transfer new files as they arrive (requires inotify-tools)
 # DB is synced to Brian periodically (at most once every DB_SYNC_INTERVAL seconds)
-IQ_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/incoming/ \
-DB_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/rf_adapt_intel.db \
+IQ_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/incoming/ \
+DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db \
   bash scripts/transfer_iq.sh --watch
 
 # Limit bandwidth to 512 kbps and use 5 retries

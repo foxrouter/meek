@@ -13,13 +13,13 @@
 #
 # Environment overrides:
 #   IQ_SOURCE_DIR   Local directory containing .cf32 / .raw IQ files to send.
-#   IQ_DEST         rsync destination, e.g. brian@192.168.1.10:/var/lib/rf-adapt-intel/incoming/
+#   IQ_DEST         rsync destination, e.g. rf_worker@<brian_host>:/var/lib/rf-adapt-intel/incoming/
 #   IQ_BW_KBPS      rsync --bwlimit value in kbps (default 2048 = 2 Mbit/s).
 #   IQ_MAX_RETRIES  Maximum rsync retry attempts per file (default 3).
 #   IQ_TRANSFER_LOG Path to append transfer log lines (default /var/log/iq_transfer.log).
 #   IQ_WATCH        Set to 1 to enable inotifywait watcher mode.
 #   DB_SOURCE       Local path to the SQLite DB to sync (default /var/lib/rf-adapt-intel/rf_adapt_intel.db).
-#   DB_DEST         rsync destination for the DB, e.g. rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/rf_adapt_intel.db
+#   DB_DEST         rsync destination for the DB, e.g. rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db
 #                   If unset, DB sync is skipped.
 #   DB_SYNC_INTERVAL  Minimum seconds between DB syncs in watch mode (default 60).
 set -euo pipefail
@@ -174,6 +174,11 @@ sync_db() {
         log "WARN sqlite3 .backup failed; falling back to live-file rsync"
         [[ -n "${snap_file}" ]] && rm -f "${snap_file}"
         snap_file=""
+      else
+        # mktemp creates files with mode 0600; copy source DB permissions so
+        # rsync's -a doesn't propagate restrictive permissions to the destination
+        # and break reads by other users on Brian.
+        chmod --reference="${DB_SOURCE}" "${snap_file}" 2>/dev/null || true
       fi
     else
       log "WARN mktemp failed in ${snap_dir}; falling back to live-file rsync"
