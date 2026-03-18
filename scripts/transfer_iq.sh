@@ -170,7 +170,7 @@ sync_db() {
       # Use the SQLite online backup API (.backup): avoids a full DB rewrite and
       # holds only brief shared locks, causing minimal disruption to concurrent
       # worker writes.  Unlike VACUUM INTO, .backup can write to an existing file.
-      if ! run_logged sqlite3 "${DB_SOURCE}" ".backup ${snap_file}"; then
+      if ! run_logged sqlite3 "${DB_SOURCE}" ".backup '${snap_file}'"; then
         log "WARN sqlite3 .backup failed; falling back to live-file rsync"
         [[ -n "${snap_file}" ]] && rm -f "${snap_file}"
         snap_file=""
