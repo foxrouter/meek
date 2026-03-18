@@ -110,8 +110,8 @@ if [[ -n "${DB_DEST}" ]]; then
 fi
 
 # Validate integer parameters (may have been set via env or CLI).
-if ! [[ "${BW_KBPS}" =~ ^[0-9]+$ ]]; then
-  echo "[WARN] IQ_BW_KBPS/--bwlimit='${BW_KBPS}' is not a non-negative integer; using default 2048." >&2
+if ! [[ "${BW_KBPS}" =~ ^[0-9]+$ ]] || [[ "${BW_KBPS}" -lt 1 ]]; then
+  echo "[WARN] IQ_BW_KBPS/--bwlimit='${BW_KBPS}' is not a positive integer; using default 2048." >&2
   BW_KBPS=2048
 fi
 if ! [[ "${MAX_RETRIES}" =~ ^[0-9]+$ ]] || [[ "${MAX_RETRIES}" -lt 1 ]]; then
