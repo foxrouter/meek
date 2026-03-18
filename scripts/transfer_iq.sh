@@ -193,22 +193,30 @@ sync_db() {
     if [[ -n "${snap_file}" ]]; then
       run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
           --delay-updates --timeout=30 "${snap_file}" "${DB_DEST}" || ok=false
-      # After a successful snapshot transfer, overwrite any stale WAL/SHM at
-      # the destination with empty files.  If those sidecars are left from a
-      # previous live-file sync, SQLite on the receiver would otherwise try to
-      # apply the old WAL data to the new consistent snapshot and produce
-      # corrupt or inconsistent reads.  Failures here are non-fatal: the main
-      # snapshot was already transferred successfully.
+      # After a successful snapshot transfer, remove any stale WAL/SHM at
+      # the destination.  If those sidecars are left from a previous live-file
+      # sync, SQLite on the receiver would otherwise try to apply the old WAL
+      # data to the new consistent snapshot and produce corrupt or inconsistent
+      # reads.  Failures here are non-fatal: the main snapshot was already
+      # transferred successfully.
       if $ok; then
-        local _sidecar_empty
-        if _sidecar_empty="$(mktemp 2>/dev/null)"; then
-          run_logged rsync -az --bwlimit="${BW_KBPS}" --timeout=30 \
-              "${_sidecar_empty}" "${DB_DEST}-wal" || \
-            log "WARN could not clear stale WAL at destination (non-fatal)"
-          run_logged rsync -az --bwlimit="${BW_KBPS}" --timeout=30 \
-              "${_sidecar_empty}" "${DB_DEST}-shm" || \
-            log "WARN could not clear stale SHM at destination (non-fatal)"
-          rm -f "${_sidecar_empty}"
+        # Determine whether DB_DEST is remote ([user@]host:/path).
+        # A remote spec has a colon and the part before the colon contains no
+        # slash (host/user@host never has a slash; a local absolute path does).
+        local _db_dest_host _db_dest_path
+        if [[ "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
+          _db_dest_host="${DB_DEST%%:*}"
+          _db_dest_path="${DB_DEST#*:}"
+          # Use printf %q to shell-quote the remote paths safely.
+          local _wal_q _shm_q
+          _wal_q="$(printf '%q' "${_db_dest_path}-wal")"
+          _shm_q="$(printf '%q' "${_db_dest_path}-shm")"
+          ssh -o BatchMode=yes "${_db_dest_host}" \
+              "rm -f ${_wal_q} ${_shm_q}" 2>/dev/null || \
+            log "WARN could not remove stale WAL/SHM at destination (non-fatal)"
+        else
+          rm -f "${DB_DEST}-wal" "${DB_DEST}-shm" 2>/dev/null || \
+            log "WARN could not remove stale WAL/SHM at destination (non-fatal)"
         fi
       fi
     else
