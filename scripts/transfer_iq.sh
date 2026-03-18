@@ -87,6 +87,15 @@ if [[ -n "${DB_DEST}" ]]; then
     echo "  Example: DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
     exit 1
   fi
+  # Reject rsync-daemon syntax (host::module/path): the double-colon is parsed
+  # as host="host", path=":module/path" by our remote-detection logic, causing
+  # a bogus ssh cleanup target and a false sync failure.  Daemon destinations
+  # are not supported; require the standard [user@]host:/path form.
+  if [[ "${DB_DEST}" == *::* ]]; then
+    echo "[ERROR] DB_DEST '${DB_DEST}' uses rsync-daemon syntax (::) which is not supported." >&2
+    echo "  Use the standard [user@]host:/path form instead." >&2
+    exit 1
+  fi
   # For local paths (no remote colon), reject an existing directory even without
   # a trailing slash: rsync would place the snapshot in the directory using the
   # source file's basename, breaking the WAL/SHM cleanup logic that assumes
@@ -115,8 +124,10 @@ fi
 # later replaced with a symlink, significantly reducing TOCTOU exposure.
 # Both log() and run_logged() write to FD 3.
 exec 3>/dev/null
-if [[ ! -L "${TRANSFER_LOG}" ]]; then
-  { exec 3>>"${TRANSFER_LOG}"; } 2>/dev/null || exec 3>/dev/null
+if [[ -L "${TRANSFER_LOG}" ]]; then
+  echo "[WARN] TRANSFER_LOG '${TRANSFER_LOG}' is a symlink; logging disabled (writes go to /dev/null)." >&2
+elif ! { exec 3>>"${TRANSFER_LOG}"; } 2>/dev/null; then
+  echo "[WARN] Could not open TRANSFER_LOG '${TRANSFER_LOG}' for writing; logging disabled (writes go to /dev/null)." >&2
 fi
 
 # ---------------------------------------------------------------------------
@@ -241,8 +252,12 @@ sync_db() {
       # Use the SQLite online backup API (.backup): avoids a full DB rewrite and
       # holds only brief shared locks, causing minimal disruption to concurrent
       # worker writes.  Unlike VACUUM INTO, .backup can write to an existing file.
-      local _snap_sq; _snap_sq="$(_posix_sq "${snap_file}")"
-      if ! run_logged sqlite3 -- "${DB_SOURCE}" ".backup ${_snap_sq}"; then
+      # Use SQL-style single-quote escaping (double each embedded ') so sqlite3's
+      # shell tokenizer correctly handles paths with single quotes or spaces.
+      # Do NOT use _posix_sq here: that function produces shell quoting for remote
+      # /bin/sh commands and its \'...'\'' escaping is not understood by sqlite3.
+      local _snap_sql_esc="${snap_file//"'"/"''"}"
+      if ! run_logged sqlite3 -- "${DB_SOURCE}" ".backup '${_snap_sql_esc}'"; then
         log "WARN sqlite3 .backup failed; falling back to live-file rsync"
         [[ -n "${snap_file}" ]] && rm -f -- "${snap_file}"
         _current_snap_file=""
