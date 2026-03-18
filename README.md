@@ -391,9 +391,11 @@ Transfer IQ snapshot files from Ray (edge SDR) to Brian (central server) via
 rsync with retries, bandwidth limiting, and logging.  After each transfer batch
 the SQLite classifications DB is synced to Brian so that the reporting node
 receives recent classification data.  When `sqlite3` is available a consistent
-snapshot is created via `VACUUM INTO` before rsyncing; otherwise the script
-falls back to rsyncing the live DB and WAL/SHM sidecars (which may be racy
-under write load).  DB sync failures are logged but do not abort IQ transfers.
+snapshot is created via `sqlite3 .backup` (online backup API) before rsyncing;
+this holds only brief shared locks and avoids a full DB rewrite.  Otherwise
+the script falls back to rsyncing the live DB and WAL/SHM sidecars (which may
+be racy under write load).  DB sync failures are logged but do not abort IQ
+transfers.
 
 Key environment variables and CLI flags for DB sync:
 - `DB_SOURCE` / `--db-source` — local path to the SQLite DB (default: `/var/lib/rf-adapt-intel/rf_adapt_intel.db`)
@@ -402,7 +404,7 @@ Key environment variables and CLI flags for DB sync:
 
 ```bash
 # One-shot transfer of all files in the snapshot directory
-IQ_DEST=rf_worker@192.168.1.10:/var/lib/rf-adapt-intel/incoming/ \
+IQ_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/incoming/ \
   bash scripts/transfer_iq.sh
 
 # Also sync the classifications DB to Brian after the sweep
@@ -411,7 +413,7 @@ DB_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/rf_adapt_intel.db \
   bash scripts/transfer_iq.sh
 
 # Continuous watcher: transfer new files as they arrive (requires inotify-tools)
-# DB is synced to Brian after each new IQ file is transferred
+# DB is synced to Brian periodically (at most once every DB_SYNC_INTERVAL seconds)
 IQ_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/incoming/ \
 DB_DEST=rf_worker@192.168.4.246:/var/lib/rf-adapt-intel/rf_adapt_intel.db \
   bash scripts/transfer_iq.sh --watch

@@ -37,6 +37,11 @@ DRY_RUN=false
 DB_SOURCE="${DB_SOURCE:-/var/lib/rf-adapt-intel/rf_adapt_intel.db}"
 DB_DEST="${DB_DEST:-}"
 DB_SYNC_INTERVAL="${DB_SYNC_INTERVAL:-60}"
+# Validate DB_SYNC_INTERVAL is a non-negative integer; fall back to default if not.
+if ! [[ "${DB_SYNC_INTERVAL}" =~ ^[0-9]+$ ]]; then
+  echo "[WARN] DB_SYNC_INTERVAL='${DB_SYNC_INTERVAL}' is not a non-negative integer; using default 60." >&2
+  DB_SYNC_INTERVAL=60
+fi
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -125,9 +130,11 @@ run_rsync() {
 # ---------------------------------------------------------------------------
 # Sync the SQLite classifications DB to Brian.
 # Skipped silently when DB_DEST is empty.
-# A consistent snapshot is created via "sqlite3 VACUUM INTO" before rsyncing
-# so the remote copy is not affected by concurrent WAL-mode writes.  When
-# sqlite3 is unavailable the function falls back to rsyncing the live DB and
+# A consistent snapshot is created via "sqlite3 .backup" (online backup API)
+# before rsyncing.  The online backup API holds only brief shared locks and
+# does not rewrite the entire database, so it is less disruptive to concurrent
+# worker writes than VACUUM INTO.  When sqlite3 is unavailable, or when the
+# snapshot step fails, the function falls back to rsyncing the live DB and
 # sidecar files, which is inherently racy.
 # Rsync respects the same --bwlimit as the IQ file transfers.
 # ---------------------------------------------------------------------------
@@ -154,14 +161,22 @@ sync_db() {
   # filesystem (sufficient space, no cross-device copy) and avoids TMPDIR.
   local snap_file=""
   if command -v sqlite3 &>/dev/null; then
-    # Generate a unique path, then remove the placeholder file immediately:
-    # VACUUM INTO requires the destination to not already exist.
-    snap_file="$(mktemp --tmpdir="$(dirname "${DB_SOURCE}")" --suffix=.db)"
-    rm -f "${snap_file}"
-    if ! run_logged sqlite3 "${DB_SOURCE}" "VACUUM INTO '${snap_file}'"; then
-      log "WARN VACUUM INTO failed; falling back to live-file rsync"
-      rm -f "${snap_file}"
-      snap_file=""
+    local snap_dir
+    snap_dir="$(dirname "${DB_SOURCE}")"
+    local snap_tmp
+    # Use an if-guard so mktemp failure is non-fatal: fall back to live-file rsync.
+    if snap_tmp="$(mktemp --tmpdir="${snap_dir}" --suffix=.db 2>/dev/null)"; then
+      snap_file="${snap_tmp}"
+      # Use the SQLite online backup API (.backup): avoids a full DB rewrite and
+      # holds only brief shared locks, causing minimal disruption to concurrent
+      # worker writes.  Unlike VACUUM INTO, .backup can write to an existing file.
+      if ! run_logged sqlite3 "${DB_SOURCE}" ".backup ${snap_file}"; then
+        log "WARN sqlite3 .backup failed; falling back to live-file rsync"
+        [[ -n "${snap_file}" ]] && rm -f "${snap_file}"
+        snap_file=""
+      fi
+    else
+      log "WARN mktemp failed in ${snap_dir}; falling back to live-file rsync"
     fi
   else
     log "WARN sqlite3 not found; rsyncing live DB files (may be racy in WAL mode)"
