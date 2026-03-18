@@ -273,8 +273,9 @@ sync_db() {
         # for the bracket form first to avoid splitting on the wrong colon.
         local _db_dest_host _db_dest_path _is_remote=false
         if [[ "${DB_DEST}" =~ ^([^/@]*@)?\[([^]]*)\]:(.*)$ ]]; then
-          # IPv6 bracket form: [user@][addr]:/path
-          _db_dest_host="${BASH_REMATCH[1]}[${BASH_REMATCH[2]}]"
+          # IPv6 bracket form: [user@][addr]:/path.  ssh expects the bare
+          # address (no brackets), so strip them here for the ssh invocation.
+          _db_dest_host="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
           _db_dest_path="${BASH_REMATCH[3]}"
           _is_remote=true
         elif [[ "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
@@ -289,7 +290,11 @@ sync_db() {
           local _wal_q _shm_q
           _wal_q="$(_posix_sq "${_db_dest_path}-wal")"
           _shm_q="$(_posix_sq "${_db_dest_path}-shm")"
-          ssh -o BatchMode=yes -- "${_db_dest_host}" \
+          ssh -o BatchMode=yes \
+              -o ConnectTimeout=10 \
+              -o ServerAliveInterval=5 \
+              -o ServerAliveCountMax=2 \
+              -- "${_db_dest_host}" \
               "rm -f -- ${_wal_q} ${_shm_q}" 2>/dev/null || \
             log "WARN could not remove stale WAL/SHM at destination (non-fatal)"
         else
