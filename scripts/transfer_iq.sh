@@ -80,6 +80,11 @@ if [[ -z "${DEST}" ]]; then
   echo "  Example: IQ_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/incoming/" >&2
   exit 1
 fi
+if [[ -n "${DB_DEST}" && "${DB_DEST}" == */ ]]; then
+  echo "[ERROR] DB_DEST must be a file path, not a directory (trailing '/' not allowed)." >&2
+  echo "  Example: DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
+  exit 1
+fi
 
 # Validate integer parameters (may have been set via env or CLI).
 if ! [[ "${BW_KBPS}" =~ ^[0-9]+$ ]]; then
@@ -91,13 +96,13 @@ if ! [[ "${MAX_RETRIES}" =~ ^[0-9]+$ ]] || [[ "${MAX_RETRIES}" -lt 1 ]]; then
   MAX_RETRIES=3
 fi
 
-# Resolve a safe log target once: reject symlinks (avoid unintended writes to
-# symlink targets) and fall back to /dev/null when the log is not writable.
-# Both log() and run_logged() use _SAFE_LOG for consistent behaviour.
-if [[ ! -L "${TRANSFER_LOG}" ]] && touch "${TRANSFER_LOG}" 2>/dev/null; then
-  _SAFE_LOG="${TRANSFER_LOG}"
-else
-  _SAFE_LOG="/dev/null"
+# Open log FD (3) once after a symlink check.  All writes go via this FD so
+# they always reach the originally-opened inode even if the filesystem path is
+# later replaced with a symlink, significantly reducing TOCTOU exposure.
+# Both log() and run_logged() write to FD 3.
+exec 3>/dev/null
+if [[ ! -L "${TRANSFER_LOG}" ]]; then
+  { exec 3>>"${TRANSFER_LOG}"; } 2>/dev/null || exec 3>/dev/null
 fi
 
 # ---------------------------------------------------------------------------
@@ -107,16 +112,16 @@ log() {
   local msg="[$(date '+%Y-%m-%dT%H:%M:%S')] $*"
   echo "${msg}"
   if ! $DRY_RUN; then
-    echo "${msg}" >> "${_SAFE_LOG}" 2>/dev/null || true
+    echo "${msg}" >&3
   fi
 }
 
-# Run a command piping stdout+stderr to the transfer log.
+# Run a command piping stdout+stderr to the transfer log (FD 3).
 # The exit code reflects only the command's outcome; tee failures are non-fatal.
 run_logged() {
   local cmd_rc
   set +o pipefail
-  "$@" 2>&1 | { tee -a "${_SAFE_LOG}" || true; }
+  "$@" 2>&1 | { tee /dev/fd/3 || true; }
   cmd_rc="${PIPESTATUS[0]}"
   set -o pipefail
   return "${cmd_rc}"
@@ -157,6 +162,27 @@ run_rsync() {
 # sidecar files, which is inherently racy.
 # Rsync respects the same --bwlimit as the IQ file transfers.
 # ---------------------------------------------------------------------------
+
+# Shell-quote a string for use inside a POSIX /bin/sh command string.
+# This function runs locally in bash; the *output* it produces — a single-quoted
+# string with embedded single quotes escaped as '\'' — is what must be safe
+# for a remote /bin/sh to interpret.  This avoids printf '%q', which can emit
+# bash-specific $'...' quoting that /bin/sh on the remote side may not support.
+_posix_sq() {
+  local s="${1//\'/\'\\\'\'}"
+  printf "'%s'" "${s}"
+}
+
+# Global handle for the current snapshot temp file so that the EXIT/INT/TERM
+# trap can remove it even when the script is interrupted mid-sync.
+_current_snap_file=""
+_cleanup_snap() {
+  if [[ -n "${_current_snap_file}" ]]; then
+    rm -f -- "${_current_snap_file}" 2>/dev/null || true
+  fi
+}
+trap '_cleanup_snap' EXIT INT TERM
+
 sync_db() {
   if [[ -z "${DB_DEST}" ]]; then
     return 0
@@ -186,12 +212,14 @@ sync_db() {
     # Use an if-guard so mktemp failure is non-fatal: fall back to live-file rsync.
     if snap_tmp="$(mktemp --tmpdir="${snap_dir}" --suffix=.db 2>/dev/null)"; then
       snap_file="${snap_tmp}"
+      _current_snap_file="${snap_file}"  # register for EXIT/signal cleanup
       # Use the SQLite online backup API (.backup): avoids a full DB rewrite and
       # holds only brief shared locks, causing minimal disruption to concurrent
       # worker writes.  Unlike VACUUM INTO, .backup can write to an existing file.
       if ! run_logged sqlite3 "${DB_SOURCE}" ".backup '${snap_file}'"; then
         log "WARN sqlite3 .backup failed; falling back to live-file rsync"
         [[ -n "${snap_file}" ]] && rm -f -- "${snap_file}"
+        _current_snap_file=""
         snap_file=""
       else
         # mktemp creates files with mode 0600; copy source DB permissions so
@@ -226,12 +254,13 @@ sync_db() {
         if [[ "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
           _db_dest_host="${DB_DEST%%:*}"
           _db_dest_path="${DB_DEST#*:}"
-          # Use printf %q to shell-quote the remote paths safely.
+          # Use POSIX-portable single-quote escaping (not printf %q, which can
+          # emit bash-specific $'...' syntax that fails on remote /bin/sh).
           local _wal_q _shm_q
-          _wal_q="$(printf '%q' "${_db_dest_path}-wal")"
-          _shm_q="$(printf '%q' "${_db_dest_path}-shm")"
+          _wal_q="$(_posix_sq "${_db_dest_path}-wal")"
+          _shm_q="$(_posix_sq "${_db_dest_path}-shm")"
           ssh -o BatchMode=yes "${_db_dest_host}" \
-              "rm -f ${_wal_q} ${_shm_q}" 2>/dev/null || \
+              "rm -f -- ${_wal_q} ${_shm_q}" 2>/dev/null || \
             log "WARN could not remove stale WAL/SHM at destination (non-fatal)"
         else
           rm -f "${DB_DEST}-wal" "${DB_DEST}-shm" 2>/dev/null || \
@@ -254,6 +283,7 @@ sync_db() {
     if $ok; then
       log "OK DB synced: $(basename "${DB_SOURCE}") -> ${DB_DEST}"
       [[ -n "${snap_file}" ]] && rm -f -- "${snap_file}"
+      _current_snap_file=""
       return 0
     fi
     log "WARN DB sync attempt ${attempt}/${MAX_RETRIES} failed"
@@ -263,6 +293,7 @@ sync_db() {
     attempt=$(( attempt + 1 ))
   done
   [[ -n "${snap_file}" ]] && rm -f -- "${snap_file}"
+  _current_snap_file=""
   log "ERROR DB sync failed after ${MAX_RETRIES} attempts"
   return 1
 }
