@@ -250,6 +250,9 @@ transfer_dir() {
     fi
   done < <(find "${SOURCE_DIR}" -maxdepth 1 \( -name '*.cf32' -o -name '*.raw' \) -print0 2>/dev/null | sort -z)
   log "Transfer sweep complete: ${count} OK, ${failed} failed"
+  # Record the sync timestamp before syncing (same convention as sync_db_if_due)
+  # so watch mode doesn't immediately re-trigger a DB sync after the initial sweep.
+  _last_db_sync=$(date +%s)
   sync_db || true
 }
 

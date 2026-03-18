@@ -400,7 +400,7 @@ transfers.
 Key environment variables and CLI flags for DB sync:
 - `DB_SOURCE` / `--db-source` — local path to the SQLite DB (default: `/var/lib/rf-adapt-intel/rf_adapt_intel.db`)
 - `DB_DEST` / `--db-dest` — rsync destination for the DB snapshot; DB sync is skipped when unset
-- `DB_SYNC_INTERVAL` — minimum seconds between DB syncs in watch mode (default: 60)
+- `DB_SYNC_INTERVAL` *(env only)* — minimum seconds between DB syncs in watch mode (default: 60)
 
 ```bash
 # One-shot transfer of all files in the snapshot directory
