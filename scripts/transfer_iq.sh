@@ -43,6 +43,10 @@ if ! [[ "${DB_SYNC_INTERVAL}" =~ ^[0-9]+$ ]]; then
   echo "[WARN] DB_SYNC_INTERVAL='${DB_SYNC_INTERVAL}' is not a non-negative integer; using default 60." >&2
   DB_SYNC_INTERVAL=60
 fi
+# Force base-10 interpretation so values with leading zeros (e.g. "010") are
+# treated as decimal rather than octal in arithmetic expressions like
+# (( now - _last_db_sync >= DB_SYNC_INTERVAL )).
+DB_SYNC_INTERVAL=$(( 10#${DB_SYNC_INTERVAL} ))
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -256,7 +260,13 @@ sync_db() {
   if $DRY_RUN; then
     log "[dry-run] sqlite3 -- '${DB_SOURCE}' '.backup <snapshot>'"
     log "[dry-run] rsync -az --bwlimit=${BW_KBPS} --partial-dir=.rsync-tmp --delay-updates --timeout=30 -- <snapshot> '${DB_DEST}'"
-    log "[dry-run] ssh rm -f -- '${DB_DEST}-wal' '${DB_DEST}-shm'  # remove stale WAL/SHM at destination"
+    # Log the correct WAL/SHM cleanup form (ssh for remote, local rm otherwise).
+    if [[ "${DB_DEST}" =~ ^([^/@]*@)?\[([^]]*)\]:(.*)$ ]] || \
+       { [[ "${DB_DEST}" == *:* ]] && [[ "${DB_DEST%%:*}" != */* ]]; }; then
+      log "[dry-run] ssh <host> 'rm -f -- <dest_path>-wal <dest_path>-shm'  # remove stale WAL/SHM at destination"
+    else
+      log "[dry-run] rm -f -- '${DB_DEST}-wal' '${DB_DEST}-shm'  # remove stale WAL/SHM at destination"
+    fi
     log "[dry-run] # fallback (sqlite3 unavailable): rsync -az --bwlimit=${BW_KBPS} --partial-dir=.rsync-tmp --delay-updates --timeout=30 -- '${DB_SOURCE}' '${DB_DEST}'"
     return 0
   fi
@@ -368,6 +378,43 @@ sync_db() {
         run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
             --delay-updates --timeout=30 -- "${DB_SOURCE}-shm" "${DB_DEST}-shm" || ok=false
       fi
+      # Remove any stale destination sidecars whose source counterpart no longer
+      # exists (e.g. WAL checkpointed and deleted by the writer).  Without this,
+      # SQLite on the receiver could apply old WAL data to the freshly-copied DB
+      # and produce inconsistent reads.  Failures here are treated as non-fatal
+      # warnings so a transient cleanup error doesn't abort the transfer.
+      if $ok; then
+        local _fb_is_remote=false _fb_host="" _fb_path=""
+        if [[ "${DB_DEST}" =~ ^([^/@]*@)?\[([^]]*)\]:(.*)$ ]]; then
+          _fb_host="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+          _fb_path="${BASH_REMATCH[3]}"
+          _fb_is_remote=true
+        elif [[ "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
+          _fb_host="${DB_DEST%%:*}"
+          _fb_path="${DB_DEST#*:}"
+          _fb_is_remote=true
+        else
+          _fb_path="${DB_DEST}"
+        fi
+        local -a _fb_stale=()
+        [[ ! -f "${DB_SOURCE}-wal" ]] && _fb_stale+=("${_fb_path}-wal")
+        [[ ! -f "${DB_SOURCE}-shm" ]] && _fb_stale+=("${_fb_path}-shm")
+        if [[ ${#_fb_stale[@]} -gt 0 ]]; then
+          if $_fb_is_remote; then
+            local _fb_rm_q="" _fb_p
+            for _fb_p in "${_fb_stale[@]}"; do
+              _fb_rm_q="${_fb_rm_q} $(_posix_sq "${_fb_p}")"
+            done
+            ssh -o BatchMode=yes -o ConnectTimeout=10 \
+                -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
+                -- "${_fb_host}" "rm -f --${_fb_rm_q}" 2>/dev/null || \
+              log "WARN could not remove stale WAL/SHM at fallback destination (non-fatal)"
+          else
+            rm -f -- "${_fb_stale[@]}" 2>/dev/null || \
+              log "WARN could not remove stale WAL/SHM at fallback destination (non-fatal)"
+          fi
+        fi
+      fi
     fi
     if $ok; then
       log "OK DB synced: $(basename "${DB_SOURCE}") -> ${DB_DEST}"
@@ -441,7 +488,8 @@ watch_and_transfer() {
   mkdir -p "${SOURCE_DIR}"
   # Run inotifywait as a coprocess so:
   #  1. the while loop runs in this shell and shares _last_db_sync state
-  #     with sync_db_if_due (same as the previous process-substitution form), and
+  #     with sync_db_if_due (unlike the former pipe-into-while form which ran
+  #     in a subshell and could not update the caller's variables), and
   #  2. we can detect unexpected termination (inotify queue overflow, missing
   #     directory, permission error) via the coprocess exit status after the loop.
   # --format '%w%f' gives full path; -e close_write triggers after file is done.
