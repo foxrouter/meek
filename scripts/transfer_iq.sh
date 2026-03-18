@@ -87,8 +87,9 @@ if [[ -n "${DB_DEST}" ]]; then
     exit 1
   fi
   # For local paths (no remote colon), reject an existing directory even without
-  # a trailing slash: rsync would silently drop the snapshot under a random
-  # basename, breaking the subsequent WAL/SHM cleanup at "${DB_DEST}-wal".
+  # a trailing slash: rsync would place the snapshot in the directory using the
+  # source file's basename, breaking the WAL/SHM cleanup logic that assumes
+  # DB_DEST is a complete file path (e.g. cleanup targets "${DB_DEST}-wal").
   # A path is local when it has no colon OR when the part before the colon
   # contains a slash (absolute path like /some/dir:/bad has a slash before ':').
   if { [[ "${DB_DEST}" != *:* ]] || [[ "${DB_DEST%%:*}" == */* ]]; } && [[ -d "${DB_DEST}" ]]; then
@@ -151,7 +152,7 @@ run_rsync() {
     # Add --checksum if IQ integrity verification is critical (increases bandwidth
     # usage since rsync re-reads both sides to compare checksums).
     if run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-        "${file}" "${DEST}"; then
+        -- "${file}" "${DEST}"; then
       log "OK transferred: $(basename "${file}")"
       return 0
     fi
@@ -181,7 +182,11 @@ run_rsync() {
 # for a remote /bin/sh to interpret.  This avoids printf '%q', which can emit
 # bash-specific $'...' quoting that /bin/sh on the remote side may not support.
 _posix_sq() {
-  local s="${1//\'/\'\\\'\'}"
+  # Wrap a string in single quotes, escaping any embedded single quotes as '\''.
+  # Use a variable for the quote character to avoid backslash/glob-pattern
+  # ambiguity that arises when writing \' inside a bash ${...} expansion.
+  local _sq="'"
+  local s="${1//${_sq}/${_sq}\\${_sq}${_sq}}"
   printf "'%s'" "${s}"
 }
 
@@ -254,7 +259,7 @@ sync_db() {
     local ok=true
     if [[ -n "${snap_file}" ]]; then
       run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
-          --delay-updates --timeout=30 "${snap_file}" "${DB_DEST}" || ok=false
+          --delay-updates --timeout=30 -- "${snap_file}" "${DB_DEST}" || ok=false
       # After a successful snapshot transfer, remove any stale WAL/SHM at
       # the destination.  If those sidecars are left from a previous live-file
       # sync, SQLite on the receiver would otherwise try to apply the old WAL
@@ -284,7 +289,7 @@ sync_db() {
           local _wal_q _shm_q
           _wal_q="$(_posix_sq "${_db_dest_path}-wal")"
           _shm_q="$(_posix_sq "${_db_dest_path}-shm")"
-          ssh -o BatchMode=yes "${_db_dest_host}" \
+          ssh -o BatchMode=yes -- "${_db_dest_host}" \
               "rm -f -- ${_wal_q} ${_shm_q}" 2>/dev/null || \
             log "WARN could not remove stale WAL/SHM at destination (non-fatal)"
         else
@@ -295,14 +300,14 @@ sync_db() {
     else
       # Fallback: sync live DB and sidecars (racy but better than nothing).
       run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
-          --delay-updates --timeout=30 "${DB_SOURCE}" "${DB_DEST}" || ok=false
+          --delay-updates --timeout=30 -- "${DB_SOURCE}" "${DB_DEST}" || ok=false
       if $ok && [[ -f "${DB_SOURCE}-wal" ]]; then
         run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
-            --delay-updates --timeout=30 "${DB_SOURCE}-wal" "${DB_DEST}-wal" || ok=false
+            --delay-updates --timeout=30 -- "${DB_SOURCE}-wal" "${DB_DEST}-wal" || ok=false
       fi
       if $ok && [[ -f "${DB_SOURCE}-shm" ]]; then
         run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
-            --delay-updates --timeout=30 "${DB_SOURCE}-shm" "${DB_DEST}-shm" || ok=false
+            --delay-updates --timeout=30 -- "${DB_SOURCE}-shm" "${DB_DEST}-shm" || ok=false
       fi
     fi
     if $ok; then
