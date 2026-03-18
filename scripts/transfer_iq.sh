@@ -77,7 +77,7 @@ done
 
 if [[ -z "${DEST}" ]]; then
   echo "[ERROR] Destination not set. Use --dest or IQ_DEST env var." >&2
-  echo "  Example: IQ_DEST=brian@192.168.1.10:/var/lib/rf-adapt-intel/incoming/" >&2
+  echo "  Example: IQ_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/incoming/" >&2
   exit 1
 fi
 
@@ -86,9 +86,18 @@ if ! [[ "${BW_KBPS}" =~ ^[0-9]+$ ]]; then
   echo "[WARN] BW_KBPS/--bwlimit='${BW_KBPS}' is not a non-negative integer; using default 2048." >&2
   BW_KBPS=2048
 fi
-if ! [[ "${MAX_RETRIES}" =~ ^[0-9]+$ ]]; then
-  echo "[WARN] MAX_RETRIES/--retries='${MAX_RETRIES}' is not a non-negative integer; using default 3." >&2
+if ! [[ "${MAX_RETRIES}" =~ ^[0-9]+$ ]] || [[ "${MAX_RETRIES}" -lt 1 ]]; then
+  echo "[WARN] MAX_RETRIES/--retries='${MAX_RETRIES}' is not a positive integer; using default 3." >&2
   MAX_RETRIES=3
+fi
+
+# Resolve a safe log target once: reject symlinks (avoid unintended writes to
+# symlink targets) and fall back to /dev/null when the log is not writable.
+# Both log() and run_logged() use _SAFE_LOG for consistent behaviour.
+if [[ ! -L "${TRANSFER_LOG}" ]] && touch "${TRANSFER_LOG}" 2>/dev/null; then
+  _SAFE_LOG="${TRANSFER_LOG}"
+else
+  _SAFE_LOG="/dev/null"
 fi
 
 # ---------------------------------------------------------------------------
@@ -98,26 +107,16 @@ log() {
   local msg="[$(date '+%Y-%m-%dT%H:%M:%S')] $*"
   echo "${msg}"
   if ! $DRY_RUN; then
-    echo "${msg}" >> "${TRANSFER_LOG}" 2>/dev/null || true
+    echo "${msg}" >> "${_SAFE_LOG}" 2>/dev/null || true
   fi
 }
 
 # Run a command piping stdout+stderr to the transfer log.
 # The exit code reflects only the command's outcome; tee failures are non-fatal.
-# If TRANSFER_LOG is not writable, output is discarded to /dev/null so the
-# wrapped command never receives SIGPIPE from tee exiting early.
 run_logged() {
-  local cmd_rc _log_target
-  # Pre-flight: try to open/create the log file; fall back to /dev/null so
-  # tee always succeeds and never sends SIGPIPE to the wrapped command.
-  # Reject symlinks to avoid unintended writes to symlink targets.
-  if [[ ! -L "${TRANSFER_LOG}" ]] && touch "${TRANSFER_LOG}" 2>/dev/null; then
-    _log_target="${TRANSFER_LOG}"
-  else
-    _log_target="/dev/null"
-  fi
+  local cmd_rc
   set +o pipefail
-  "$@" 2>&1 | { tee -a "${_log_target}" || true; }
+  "$@" 2>&1 | { tee -a "${_SAFE_LOG}" || true; }
   cmd_rc="${PIPESTATUS[0]}"
   set -o pipefail
   return "${cmd_rc}"
