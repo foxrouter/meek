@@ -91,10 +91,17 @@ if [[ -n "${DB_DEST}" ]]; then
   # as host="host", path=":module/path" by our remote-detection logic, causing
   # a bogus ssh cleanup target and a false sync failure.  Daemon destinations
   # are not supported; require the standard [user@]host:/path form.
+  # IPv6 bracket addresses (user@[::1]:/path) legitimately contain :: inside
+  # [...]; allow those by checking whether the text before the first :: contains
+  # an unmatched '[' — if it does, the :: is inside the bracket section.
   if [[ "${DB_DEST}" == *::* ]]; then
-    echo "[ERROR] DB_DEST '${DB_DEST}' uses rsync-daemon syntax (::) which is not supported." >&2
-    echo "  Use the standard [user@]host:/path form instead." >&2
-    exit 1
+    _before_dcolon="${DB_DEST%%::*}"
+    if ! { [[ "${_before_dcolon}" == *\[* ]] && [[ "${_before_dcolon}" != *\]* ]]; }; then
+      echo "[ERROR] DB_DEST '${DB_DEST}' uses rsync-daemon syntax (::) which is not supported." >&2
+      echo "  Use the standard [user@]host:/path form instead." >&2
+      exit 1
+    fi
+    unset _before_dcolon
   fi
   # For local paths (no remote colon), reject an existing directory even without
   # a trailing slash: rsync would place the snapshot in the directory using the
