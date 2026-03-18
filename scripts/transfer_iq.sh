@@ -126,7 +126,7 @@ log() {
   local msg="[$(date '+%Y-%m-%dT%H:%M:%S')] $*"
   echo "${msg}"
   if ! $DRY_RUN; then
-    echo "${msg}" >&3
+    echo "${msg}" >&3 || true
   fi
 }
 
