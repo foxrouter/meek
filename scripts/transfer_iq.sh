@@ -224,11 +224,12 @@ sync_db_if_due() {
   local now
   now=$(date +%s)
   if (( now - _last_db_sync >= DB_SYNC_INTERVAL )); then
-    # Record the start time before syncing so the interval counts from when
-    # this sync began, not after it finishes (avoids immediate re-trigger
-    # when sync takes longer than DB_SYNC_INTERVAL).
-    _last_db_sync=${now}
-    sync_db || true
+    # Only update the timestamp on success so a transient failure (network
+    # outage, disk-full) allows a retry on the next IQ file event rather than
+    # suppressing further attempts for a full DB_SYNC_INTERVAL.
+    if sync_db; then
+      _last_db_sync=${now}
+    fi
   fi
 }
 
