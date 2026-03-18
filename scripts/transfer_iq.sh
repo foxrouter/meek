@@ -209,12 +209,16 @@ sync_db() {
     return 0
   fi
   # Dry-run: log the intended operations without any filesystem or SQLite work.
-  # All three rsync commands are shown unconditionally so the output reflects
-  # the full intended behaviour regardless of which sidecar files currently exist.
+  # The primary path creates a consistent sqlite3 .backup snapshot, rsyncs it
+  # with --partial-dir=.rsync-tmp --delay-updates --timeout=30 (atomic at-dest),
+  # and then deletes (not rsyncs) stale -wal/-shm sidecars at the destination.
+  # The fallback (sqlite3 unavailable or mktemp failed) rsyncs the live DB and
+  # its sidecar files directly with the same rsync flags.
   if $DRY_RUN; then
-    log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}' '${DB_DEST}'"
-    log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-wal' '${DB_DEST}-wal'"
-    log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-shm' '${DB_DEST}-shm'"
+    log "[dry-run] sqlite3 -- '${DB_SOURCE}' '.backup <snapshot>'"
+    log "[dry-run] rsync -az --bwlimit=${BW_KBPS} --partial-dir=.rsync-tmp --delay-updates --timeout=30 -- <snapshot> '${DB_DEST}'"
+    log "[dry-run] ssh rm -f -- '${DB_DEST}-wal' '${DB_DEST}-shm'  # remove stale WAL/SHM at destination"
+    log "[dry-run] # fallback (sqlite3 unavailable): rsync -az --bwlimit=${BW_KBPS} --partial-dir=.rsync-tmp --delay-updates --timeout=30 -- '${DB_SOURCE}' '${DB_DEST}'"
     return 0
   fi
   if [[ ! -f "${DB_SOURCE}" ]]; then
