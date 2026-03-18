@@ -42,7 +42,7 @@ DB_SYNC_INTERVAL="${DB_SYNC_INTERVAL:-60}"
 # Argument parsing
 # ---------------------------------------------------------------------------
 require_arg() {
-  if [[ $# -lt 2 || -z "${2:-}" ]]; then
+  if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
     echo "[ERROR] Option '$1' requires an argument." >&2
     exit 1
   fi
@@ -87,6 +87,17 @@ log() {
   fi
 }
 
+# Run a command piping stdout+stderr to the transfer log.
+# The exit code reflects only the command's outcome; tee failures are non-fatal.
+run_logged() {
+  local cmd_rc
+  set +o pipefail
+  "$@" 2>&1 | { tee -a "${TRANSFER_LOG}" 2>/dev/null || true; }
+  cmd_rc="${PIPESTATUS[0]}"
+  set -o pipefail
+  return "${cmd_rc}"
+}
+
 run_rsync() {
   local file="$1"
   local attempt=1
@@ -98,8 +109,8 @@ run_rsync() {
     # --partial: resume interrupted transfers; --timeout: abort stalled transfers.
     # Add --checksum if IQ integrity verification is critical (increases bandwidth
     # usage since rsync re-reads both sides to compare checksums).
-    if rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-        "${file}" "${DEST}" 2>&1 | tee -a "${TRANSFER_LOG}"; then
+    if run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
+        "${file}" "${DEST}"; then
       log "OK transferred: $(basename "${file}")"
       return 0
     fi
@@ -124,6 +135,15 @@ sync_db() {
   if [[ -z "${DB_DEST}" ]]; then
     return 0
   fi
+  # Dry-run: log intended operations without any filesystem or SQLite work.
+  if $DRY_RUN; then
+    log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}' '${DB_DEST}'"
+    [[ -f "${DB_SOURCE}-wal" ]] && \
+      log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-wal' '${DB_DEST}-wal'"
+    [[ -f "${DB_SOURCE}-shm" ]] && \
+      log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-shm' '${DB_DEST}-shm'"
+    return 0
+  fi
   if [[ ! -f "${DB_SOURCE}" ]]; then
     log "WARN DB file not found, skipping DB sync: ${DB_SOURCE}"
     return 0
@@ -134,8 +154,11 @@ sync_db() {
   # filesystem (sufficient space, no cross-device copy) and avoids TMPDIR.
   local snap_file=""
   if command -v sqlite3 &>/dev/null; then
+    # Generate a unique path, then remove the placeholder file immediately:
+    # VACUUM INTO requires the destination to not already exist.
     snap_file="$(mktemp --tmpdir="$(dirname "${DB_SOURCE}")" --suffix=.db)"
-    if ! sqlite3 "${DB_SOURCE}" "VACUUM INTO '${snap_file}'" 2>&1 | tee -a "${TRANSFER_LOG}"; then
+    rm -f "${snap_file}"
+    if ! run_logged sqlite3 "${DB_SOURCE}" "VACUUM INTO '${snap_file}'"; then
       log "WARN VACUUM INTO failed; falling back to live-file rsync"
       rm -f "${snap_file}"
       snap_file=""
@@ -146,34 +169,21 @@ sync_db() {
 
   local attempt=1
   while [[ "${attempt}" -le "${MAX_RETRIES}" ]]; do
-    if $DRY_RUN; then
-      if [[ -n "${snap_file}" ]]; then
-        log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${snap_file}' '${DB_DEST}'"
-      else
-        log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}' '${DB_DEST}'"
-        [[ -f "${DB_SOURCE}-wal" ]] && \
-          log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-wal' '${DB_DEST}-wal'"
-        [[ -f "${DB_SOURCE}-shm" ]] && \
-          log "[dry-run] rsync -az --bwlimit=${BW_KBPS} '${DB_SOURCE}-shm' '${DB_DEST}-shm'"
-      fi
-      rm -f "${snap_file}"
-      return 0
-    fi
     local ok=true
     if [[ -n "${snap_file}" ]]; then
-      rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-          "${snap_file}" "${DB_DEST}" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
+      run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
+          "${snap_file}" "${DB_DEST}" || ok=false
     else
       # Fallback: sync live DB and sidecars (racy but better than nothing).
-      rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-          "${DB_SOURCE}" "${DB_DEST}" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
+      run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
+          "${DB_SOURCE}" "${DB_DEST}" || ok=false
       if $ok && [[ -f "${DB_SOURCE}-wal" ]]; then
-        rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-            "${DB_SOURCE}-wal" "${DB_DEST}-wal" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
+        run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
+            "${DB_SOURCE}-wal" "${DB_DEST}-wal" || ok=false
       fi
       if $ok && [[ -f "${DB_SOURCE}-shm" ]]; then
-        rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-            "${DB_SOURCE}-shm" "${DB_DEST}-shm" 2>&1 | tee -a "${TRANSFER_LOG}" || ok=false
+        run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
+            "${DB_SOURCE}-shm" "${DB_DEST}-shm" || ok=false
       fi
     fi
     if $ok; then
