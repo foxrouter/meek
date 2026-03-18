@@ -80,10 +80,22 @@ if [[ -z "${DEST}" ]]; then
   echo "  Example: IQ_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/incoming/" >&2
   exit 1
 fi
-if [[ -n "${DB_DEST}" && "${DB_DEST}" == */ ]]; then
-  echo "[ERROR] DB_DEST must be a file path, not a directory (trailing '/' not allowed)." >&2
-  echo "  Example: DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
-  exit 1
+if [[ -n "${DB_DEST}" ]]; then
+  if [[ "${DB_DEST}" == */ ]]; then
+    echo "[ERROR] DB_DEST must be a file path, not a directory (trailing '/' not allowed)." >&2
+    echo "  Example: DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
+    exit 1
+  fi
+  # For local paths (no remote colon), reject an existing directory even without
+  # a trailing slash: rsync would silently drop the snapshot under a random
+  # basename, breaking the subsequent WAL/SHM cleanup at "${DB_DEST}-wal".
+  # A path is local when it has no colon OR when the part before the colon
+  # contains a slash (absolute path like /some/dir:/bad has a slash before ':').
+  if { [[ "${DB_DEST}" != *:* ]] || [[ "${DB_DEST%%:*}" == */* ]]; } && [[ -d "${DB_DEST}" ]]; then
+    echo "[ERROR] DB_DEST '${DB_DEST}' is an existing directory; a file path is required." >&2
+    echo "  Example: DB_DEST=/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
+    exit 1
+  fi
 fi
 
 # Validate integer parameters (may have been set via env or CLI).
@@ -173,15 +185,18 @@ _posix_sq() {
   printf "'%s'" "${s}"
 }
 
-# Global handle for the current snapshot temp file so that the EXIT/INT/TERM
-# trap can remove it even when the script is interrupted mid-sync.
+# Global handle for the current snapshot temp file so that the EXIT trap can
+# remove it even when the script is interrupted mid-sync (INT/TERM both trigger
+# exit, which then runs the EXIT trap).
 _current_snap_file=""
 _cleanup_snap() {
   if [[ -n "${_current_snap_file}" ]]; then
     rm -f -- "${_current_snap_file}" 2>/dev/null || true
   fi
 }
-trap '_cleanup_snap' EXIT INT TERM
+trap '_cleanup_snap' EXIT
+trap 'exit 130' INT   # cleanup via EXIT trap; 128+SIGINT(2)
+trap 'exit 143' TERM  # cleanup via EXIT trap; 128+SIGTERM(15)
 
 sync_db() {
   if [[ -z "${DB_DEST}" ]]; then
@@ -247,13 +262,23 @@ sync_db() {
       # reads.  Failures here are non-fatal: the main snapshot was already
       # transferred successfully.
       if $ok; then
-        # Determine whether DB_DEST is remote ([user@]host:/path).
-        # A remote spec has a colon and the part before the colon contains no
-        # slash (host/user@host never has a slash; a local absolute path does).
-        local _db_dest_host _db_dest_path
-        if [[ "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
+        # Determine whether DB_DEST is remote.  Support both the standard
+        # [user@]host:/path form and the IPv6 bracket form [user@][addr]:/path.
+        # A colon that belongs to an IPv6 address is inside [...], so we check
+        # for the bracket form first to avoid splitting on the wrong colon.
+        local _db_dest_host _db_dest_path _is_remote=false
+        if [[ "${DB_DEST}" =~ ^([^/@]*@)?\[([^]]*)\]:(.*)$ ]]; then
+          # IPv6 bracket form: [user@][addr]:/path
+          _db_dest_host="${BASH_REMATCH[1]}[${BASH_REMATCH[2]}]"
+          _db_dest_path="${BASH_REMATCH[3]}"
+          _is_remote=true
+        elif [[ "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
+          # Standard form: [user@]hostname:/path (colon present, no slash before it)
           _db_dest_host="${DB_DEST%%:*}"
           _db_dest_path="${DB_DEST#*:}"
+          _is_remote=true
+        fi
+        if $_is_remote; then
           # Use POSIX-portable single-quote escaping (not printf %q, which can
           # emit bash-specific $'...' syntax that fails on remote /bin/sh).
           local _wal_q _shm_q
