@@ -388,14 +388,15 @@ Promotion criteria (all must be met before `--promote`):
 ## IQ file transfer (`scripts/transfer_iq.sh`)
 
 Transfer IQ snapshot files from Ray (edge SDR) to Brian (central server) via
-rsync with retries, bandwidth limiting, and logging.  After each transfer batch
-the SQLite classifications DB is synced to Brian so that the reporting node
-receives recent classification data.  When `sqlite3` is available a consistent
-snapshot is created via `sqlite3 .backup` (online backup API) before rsyncing;
-this holds only brief shared locks and avoids a full DB rewrite.  Otherwise
-the script falls back to rsyncing the live DB and WAL/SHM sidecars (which may
-be racy under write load).  DB sync failures are logged but do not abort IQ
-transfers.
+rsync with retries, bandwidth limiting, and logging.  When `DB_DEST` is set,
+the SQLite classifications DB is also synced to Brian after each transfer batch
+so that the reporting node receives recent classification data; DB sync is
+skipped silently when `DB_DEST` is unset.  When `sqlite3` is available a
+consistent snapshot is created via `sqlite3 .backup` (online backup API) before
+rsyncing; this holds only brief shared locks and avoids a full DB rewrite.
+Otherwise the script falls back to rsyncing the live DB and WAL/SHM sidecars
+(which may be racy under write load).  DB sync failures are logged but do not
+abort IQ transfers.
 
 Key environment variables and CLI flags for DB sync:
 - `DB_SOURCE` / `--db-source` — local path to the SQLite DB (default: `/var/lib/rf-adapt-intel/rf_adapt_intel.db`)

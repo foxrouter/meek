@@ -2,8 +2,9 @@
 # scripts/transfer_iq.sh — Transfer IQ files from Ray (edge SDR) to Brian
 # (central processing server) via rsync/scp with retries, bandwidth limiting,
 # logging, and an optional inotifywait watcher for automatic triggering.
-# After each transfer batch the SQLite classifications DB is also synced so
-# that Brian's reporting node always has up-to-date classification data.
+# When DB_DEST is set, the SQLite classifications DB is also synced after each
+# transfer batch so that Brian's reporting node has up-to-date classification
+# data.  DB sync is skipped silently when DB_DEST is unset.
 #
 # Usage:
 #   bash scripts/transfer_iq.sh [--source <dir>] [--dest <user@host:path>]
@@ -236,7 +237,8 @@ sync_db() {
       # Use the SQLite online backup API (.backup): avoids a full DB rewrite and
       # holds only brief shared locks, causing minimal disruption to concurrent
       # worker writes.  Unlike VACUUM INTO, .backup can write to an existing file.
-      if ! run_logged sqlite3 "${DB_SOURCE}" ".backup '${snap_file}'"; then
+      local _snap_sq; _snap_sq="$(_posix_sq "${snap_file}")"
+      if ! run_logged sqlite3 -- "${DB_SOURCE}" ".backup ${_snap_sq}"; then
         log "WARN sqlite3 .backup failed; falling back to live-file rsync"
         [[ -n "${snap_file}" ]] && rm -f -- "${snap_file}"
         _current_snap_file=""
