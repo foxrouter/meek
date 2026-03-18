@@ -188,6 +188,24 @@ sync_db() {
     if [[ -n "${snap_file}" ]]; then
       run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
           "${snap_file}" "${DB_DEST}" || ok=false
+      # After a successful snapshot transfer, overwrite any stale WAL/SHM at
+      # the destination with empty files.  If those sidecars are left from a
+      # previous live-file sync, SQLite on the receiver would otherwise try to
+      # apply the old WAL data to the new consistent snapshot and produce
+      # corrupt or inconsistent reads.  Failures here are non-fatal: the main
+      # snapshot was already transferred successfully.
+      if $ok; then
+        local _sidecar_empty
+        if _sidecar_empty="$(mktemp 2>/dev/null)"; then
+          run_logged rsync -az --bwlimit="${BW_KBPS}" --timeout=30 \
+              "${_sidecar_empty}" "${DB_DEST}-wal" || \
+            log "WARN could not clear stale WAL at destination (non-fatal)"
+          run_logged rsync -az --bwlimit="${BW_KBPS}" --timeout=30 \
+              "${_sidecar_empty}" "${DB_DEST}-shm" || \
+            log "WARN could not clear stale SHM at destination (non-fatal)"
+          rm -f "${_sidecar_empty}"
+        fi
+      fi
     else
       # Fallback: sync live DB and sidecars (racy but better than nothing).
       run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
@@ -251,10 +269,12 @@ transfer_dir() {
     fi
   done < <(find "${SOURCE_DIR}" -maxdepth 1 \( -name '*.cf32' -o -name '*.raw' \) -print0 2>/dev/null | sort -z)
   log "Transfer sweep complete: ${count} OK, ${failed} failed"
-  # Record the sync timestamp before syncing (same convention as sync_db_if_due)
-  # so watch mode doesn't immediately re-trigger a DB sync after the initial sweep.
-  _last_db_sync=$(date +%s)
-  sync_db || true
+  # Only record the sync timestamp on success, matching sync_db_if_due behaviour:
+  # a failed initial sync lets watch mode retry on the next file event rather
+  # than suppressing attempts for a full DB_SYNC_INTERVAL.
+  if sync_db; then
+    _last_db_sync=$(date +%s)
+  fi
 }
 
 # ---------------------------------------------------------------------------
