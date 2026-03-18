@@ -186,8 +186,8 @@ sync_db() {
   while [[ "${attempt}" -le "${MAX_RETRIES}" ]]; do
     local ok=true
     if [[ -n "${snap_file}" ]]; then
-      run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-          "${snap_file}" "${DB_DEST}" || ok=false
+      run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
+          --delay-updates --timeout=30 "${snap_file}" "${DB_DEST}" || ok=false
       # After a successful snapshot transfer, overwrite any stale WAL/SHM at
       # the destination with empty files.  If those sidecars are left from a
       # previous live-file sync, SQLite on the receiver would otherwise try to
@@ -208,15 +208,15 @@ sync_db() {
       fi
     else
       # Fallback: sync live DB and sidecars (racy but better than nothing).
-      run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-          "${DB_SOURCE}" "${DB_DEST}" || ok=false
+      run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
+          --delay-updates --timeout=30 "${DB_SOURCE}" "${DB_DEST}" || ok=false
       if $ok && [[ -f "${DB_SOURCE}-wal" ]]; then
-        run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-            "${DB_SOURCE}-wal" "${DB_DEST}-wal" || ok=false
+        run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
+            --delay-updates --timeout=30 "${DB_SOURCE}-wal" "${DB_DEST}-wal" || ok=false
       fi
       if $ok && [[ -f "${DB_SOURCE}-shm" ]]; then
-        run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-            "${DB_SOURCE}-shm" "${DB_DEST}-shm" || ok=false
+        run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
+            --delay-updates --timeout=30 "${DB_SOURCE}-shm" "${DB_DEST}-shm" || ok=false
       fi
     fi
     if $ok; then
