@@ -195,10 +195,12 @@ fi
 # later replaced with a symlink, significantly reducing TOCTOU exposure.
 # Both log() and run_logged() write to FD 3.
 exec 3>/dev/null
-if [[ -L "${TRANSFER_LOG}" ]]; then
-  echo "[WARN] TRANSFER_LOG '${TRANSFER_LOG}' is a symlink; logging disabled (writes go to /dev/null)." >&2
-elif ! { exec 3>>"${TRANSFER_LOG}"; } 2>/dev/null; then
-  echo "[WARN] Could not open TRANSFER_LOG '${TRANSFER_LOG}' for writing; logging disabled (writes go to /dev/null)." >&2
+if ! $DRY_RUN; then
+  if [[ -L "${TRANSFER_LOG}" ]]; then
+    echo "[WARN] TRANSFER_LOG '${TRANSFER_LOG}' is a symlink; logging disabled (writes go to /dev/null)." >&2
+  elif ! { exec 3>>"${TRANSFER_LOG}"; } 2>/dev/null; then
+    echo "[WARN] Could not open TRANSFER_LOG '${TRANSFER_LOG}' for writing; logging disabled (writes go to /dev/null)." >&2
+  fi
 fi
 
 # ---------------------------------------------------------------------------
