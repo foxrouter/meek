@@ -98,21 +98,31 @@ if [[ -n "${DB_DEST}" ]]; then
   # IPv6 bracket addresses (user@[::1]:/path) contain :: inside [...] and are
   # allowed; :: in the path portion of a remote destination (e.g.
   # user@host:/var/lib/db::backup.sqlite) is also valid and must not be
-  # rejected.  Strategy: only check the host segment (everything before the
-  # first '/') for ::, after stripping any IPv6 bracket content.
+  # rejected.  Strategy: only check the host segment (substring after any
+  # optional user@ and before the first ':') for ::, after stripping any IPv6
+  # bracket content.
   if [[ "${DB_DEST}" == *::* ]]; then
-    _before_slash="${DB_DEST%%/*}"
-    if [[ "${_before_slash}" == *\[*\]* ]]; then
-      _check="${_before_slash%%\[*}${_before_slash##*\]}"
+    # Strip optional user@ prefix to isolate host[:...].
+    if [[ "${DB_DEST}" == *@* ]]; then
+      _host_and_rest="${DB_DEST#*@}"
     else
-      _check="${_before_slash}"
+      _host_and_rest="${DB_DEST}"
+    fi
+    # Host segment is everything before the first ':'.
+    _host_segment="${_host_and_rest%%:*}"
+    # If the host contains bracketed IPv6, drop the bracketed portion when
+    # checking for :: so that [::1] is allowed.
+    if [[ "${_host_segment}" == *\[*\]* ]]; then
+      _check="${_host_segment%%\[*}${_host_segment##*\]}"
+    else
+      _check="${_host_segment}"
     fi
     if [[ "${_check}" == *::* ]]; then
       echo "[ERROR] DB_DEST '${DB_DEST}' uses rsync-daemon syntax (::) which is not supported." >&2
       echo "  Use the standard [user@]host:/path form instead." >&2
       exit 1
     fi
-    unset _before_slash _check
+    unset _host_and_rest _host_segment _check
   fi
   # Reject remote destinations with an empty path component (e.g. user@host:).
   # rsync would write the snapshot into the remote home directory (not a named
