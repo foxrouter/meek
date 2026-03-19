@@ -592,7 +592,7 @@ watch_and_transfer() {
   #  2. we can detect unexpected termination (inotify queue overflow, missing
   #     directory, permission error) via the coprocess exit status after the loop.
   # --format '%w%f' gives full path; -e close_write triggers after file is done.
-  coproc _IQ_WATCH (inotifywait -m -r -e close_write --format '%w%f' "${SOURCE_DIR}" 2>&3)
+  coproc _IQ_WATCH (inotifywait -m -r -e close_write --format '%w%f' "${SOURCE_DIR}" 2> >(tee -a /dev/stderr >&3))
   local _inotify_pid="${_IQ_WATCH_PID}"
   while IFS= read -r new_file <&"${_IQ_WATCH[0]}"; do
     case "${new_file}" in
