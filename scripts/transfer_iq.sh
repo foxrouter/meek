@@ -118,7 +118,7 @@ if [[ -n "${DB_DEST}" ]]; then
   # rsync would write the snapshot into the remote home directory (not a named
   # file), and the WAL/SHM cleanup would target just '-wal'/'-shm' with no
   # preceding path, which is clearly wrong.
-  if [[ "${DB_DEST}" =~ ^([^/@]*@)?\[([^]]*)\]:(.*)$ ]]; then
+  if [[ "${DB_DEST}" =~ ^([^/@]+@)?\[([^]]*)\]:(.*)$ ]]; then
     # IPv6 bracket form: host is the second capture group, path is the third.
     if [[ -z "${BASH_REMATCH[2]}" ]]; then
       echo "[ERROR] DB_DEST '${DB_DEST}' has an empty bracket host; specify a host address." >&2
@@ -132,14 +132,20 @@ if [[ -n "${DB_DEST}" ]]; then
     fi
   elif [[ "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
     # Standard remote form: [user@]host:path — host is before the colon, path after.
-    _std_host="${DB_DEST%%:*}"
-    _std_host="${_std_host##*@}"
+    _remote_prefix="${DB_DEST%%:*}"
+    # Reject cases with an '@' but no username before it (e.g. @host:/path).
+    if [[ "${_remote_prefix}" == @* ]]; then
+      echo "[ERROR] DB_DEST '${DB_DEST}' has an empty username before '@'; specify a non-empty user or omit '@' entirely." >&2
+      echo "  Example: DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
+      unset _remote_prefix; exit 1
+    fi
+    _std_host="${_remote_prefix##*@}"
     if [[ -z "${_std_host}" ]]; then
       echo "[ERROR] DB_DEST '${DB_DEST}' has an empty remote host; specify a hostname." >&2
       echo "  Example: DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
-      unset _std_host; exit 1
+      unset _std_host _remote_prefix; exit 1
     fi
-    unset _std_host
+    unset _std_host _remote_prefix
     if [[ -z "${DB_DEST#*:}" ]]; then
       echo "[ERROR] DB_DEST '${DB_DEST}' has an empty remote path; specify a full file path." >&2
       echo "  Example: DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
