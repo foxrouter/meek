@@ -98,31 +98,25 @@ if [[ -n "${DB_DEST}" ]]; then
   # IPv6 bracket addresses (user@[::1]:/path) contain :: inside [...] and are
   # allowed; :: in the path portion of a remote destination (e.g.
   # user@host:/var/lib/db::backup.sqlite) is also valid and must not be
-  # rejected.  Strategy: only check the host segment (substring after any
-  # optional user@ and before the first ':') for ::, after stripping any IPv6
-  # bracket content.
+  # rejected.  Strategy: reject only when '::' appears immediately after the
+  # host portion (after optional user@ and optional [...] IPv6 host), which
+  # indicates rsync-daemon syntax [user@]host::module/path.
   if [[ "${DB_DEST}" == *::* ]]; then
-    # Strip optional user@ prefix to isolate host[:...].
-    if [[ "${DB_DEST}" == *@* ]]; then
-      _host_and_rest="${DB_DEST#*@}"
-    else
-      _host_and_rest="${DB_DEST}"
-    fi
-    # Host segment is everything before the first ':'.
-    _host_segment="${_host_and_rest%%:*}"
-    # If the host contains bracketed IPv6, drop the bracketed portion when
-    # checking for :: so that [::1] is allowed.
-    if [[ "${_host_segment}" == *\[*\]* ]]; then
-      _check="${_host_segment%%\[*}${_host_segment##*\]}"
-    else
-      _check="${_host_segment}"
-    fi
-    if [[ "${_check}" == *::* ]]; then
+    # Bracketed IPv6 host: [user@][ipv6]::module/path  -> reject.
+    # Example: rf_worker@[::1]::module/path
+    if [[ "${DB_DEST}" =~ ^([^@]+@)?\[[^]]+\]:: ]]; then
       echo "[ERROR] DB_DEST '${DB_DEST}' uses rsync-daemon syntax (::) which is not supported." >&2
       echo "  Use the standard [user@]host:/path form instead." >&2
       exit 1
     fi
-    unset _host_and_rest _host_segment _check
+    # Normal host: [user@]host::module/path  -> reject.
+    # This still allows paths that contain '::' after the initial ':' such as
+    # user@host:/var/lib/db::backup.sqlite.
+    if [[ "${DB_DEST}" =~ ^([^@:]+@)?[^[:space:]@:]+:: ]]; then
+      echo "[ERROR] DB_DEST '${DB_DEST}' uses rsync-daemon syntax (::) which is not supported." >&2
+      echo "  Use the standard [user@]host:/path form instead." >&2
+      exit 1
+    fi
   fi
   # Reject remote destinations with an empty path component (e.g. user@host:).
   # rsync would write the snapshot into the remote home directory (not a named
