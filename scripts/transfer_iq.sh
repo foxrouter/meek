@@ -349,8 +349,14 @@ sync_db() {
       else
         # mktemp creates files with mode 0600; copy source DB permissions so
         # rsync's -a doesn't propagate restrictive permissions to the destination
-        # and break reads by other users on Brian.
-        chmod --reference="${DB_SOURCE}" "${snap_file}" 2>/dev/null || true
+        # and break reads by other users on Brian.  Fall back to a safe explicit
+        # mode (0644) if --reference is unavailable (non-GNU chmod) or fails.
+        if ! chmod --reference="${DB_SOURCE}" "${snap_file}" 2>/dev/null; then
+          log "WARN chmod --reference failed for snapshot; applying mode 0644"
+          if ! chmod 0644 "${snap_file}" 2>/dev/null; then
+            log "WARN chmod 0644 also failed; snapshot may be at mode 0600 on destination"
+          fi
+        fi
       fi
     else
       log "WARN mktemp failed in ${snap_dir}; falling back to live-file rsync"
