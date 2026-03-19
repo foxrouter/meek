@@ -288,6 +288,34 @@ sync_db() {
     return 0
   fi
 
+  # For remote DB_DEST, verify that the remote path is not an existing directory.
+  # rsync (without a trailing /) would copy the snapshot into the directory under
+  # the snapshot temp file's basename rather than to the intended file path, and
+  # the WAL/SHM cleanup logic would then target wrong paths like
+  # "${DB_DEST}-wal".  This mirrors the local -d guard in the startup validation
+  # block.  SSH errors (host unreachable etc.) are ignored so a transient
+  # connectivity problem does not prevent other transfers from running.
+  local _chk_is_remote=false _chk_host="" _chk_path=""
+  if [[ "${DB_DEST}" =~ ^([^/@]*@)?\[([^]]*)\]:(.*)$ ]]; then
+    _chk_host="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+    _chk_path="${BASH_REMATCH[3]}"
+    _chk_is_remote=true
+  elif [[ "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
+    _chk_host="${DB_DEST%%:*}"
+    _chk_path="${DB_DEST#*:}"
+    _chk_is_remote=true
+  fi
+  if $_chk_is_remote; then
+    if ssh -o BatchMode=yes -o ConnectTimeout=10 \
+           -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
+           -- "${_chk_host}" \
+           "test -d $(_posix_sq "${_chk_path}")" 2>/dev/null; then
+      log "ERROR DB_DEST '${DB_DEST}' is a remote directory; a full file path is required"
+      log "      Example: DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db"
+      return 1
+    fi
+  fi
+
   # Build a consistent snapshot to rsync (avoids WAL-mode raciness).
   # Use the same directory as DB_SOURCE so the snapshot stays on the same
   # filesystem (sufficient space, no cross-device copy) and avoids TMPDIR.
