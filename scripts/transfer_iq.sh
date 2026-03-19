@@ -191,7 +191,7 @@ log() {
 # SIGPIPE to the command; FD 3 write failures are silently ignored and the
 # exit code reflects only the command's outcome.
 run_logged() {
-  local cmd_rc
+  local cmd_rc _rl_line
   set +o pipefail
   "$@" 2>&1 | while IFS= read -r _rl_line || [[ -n "${_rl_line}" ]]; do
     printf '%s\n' "${_rl_line}"
@@ -290,7 +290,7 @@ sync_db() {
   fi
   if [[ ! -f "${DB_SOURCE}" ]]; then
     log "WARN DB file not found, skipping DB sync: ${DB_SOURCE}"
-    return 0
+    return 1
   fi
 
   # For remote DB_DEST, verify that the remote path is not an existing directory.
