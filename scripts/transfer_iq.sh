@@ -187,11 +187,16 @@ log() {
 }
 
 # Run a command piping stdout+stderr to the transfer log (FD 3).
-# The exit code reflects only the command's outcome; tee failures are non-fatal.
+# Uses a read loop instead of tee so a broken/full log (FD 3) never delivers
+# SIGPIPE to the command; FD 3 write failures are silently ignored and the
+# exit code reflects only the command's outcome.
 run_logged() {
   local cmd_rc
   set +o pipefail
-  "$@" 2>&1 | { tee /dev/fd/3 || true; }
+  "$@" 2>&1 | while IFS= read -r _rl_line || [[ -n "${_rl_line}" ]]; do
+    echo "${_rl_line}"
+    echo "${_rl_line}" >&3 2>/dev/null || true
+  done
   cmd_rc="${PIPESTATUS[0]}"
   set -o pipefail
   return "${cmd_rc}"
