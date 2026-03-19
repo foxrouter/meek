@@ -511,9 +511,9 @@ sync_db() {
     fi
     log "WARN DB sync attempt ${attempt}/${MAX_RETRIES} failed"
     if [[ "${attempt}" -lt "${MAX_RETRIES}" ]]; then
+      attempt=$(( attempt + 1 ))
       sleep $(( attempt * 5 ))
     fi
-    attempt=$(( attempt + 1 ))
   done
   [[ -n "${snap_file}" ]] && rm -f -- "${snap_file}"
   _current_snap_file=""
