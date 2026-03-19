@@ -114,14 +114,27 @@ if [[ -n "${DB_DEST}" ]]; then
   # file), and the WAL/SHM cleanup would target just '-wal'/'-shm' with no
   # preceding path, which is clearly wrong.
   if [[ "${DB_DEST}" =~ ^([^/@]*@)?\[([^]]*)\]:(.*)$ ]]; then
-    # IPv6 bracket form: path is the third capture group.
+    # IPv6 bracket form: host is the second capture group, path is the third.
+    if [[ -z "${BASH_REMATCH[2]}" ]]; then
+      echo "[ERROR] DB_DEST '${DB_DEST}' has an empty bracket host; specify a host address." >&2
+      echo "  Example: DB_DEST=rf_worker@[::1]:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
+      exit 1
+    fi
     if [[ -z "${BASH_REMATCH[3]}" ]]; then
       echo "[ERROR] DB_DEST '${DB_DEST}' has an empty remote path; specify a full file path." >&2
       echo "  Example: DB_DEST=rf_worker@[::1]:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
       exit 1
     fi
   elif [[ "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
-    # Standard remote form: [user@]host:path — path is everything after the colon.
+    # Standard remote form: [user@]host:path — host is before the colon, path after.
+    _std_host="${DB_DEST%%:*}"
+    _std_host="${_std_host##*@}"
+    if [[ -z "${_std_host}" ]]; then
+      echo "[ERROR] DB_DEST '${DB_DEST}' has an empty remote host; specify a hostname." >&2
+      echo "  Example: DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
+      unset _std_host; exit 1
+    fi
+    unset _std_host
     if [[ -z "${DB_DEST#*:}" ]]; then
       echo "[ERROR] DB_DEST '${DB_DEST}' has an empty remote path; specify a full file path." >&2
       echo "  Example: DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
@@ -347,20 +360,20 @@ sync_db() {
         if $_is_remote; then
           # Use POSIX-portable single-quote escaping (not printf %q, which can
           # emit bash-specific $'...' syntax that fails on remote /bin/sh).
-          local _wal_q _shm_q
+          local _wal_q _shm_q _ssh_err
           _wal_q="$(_posix_sq "${_db_dest_path}-wal")"
           _shm_q="$(_posix_sq "${_db_dest_path}-shm")"
-          ssh -o BatchMode=yes \
+          _ssh_err="$(ssh -o BatchMode=yes \
               -o ConnectTimeout=10 \
               -o ServerAliveInterval=5 \
               -o ServerAliveCountMax=2 \
               -- "${_db_dest_host}" \
-              "rm -f -- ${_wal_q} ${_shm_q}" 2>/dev/null || {
-            log "WARN could not remove stale WAL/SHM at destination; marking sync as failed"
+              "rm -f -- ${_wal_q} ${_shm_q}" 2>&1)" || {
+            log "WARN could not remove stale WAL/SHM at destination; marking sync as failed${_ssh_err:+: ${_ssh_err}}"
             ok=false
           }
         else
-          rm -f "${DB_DEST}-wal" "${DB_DEST}-shm" 2>/dev/null || {
+          rm -f -- "${DB_DEST}-wal" "${DB_DEST}-shm" 2>/dev/null || {
             log "WARN could not remove stale WAL/SHM at destination; marking sync as failed"
             ok=false
           }
