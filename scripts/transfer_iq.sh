@@ -155,13 +155,28 @@ if [[ -n "${DB_DEST}" ]]; then
 fi
 
 # Validate integer parameters (may have been set via env or CLI).
-if ! [[ "${BW_KBPS}" =~ ^[0-9]+$ ]] || [[ "${BW_KBPS}" -lt 1 ]]; then
+# Regex check is done first (safe, no arithmetic), then normalize to base-10
+# with $(( 10#... )) before doing numeric comparisons so octal-looking values
+# like '08' or '010' don't cause 'value too great for base' errors.
+if ! [[ "${BW_KBPS}" =~ ^[0-9]+$ ]]; then
   echo "[WARN] IQ_BW_KBPS/--bwlimit='${BW_KBPS}' is not a positive integer; using default 2048." >&2
   BW_KBPS=2048
+else
+  BW_KBPS=$(( 10#${BW_KBPS} ))
+  if [[ "${BW_KBPS}" -lt 1 ]]; then
+    echo "[WARN] IQ_BW_KBPS/--bwlimit='${BW_KBPS}' is not a positive integer; using default 2048." >&2
+    BW_KBPS=2048
+  fi
 fi
-if ! [[ "${MAX_RETRIES}" =~ ^[0-9]+$ ]] || [[ "${MAX_RETRIES}" -lt 1 ]]; then
+if ! [[ "${MAX_RETRIES}" =~ ^[0-9]+$ ]]; then
   echo "[WARN] IQ_MAX_RETRIES/--retries='${MAX_RETRIES}' is not a positive integer; using default 3." >&2
   MAX_RETRIES=3
+else
+  MAX_RETRIES=$(( 10#${MAX_RETRIES} ))
+  if [[ "${MAX_RETRIES}" -lt 1 ]]; then
+    echo "[WARN] IQ_MAX_RETRIES/--retries='${MAX_RETRIES}' is not a positive integer; using default 3." >&2
+    MAX_RETRIES=3
+  fi
 fi
 
 # Open log FD (3) once after a symlink check.  All writes go via this FD so
