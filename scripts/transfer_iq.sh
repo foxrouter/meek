@@ -95,19 +95,24 @@ if [[ -n "${DB_DEST}" ]]; then
   # as host="host", path=":module/path" by our remote-detection logic, causing
   # a bogus ssh cleanup target and a false sync failure.  Daemon destinations
   # are not supported; require the standard [user@]host:/path form.
-  # IPv6 bracket addresses (user@[::1]:/path) legitimately contain :: inside
-  # [...]; allow those by checking that the text after the LAST '[' before the
-  # first '::' contains no ']' — meaning the bracket is still open at the point
-  # where '::' appears (so the '::' is inside the IPv6 bracket section).
+  # IPv6 bracket addresses (user@[::1]:/path) contain :: inside [...] and are
+  # allowed; :: in the path portion of a remote destination (e.g.
+  # user@host:/var/lib/db::backup.sqlite) is also valid and must not be
+  # rejected.  Strategy: only check the host segment (everything before the
+  # first '/') for ::, after stripping any IPv6 bracket content.
   if [[ "${DB_DEST}" == *::* ]]; then
-    _before_dcolon="${DB_DEST%%::*}"
-    _after_last_open="${_before_dcolon##*\[}"
-    if ! { [[ "${_before_dcolon}" == *\[* ]] && [[ "${_after_last_open}" != *\]* ]]; }; then
+    _before_slash="${DB_DEST%%/*}"
+    if [[ "${_before_slash}" == *\[*\]* ]]; then
+      _check="${_before_slash%%\[*}${_before_slash##*\]}"
+    else
+      _check="${_before_slash}"
+    fi
+    if [[ "${_check}" == *::* ]]; then
       echo "[ERROR] DB_DEST '${DB_DEST}' uses rsync-daemon syntax (::) which is not supported." >&2
       echo "  Use the standard [user@]host:/path form instead." >&2
       exit 1
     fi
-    unset _before_dcolon _after_last_open
+    unset _before_slash _check
   fi
   # Reject remote destinations with an empty path component (e.g. user@host:).
   # rsync would write the snapshot into the remote home directory (not a named
@@ -201,10 +206,11 @@ log() {
   fi
 }
 
-# Run a command piping stdout+stderr to the transfer log (FD 3).
-# Uses a read loop instead of tee so a broken/full log (FD 3) never delivers
-# SIGPIPE to the command; FD 3 write failures are silently ignored and the
-# exit code reflects only the command's outcome.
+# Run a command, streaming stdout+stderr to both the terminal and the transfer
+# log (FD 3). A read loop is used rather than tee so that write errors to
+# FD 3 (e.g. disk full after the log was opened) never affect the command's
+# exit code; FD 3 write failures are silently ignored and the returned status
+# always reflects only the command's outcome.
 run_logged() {
   local cmd_rc _rl_line
   set +o pipefail
