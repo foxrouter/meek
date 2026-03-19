@@ -20,7 +20,7 @@
 #   IQ_TRANSFER_LOG Path to append transfer log lines (default /var/log/iq_transfer.log).
 #   IQ_WATCH        Set to 1 to enable inotifywait watcher mode.
 #   DB_SOURCE       Local path to the SQLite DB to sync (default /var/lib/rf-adapt-intel/rf_adapt_intel.db).
-#   DB_DEST         rsync destination for the DB, e.g. rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db
+#   DB_DEST         rsync destination for the DB, e.g. rf_worker@brian_host:/var/lib/rf-adapt-intel/rf_adapt_intel.db
 #                   If unset, DB sync is skipped.
 #   DB_SYNC_INTERVAL  Minimum seconds between DB syncs in watch mode (default 60).
 set -euo pipefail
@@ -82,13 +82,13 @@ done
 
 if [[ -z "${DEST}" ]]; then
   echo "[ERROR] Destination not set. Use --dest or IQ_DEST env var." >&2
-  echo "  Example: IQ_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/incoming/" >&2
+  echo "  Example: IQ_DEST=rf_worker@brian_host:/var/lib/rf-adapt-intel/incoming/" >&2
   exit 1
 fi
 if [[ -n "${DB_DEST}" ]]; then
   if [[ "${DB_DEST}" == */ ]]; then
     echo "[ERROR] DB_DEST must be a file path, not a directory (trailing '/' not allowed)." >&2
-    echo "  Example: DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
+    echo "  Example: DB_DEST=rf_worker@brian_host:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
     exit 1
   fi
   # Reject rsync-daemon syntax (host::module/path): the double-colon is parsed
