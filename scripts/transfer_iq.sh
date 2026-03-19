@@ -194,8 +194,8 @@ run_logged() {
   local cmd_rc
   set +o pipefail
   "$@" 2>&1 | while IFS= read -r _rl_line || [[ -n "${_rl_line}" ]]; do
-    echo "${_rl_line}"
-    echo "${_rl_line}" >&3 2>/dev/null || true
+    printf '%s\n' "${_rl_line}"
+    printf '%s\n' "${_rl_line}" >&3 2>/dev/null || true
   done
   cmd_rc="${PIPESTATUS[0]}"
   set -o pipefail
@@ -349,12 +349,18 @@ sync_db() {
       else
         # mktemp creates files with mode 0600; copy source DB permissions so
         # rsync's -a doesn't propagate restrictive permissions to the destination
-        # and break reads by other users on Brian.  Fall back to a safe explicit
-        # mode (0644) if --reference is unavailable (non-GNU chmod) or fails.
+        # and break reads by other users on Brian.  Fall back to stat-derived
+        # source mode if --reference is unavailable (non-GNU chmod).
         if ! chmod --reference="${DB_SOURCE}" "${snap_file}" 2>/dev/null; then
-          log "WARN chmod --reference failed for snapshot; applying mode 0644"
-          if ! chmod 0644 "${snap_file}" 2>/dev/null; then
-            log "WARN chmod 0644 also failed; snapshot may be at mode 0600 on destination"
+          local _src_mode
+          _src_mode="$(stat -c '%a' "${DB_SOURCE}" 2>/dev/null)"
+          if [[ -n "${_src_mode}" ]]; then
+            log "WARN chmod --reference failed; applying source mode ${_src_mode} from stat"
+            if ! chmod "${_src_mode}" "${snap_file}" 2>/dev/null; then
+              log "WARN chmod ${_src_mode} also failed; snapshot may reach destination at mode 0600"
+            fi
+          else
+            log "WARN chmod --reference failed and stat could not read source mode; snapshot may reach destination at mode 0600"
           fi
         fi
       fi
