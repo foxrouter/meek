@@ -414,7 +414,8 @@ DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db \
   bash scripts/transfer_iq.sh
 
 # Continuous watcher: transfer new files as they arrive (requires inotify-tools)
-# DB is synced to Brian periodically (at most once every DB_SYNC_INTERVAL seconds)
+# After new IQ files are transferred, the DB is synced to Brian, but no more often than once
+# every DB_SYNC_INTERVAL seconds
 IQ_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/incoming/ \
 DB_DEST=rf_worker@<brian_host>:/var/lib/rf-adapt-intel/rf_adapt_intel.db \
   bash scripts/transfer_iq.sh --watch
