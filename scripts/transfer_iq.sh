@@ -38,6 +38,18 @@ DRY_RUN=false
 DB_SOURCE="${DB_SOURCE:-/var/lib/rf-adapt-intel/rf_adapt_intel.db}"
 DB_DEST="${DB_DEST:-}"
 DB_SYNC_INTERVAL="${DB_SYNC_INTERVAL:-60}"
+
+# Reject remote DB_DEST values that rely on remote shell expansion (e.g. ~ or $VAR),
+# since rsync would expand them but the ssh-based WAL/SHM cleanup uses single-quoted
+# paths via _posix_sq and would not. Require an absolute path on the remote host.
+if [[ -n "${DB_DEST}" && "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
+  db_dest_path_part="${DB_DEST#*:}"
+  if [[ "${db_dest_path_part}" == ~* || "${db_dest_path_part}" == *'$'* ]]; then
+    printf '%s\n' "ERROR: DB_DEST must not use '~' or '\$VAR' expansions in the remote path." >&2
+    printf '%s\n' "       Use an absolute path on the remote host, e.g. user@host:/var/lib/rf-adapt-intel/rf_adapt_intel.db" >&2
+    exit 1
+  fi
+fi
 # Validate DB_SYNC_INTERVAL is a non-negative integer; fall back to default if not.
 if ! [[ "${DB_SYNC_INTERVAL}" =~ ^[0-9]+$ ]]; then
   echo "[WARN] DB_SYNC_INTERVAL='${DB_SYNC_INTERVAL}' is not a non-negative integer; using default 60." >&2
