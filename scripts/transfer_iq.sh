@@ -8,7 +8,7 @@
 #
 # Usage:
 #   bash scripts/transfer_iq.sh [--source <dir>] [--dest <user@host:path>]
-#                                [--db-source <file>] [--db-dest <user@host:file>]
+#                                [--db-source <file>] [--db-dest <user@host:file>|<path>]
 #                                [--bwlimit <kbps>] [--retries <n>]
 #                                [--watch] [--dry-run]
 #
