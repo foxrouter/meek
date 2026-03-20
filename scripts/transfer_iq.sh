@@ -51,6 +51,36 @@ if [[ -n "${DB_DEST}" && "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
   fi
 fi
 # Validate DB_SYNC_INTERVAL is a non-negative integer; fall back to default if not.
+
+# Parse a DB destination string into:
+#   - is_remote: "true" if the destination is remote ([user@]host:/path or IPv6 bracket form)
+#   - ssh_host: host (with optional user@) suitable for ssh
+#   - dest_path: path component on the remote host or local filesystem
+_parse_db_dest() {
+  local dest="$1"
+  local is_remote=false
+  local ssh_host=""
+  local dest_path=""
+
+  # IPv6 bracket form: [user@][addr]:/path. A colon that belongs to an IPv6
+  # address is inside [...], so check this first.
+  if [[ "${dest}" =~ ^([^/@]*@)?\[([^]]*)\]:(.*)$ ]]; then
+    # ssh expects the bare address (no brackets), so strip them here.
+    ssh_host="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+    dest_path="${BASH_REMATCH[3]}"
+    is_remote=true
+  elif [[ "${dest}" == *:* && "${dest%%:*}" != */* ]]; then
+    # Standard form: [user@]hostname:/path (colon present, no slash before it).
+    ssh_host="${dest%%:*}"
+    dest_path="${dest#*:}"
+    is_remote=true
+  else
+    # Local path.
+    dest_path="${dest}"
+  fi
+
+  printf '%s\n%s\n%s\n' "${is_remote}" "${ssh_host}" "${dest_path}"
+}
 if ! [[ "${DB_SYNC_INTERVAL}" =~ ^[0-9]+$ ]]; then
   echo "[WARN] DB_SYNC_INTERVAL='${DB_SYNC_INTERVAL}' is not a non-negative integer; using default 60." >&2
   DB_SYNC_INTERVAL=60
@@ -430,24 +460,10 @@ sync_db() {
       # the full transfer again (including cleanup) rather than reporting success
       # with stale sidecars still in place.
       if $ok; then
-        # Determine whether DB_DEST is remote.  Support both the standard
-        # [user@]host:/path form and the IPv6 bracket form [user@][addr]:/path.
-        # A colon that belongs to an IPv6 address is inside [...], so we check
-        # for the bracket form first to avoid splitting on the wrong colon.
-        local _db_dest_host _db_dest_path _is_remote=false
-        if [[ "${DB_DEST}" =~ ^([^/@]*@)?\[([^]]*)\]:(.*)$ ]]; then
-          # IPv6 bracket form: [user@][addr]:/path.  ssh expects the bare
-          # address (no brackets), so strip them here for the ssh invocation.
-          _db_dest_host="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
-          _db_dest_path="${BASH_REMATCH[3]}"
-          _is_remote=true
-        elif [[ "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
-          # Standard form: [user@]hostname:/path (colon present, no slash before it)
-          _db_dest_host="${DB_DEST%%:*}"
-          _db_dest_path="${DB_DEST#*:}"
-          _is_remote=true
-        fi
-        if $_is_remote; then
+        # Parse DB_DEST once and reuse the result for remote/local WAL/SHM cleanup.
+        local _db_is_remote _db_dest_host _db_dest_path
+        read -r _db_is_remote _db_dest_host _db_dest_path < <(_parse_db_dest "${DB_DEST}")
+        if [[ "${_db_is_remote}" == true ]]; then
           # Use POSIX-portable single-quote escaping (not printf %q, which can
           # emit bash-specific $'...' syntax that fails on remote /bin/sh).
           local _wal_q _shm_q _ssh_err
