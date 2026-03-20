@@ -151,13 +151,19 @@ if [[ -n "${DB_DEST}" ]]; then
       echo "  Use the standard [user@]host:/path form instead." >&2
       exit 1
     fi
-    # Normal host: [user@]host::module/path  -> reject.
-    # This still allows paths that contain '::' after the initial ':' such as
-    # user@host:/var/lib/db::backup.sqlite.
-    if [[ "${DB_DEST}" =~ ^([^@:]+@)?[^[:space:]@:]+:: ]]; then
-      echo "[ERROR] DB_DEST '${DB_DEST}' uses rsync-daemon syntax (::) which is not supported." >&2
-      echo "  Use the standard [user@]host:/path form instead." >&2
-      exit 1
+    # Non-bracket remote: reject only true rsync-daemon forms [user@]host::module/path.
+    # This still allows:
+    #   - Local paths that contain '::' (they have '/' before the first ':'),
+    #   - Remote paths where '::' appears only after the first ':' separator,
+    #     e.g. user@host:/var/lib/db::backup.sqlite.
+    if [[ "${DB_DEST}" == *:* && "${DB_DEST%%:*}" != */* ]]; then
+      __db_dest_host="${DB_DEST%%:*}"
+      __db_dest_rest="${DB_DEST#*:}"
+      if [[ "${__db_dest_rest}" == :* ]]; then
+        echo "[ERROR] DB_DEST '${DB_DEST}' uses rsync-daemon syntax (::) which is not supported." >&2
+        echo "  Use the standard [user@]host:/path form instead." >&2
+        exit 1
+      fi
     fi
   fi
   # Reject remote destinations with an empty path component (e.g. user@host:).
