@@ -413,9 +413,78 @@ test_fingerprint_shown_after_keyscan() {
   assert_contains "fingerprint: mentions fingerprint" "fingerprint" "${out}"
 }
 
-test_check_only_reports_but_not_fix() {
+test_ssh_dir_not_a_directory_rejected() {
   setup_env
-  # Pre-create everything correctly — check-only mode should report passes only
+  # Plant a regular file at .ssh — the script should report it as an error
+  touch "${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" 2>&1)" || rc=$?
+  teardown_env
+  assert_exit  "non-dir .ssh: exits non-zero" 1 "${rc}"
+  assert_contains "non-dir .ssh: reports unexpected file type" "not a directory" "${out}"
+  assert_contains "non-dir .ssh: reports FAIL" "[FAIL]" "${out}"
+}
+
+test_ssh_dir_not_a_directory_fix_replaces_it() {
+  setup_env
+  # Plant a regular file at .ssh — with --fix it should be replaced by a real dir
+  touch "${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" --fix 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "non-dir .ssh --fix: reports FIXED" "FIXED" "${out}"
+}
+
+test_known_hosts_not_a_file_rejected() {
+  setup_env
+  # Create .ssh dir correctly, then put a *directory* where known_hosts should be
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  mkdir -p "${ssh_dir}/known_hosts"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" 2>&1)" || rc=$?
+  teardown_env
+  assert_exit  "non-file known_hosts: exits non-zero" 1 "${rc}"
+  assert_contains "non-file known_hosts: reports not a regular file" "not a regular file" "${out}"
+  assert_contains "non-file known_hosts: reports FAIL" "[FAIL]" "${out}"
+}
+
+test_write_access_checked_in_dry_run() {
+  setup_env
+  # Make the base directory not writable and run with --dry-run; the check
+  # should still run (it's read-only) and report a failure.
+  chmod 0555 "${_TMP}/var/lib/rf-adapt-intel"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" --dry-run 2>&1)" || rc=$?
+  chmod 0755 "${_TMP}/var/lib/rf-adapt-intel" 2>/dev/null || true
+  teardown_env
+  assert_exit  "dry-run write check: exits non-zero" 1 "${rc}"
+  assert_contains "dry-run write check: detects non-writable dir" "not writable" "${out}"
+}
+
+
+test_check_only_reports_but_not_fix() {
   local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
   mkdir -p "${ssh_dir}"
   chmod 700 "${ssh_dir}"
@@ -457,6 +526,10 @@ test_exit_nonzero_when_fix_fails_for_some
 test_tofu_warning_printed_on_host_keyscan
 test_fingerprint_shown_after_keyscan
 test_check_only_reports_but_not_fix
+test_ssh_dir_not_a_directory_rejected
+test_ssh_dir_not_a_directory_fix_replaces_it
+test_known_hosts_not_a_file_rejected
+test_write_access_checked_in_dry_run
 
 echo ""
 echo "Results: ${_PASS} passed, ${_FAIL} failed."

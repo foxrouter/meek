@@ -20,7 +20,8 @@
 #                  Without this flag the script only reports (check mode).
 #   --dry-run      Report what would change without making any modifications.
 #   --host HOST    Scan HOST with ssh-keyscan and append its host key to
-#                  known_hosts (implies --fix for the known_hosts update).
+#                  known_hosts. Implies --fix (triggers full auto-repair so
+#                  the SSH directory and key pair are ready before scanning).
 #                  Can be repeated: --host h1 --host h2
 #   --key-type TYPE  Key type to generate: ed25519 (default) or rsa.
 #   --help         Show this help message.
@@ -83,8 +84,10 @@ fi
 
 SSH_KEY="${SSH_DIR}/id_${KEY_TYPE}"
 
-# When --host is given or --dry-run, we need the fix path to show what would
-# change (--dry-run + --fix together) and to update known_hosts (--host).
+# --host implies full --fix so that the .ssh directory, key pair, and
+# known_hosts are all provisioned before the keyscan runs.
+# --dry-run also enables FIX so that fix code paths are entered and print
+# "[dry-run] Would: ..." instead of performing actual changes.
 if [[ ${#SCAN_HOSTS[@]} -gt 0 ]] || $DRY_RUN; then
   FIX=true
 fi
@@ -160,10 +163,9 @@ if [[ -d "${SSH_BASE}" ]]; then
     fi
   fi
   # Verify actual write access (ownership alone is insufficient if mode bits
-  # or ACLs restrict access).
-  if $DRY_RUN; then
-    echo "  [dry-run] Would: sudo -u ${SERVICE_USER} test -w ${SSH_BASE}"
-  elif sudo -u "${SERVICE_USER}" test -w "${SSH_BASE}" 2>/dev/null; then
+  # or ACLs restrict access). This test has no side effects so it runs even
+  # in --dry-run mode; only the repair step is gated behind DRY_RUN.
+  if sudo -u "${SERVICE_USER}" test -w "${SSH_BASE}" 2>/dev/null; then
     pass "${SSH_BASE} is writable by ${SERVICE_USER}"
   else
     fail "${SSH_BASE} is not writable by ${SERVICE_USER} — check mode bits"
@@ -221,10 +223,27 @@ elif [[ -d "${SSH_DIR}" ]]; then
     fi
   fi
 else
-  fail "${SSH_DIR} does not exist"
-  if $FIX; then
-    run_fix "mkdir -p ${SSH_DIR} (mode 700, owner ${SERVICE_USER})" \
-      bash -c "mkdir -p '${SSH_DIR}' && chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_DIR}' && chmod 700 '${SSH_DIR}'"
+  # SSH_DIR doesn't exist as a symlink or a directory.  If something else is
+  # squatting on the path (regular file, device node, etc.) mkdir -p would
+  # fail with an unhelpful error.  Detect and handle it explicitly.
+  if [[ -e "${SSH_DIR}" ]]; then
+    fail "${SSH_DIR} exists but is not a directory (unexpected file type)"
+    if $FIX; then
+      # rm -f is safe here: SSH_DIR is verified not to be a symlink (-L) or
+      # directory (-d), so it is a regular file or special node that rm -f
+      # can remove without recursion.
+      run_fix "remove ${SSH_DIR} and create real directory (mode 700, owner ${SERVICE_USER})" \
+        bash -c "rm -f '${SSH_DIR}' && \
+                 mkdir -p '${SSH_DIR}' && \
+                 chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_DIR}' && \
+                 chmod 700 '${SSH_DIR}'"
+    fi
+  else
+    fail "${SSH_DIR} does not exist"
+    if $FIX; then
+      run_fix "mkdir -p ${SSH_DIR} (mode 700, owner ${SERVICE_USER})" \
+        bash -c "mkdir -p '${SSH_DIR}' && chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_DIR}' && chmod 700 '${SSH_DIR}'"
+    fi
   fi
 fi
 
@@ -233,39 +252,51 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- known_hosts ---"
-if [[ -e "${KNOWN_HOSTS}" ]]; then
-  if [[ -L "${KNOWN_HOSTS}" ]]; then
-    fail "${KNOWN_HOSTS} is a symlink — this is a security risk"
-    if $FIX; then
-      run_fix "remove symlink ${KNOWN_HOSTS} and create real file" \
-        bash -c "rm -f '${KNOWN_HOSTS}' && touch '${KNOWN_HOSTS}' && \
-                 chown '${SERVICE_USER}:${SERVICE_USER}' '${KNOWN_HOSTS}' && \
-                 chmod 600 '${KNOWN_HOSTS}'"
-    fi
+# Check -L before -f: bash's -f follows symlinks, so a symlink pointing to a
+# regular file would pass -f. Guard the symlink case first.
+if [[ -L "${KNOWN_HOSTS}" ]]; then
+  fail "${KNOWN_HOSTS} is a symlink — this is a security risk"
+  if $FIX; then
+    run_fix "remove symlink ${KNOWN_HOSTS} and create real file" \
+      bash -c "rm -f '${KNOWN_HOSTS}' && touch '${KNOWN_HOSTS}' && \
+               chown '${SERVICE_USER}:${SERVICE_USER}' '${KNOWN_HOSTS}' && \
+               chmod 600 '${KNOWN_HOSTS}'"
+  fi
+elif [[ -f "${KNOWN_HOSTS}" ]]; then
+  pass "${KNOWN_HOSTS} exists (regular file)"
+
+  kh_owner="$(stat -c '%U' "${KNOWN_HOSTS}" 2>/dev/null || echo unknown)"
+  kh_mode="$(stat -c '%a' "${KNOWN_HOSTS}" 2>/dev/null || echo unknown)"
+
+  if [[ "${kh_owner}" == "${SERVICE_USER}" ]]; then
+    pass "${KNOWN_HOSTS} owned by ${SERVICE_USER}"
   else
-    pass "${KNOWN_HOSTS} exists (regular file)"
-
-    kh_owner="$(stat -c '%U' "${KNOWN_HOSTS}" 2>/dev/null || echo unknown)"
-    kh_mode="$(stat -c '%a' "${KNOWN_HOSTS}" 2>/dev/null || echo unknown)"
-
-    if [[ "${kh_owner}" == "${SERVICE_USER}" ]]; then
-      pass "${KNOWN_HOSTS} owned by ${SERVICE_USER}"
-    else
-      fail "${KNOWN_HOSTS} owned by '${kh_owner}', expected '${SERVICE_USER}'"
-      if $FIX; then
-        run_fix "chown ${SERVICE_USER}:${SERVICE_USER} ${KNOWN_HOSTS}" \
-          chown "${SERVICE_USER}:${SERVICE_USER}" "${KNOWN_HOSTS}"
-      fi
+    fail "${KNOWN_HOSTS} owned by '${kh_owner}', expected '${SERVICE_USER}'"
+    if $FIX; then
+      run_fix "chown ${SERVICE_USER}:${SERVICE_USER} ${KNOWN_HOSTS}" \
+        chown "${SERVICE_USER}:${SERVICE_USER}" "${KNOWN_HOSTS}"
     fi
+  fi
 
-    if [[ "${kh_mode}" == "600" ]]; then
-      pass "${KNOWN_HOSTS} mode is 600"
-    else
-      fail "${KNOWN_HOSTS} mode is ${kh_mode}, expected 600"
-      if $FIX; then
-        run_fix "chmod 600 ${KNOWN_HOSTS}" chmod 600 "${KNOWN_HOSTS}"
-      fi
+  if [[ "${kh_mode}" == "600" ]]; then
+    pass "${KNOWN_HOSTS} mode is 600"
+  else
+    fail "${KNOWN_HOSTS} mode is ${kh_mode}, expected 600"
+    if $FIX; then
+      run_fix "chmod 600 ${KNOWN_HOSTS}" chmod 600 "${KNOWN_HOSTS}"
     fi
+  fi
+elif [[ -e "${KNOWN_HOSTS}" ]]; then
+  # Exists but is not a regular file (could be a directory, device node, etc.).
+  # chmod and append operations would behave unexpectedly on such a path.
+  fail "${KNOWN_HOSTS} exists but is not a regular file (directory or special file)"
+  if $FIX; then
+    # rm -rf is intentional: KNOWN_HOSTS was verified to not be a symlink
+    # or regular file, so it is a directory or special node that requires -r.
+    run_fix "remove ${KNOWN_HOSTS} and create regular file (mode 600, owner ${SERVICE_USER})" \
+      bash -c "rm -rf '${KNOWN_HOSTS}' && touch '${KNOWN_HOSTS}' && \
+               chown '${SERVICE_USER}:${SERVICE_USER}' '${KNOWN_HOSTS}' && \
+               chmod 600 '${KNOWN_HOSTS}'"
   fi
 else
   info "${KNOWN_HOSTS} does not exist yet (will be created by SSH on first connect)"

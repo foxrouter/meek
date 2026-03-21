@@ -97,7 +97,7 @@ fi
 
 # Create runtime data directories owned by rf_worker
 run sudo mkdir -p /var/lib/rf-adapt-intel/{snapshots,incoming,processed}
-run sudo chown -R rf_worker:rf_worker /var/lib/rf-adapt-intel
+run sudo chown -hR rf_worker:rf_worker /var/lib/rf-adapt-intel
 run sudo chmod 0750 /var/lib/rf-adapt-intel
 run sudo chmod 0750 /var/lib/rf-adapt-intel/snapshots
 run sudo chmod 0750 /var/lib/rf-adapt-intel/incoming
