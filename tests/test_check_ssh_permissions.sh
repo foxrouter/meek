@@ -602,6 +602,36 @@ test_ssh_pubkey_symlink_fix_replaces_it() {
   assert_contains "ssh pubkey symlink --fix: reports FIXED" "FIXED" "${out}"
 }
 
+# Regression: when .pub is a symlink, the script must NOT print the symlink
+# target's contents, even in check-only mode (script runs as root).
+test_ssh_pubkey_symlink_does_not_print_target_contents() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  local ssh_key="${ssh_dir}/id_ed25519"
+  touch "${ssh_key}"
+  chmod 600 "${ssh_key}"
+  # Create a file with a unique sentinel that must never appear in script output
+  local target_file="${_TMP}/secret_target.txt"
+  echo "UNIQUE_SECRET_MARKER_MUST_NOT_BE_PRINTED" > "${target_file}"
+  # Plant the symlink at the pubkey path pointing at the sentinel file
+  ln -s "${target_file}" "${ssh_dir}/id_ed25519.pub"
+  touch "${ssh_dir}/known_hosts"
+  chmod 600 "${ssh_dir}/known_hosts"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "pubkey symlink no-print: reports symlink failure" "symlink" "${out}"
+  assert_not_contains "pubkey symlink no-print: symlink target NOT printed" \
+    "UNIQUE_SECRET_MARKER_MUST_NOT_BE_PRINTED" "${out}"
+}
+
 # ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
@@ -635,6 +665,7 @@ test_ssh_key_symlink_rejected
 test_ssh_key_symlink_fix_replaces_it
 test_ssh_pubkey_symlink_rejected
 test_ssh_pubkey_symlink_fix_replaces_it
+test_ssh_pubkey_symlink_does_not_print_target_contents
 
 echo ""
 echo "Results: ${_PASS} passed, ${_FAIL} failed."

@@ -454,7 +454,13 @@ fi
 echo ""
 echo "--- Public key ---"
 _pub_key_file="${SSH_KEY}.pub"
-if [[ -f "${_pub_key_file}" ]]; then
+# Guard against symlinks before cat: -f follows symlinks so a symlink at the
+# pubkey path would cause the script (running as root) to print an arbitrary
+# file's contents.  Always check -L first.
+if [[ -L "${_pub_key_file}" ]]; then
+  info "Public key path ${_pub_key_file} is a symlink — skipping display."
+  info "Run with --fix to remove the symlink and regenerate the key pair."
+elif [[ -f "${_pub_key_file}" ]]; then
   info "rf_worker public key (copy to Brian's authorized_keys):"
   echo ""
   cat "${_pub_key_file}"
