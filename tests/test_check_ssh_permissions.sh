@@ -632,6 +632,41 @@ test_ssh_pubkey_symlink_does_not_print_target_contents() {
     "UNIQUE_SECRET_MARKER_MUST_NOT_BE_PRINTED" "${out}"
 }
 
+# Test that --fix exits 0 when every detected issue is successfully repaired.
+test_fix_exits_zero_when_all_fixed() {
+  setup_env
+  local rc=0
+  env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" --fix >/dev/null 2>&1 || rc=$?
+  teardown_env
+  assert_exit "fix mode: exits 0 when all issues fixed" 0 "${rc}"
+}
+
+# Test that the atomic known_hosts creation creates a real file (not a symlink).
+test_known_hosts_created_atomically() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  local kh="${ssh_dir}/known_hosts"
+  run_check --fix >/dev/null 2>&1
+  # Check before teardown removes the temp tree
+  local is_real_file=false
+  if [[ -e "${kh}" ]] && [[ ! -L "${kh}" ]]; then
+    is_real_file=true
+  fi
+  teardown_env
+  if $is_real_file; then
+    ok "atomic known_hosts: created as real file (not symlink)"
+  else
+    fail "atomic known_hosts: created as real file (not symlink)"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
@@ -666,6 +701,8 @@ test_ssh_key_symlink_fix_replaces_it
 test_ssh_pubkey_symlink_rejected
 test_ssh_pubkey_symlink_fix_replaces_it
 test_ssh_pubkey_symlink_does_not_print_target_contents
+test_fix_exits_zero_when_all_fixed
+test_known_hosts_created_atomically
 
 echo ""
 echo "Results: ${_PASS} passed, ${_FAIL} failed."

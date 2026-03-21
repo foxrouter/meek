@@ -257,10 +257,15 @@ echo "--- known_hosts ---"
 if [[ -L "${KNOWN_HOSTS}" ]]; then
   fail "${KNOWN_HOSTS} is a symlink — this is a security risk"
   if $FIX; then
+    # Atomic replace: write to a root-owned temp in the same dir (same
+    # filesystem) so mv(1) uses rename(2).  rename(2) replaces the symlink
+    # entry atomically, never following it to the target.
     run_fix "remove symlink ${KNOWN_HOSTS} and create real file" \
-      bash -c "rm -f '${KNOWN_HOSTS}' && touch '${KNOWN_HOSTS}' && \
-               chown '${SERVICE_USER}:${SERVICE_USER}' '${KNOWN_HOSTS}' && \
-               chmod 600 '${KNOWN_HOSTS}'"
+      bash -c "_tmp=\$(mktemp '${SSH_DIR}/known_hosts.XXXXXX') && \
+               trap 'rm -f \"\${_tmp}\"' EXIT && \
+               chmod 600 \"\${_tmp}\" && \
+               chown '${SERVICE_USER}:${SERVICE_USER}' \"\${_tmp}\" && \
+               mv -f \"\${_tmp}\" '${KNOWN_HOSTS}'"
   fi
 elif [[ -f "${KNOWN_HOSTS}" ]]; then
   pass "${KNOWN_HOSTS} exists (regular file)"
@@ -293,18 +298,29 @@ elif [[ -e "${KNOWN_HOSTS}" ]]; then
   if $FIX; then
     # rm -rf is intentional: KNOWN_HOSTS was verified to not be a symlink
     # or regular file, so it is a directory or special node that requires -r.
+    # After removal, use the same atomic temp-file pattern to avoid a TOCTOU
+    # window where the service user could plant a symlink before the new file
+    # is written.
     run_fix "remove ${KNOWN_HOSTS} and create regular file (mode 600, owner ${SERVICE_USER})" \
-      bash -c "rm -rf '${KNOWN_HOSTS}' && touch '${KNOWN_HOSTS}' && \
-               chown '${SERVICE_USER}:${SERVICE_USER}' '${KNOWN_HOSTS}' && \
-               chmod 600 '${KNOWN_HOSTS}'"
+      bash -c "rm -rf '${KNOWN_HOSTS}' && \
+               _tmp=\$(mktemp '${SSH_DIR}/known_hosts.XXXXXX') && \
+               trap 'rm -f \"\${_tmp}\"' EXIT && \
+               chmod 600 \"\${_tmp}\" && \
+               chown '${SERVICE_USER}:${SERVICE_USER}' \"\${_tmp}\" && \
+               mv -f \"\${_tmp}\" '${KNOWN_HOSTS}'"
   fi
 else
   info "${KNOWN_HOSTS} does not exist yet (will be created by SSH on first connect)"
   if $FIX; then
+    # Atomic replace via temp file (same dir → same filesystem → rename(2) is
+    # atomic).  This closes the TOCTOU window where the service user could
+    # plant a symlink between the earlier -L check and the write.
     run_fix "create ${KNOWN_HOSTS} (mode 600, owner ${SERVICE_USER})" \
-      bash -c "touch '${KNOWN_HOSTS}' && \
-               chown '${SERVICE_USER}:${SERVICE_USER}' '${KNOWN_HOSTS}' && \
-               chmod 600 '${KNOWN_HOSTS}'"
+      bash -c "_tmp=\$(mktemp '${SSH_DIR}/known_hosts.XXXXXX') && \
+               trap 'rm -f \"\${_tmp}\"' EXIT && \
+               chmod 600 \"\${_tmp}\" && \
+               chown '${SERVICE_USER}:${SERVICE_USER}' \"\${_tmp}\" && \
+               mv -f \"\${_tmp}\" '${KNOWN_HOSTS}'"
   fi
 fi
 
@@ -493,17 +509,24 @@ echo ""
 if [[ ${_FAIL} -eq 0 ]]; then
   echo "All checks passed."
 else
-  if $DRY_RUN && [[ ${_FIXED} -gt 0 ]]; then
-    echo "Would fix ${_FIXED} issue(s) — re-run without --dry-run to apply."
-  elif $FIX && [[ ${_FIXED} -gt 0 ]]; then
-    echo "${_FIXED} issue(s) fixed."
-  fi
+  _unfixed=$(( _FAIL - _FIXED ))
   if $DRY_RUN; then
+    if [[ ${_FIXED} -gt 0 ]]; then
+      echo "Would fix ${_FIXED} issue(s) — re-run without --dry-run to apply."
+    fi
     echo "${_FAIL} issue(s) detected. Re-run without --dry-run (and with --fix) to repair." >&2
+    exit 1
   elif $FIX; then
-    echo "${_FAIL} issue(s) could not be fixed automatically — review output above." >&2
+    if [[ ${_FIXED} -gt 0 ]]; then
+      echo "${_FIXED} issue(s) fixed."
+    fi
+    if [[ ${_unfixed} -gt 0 ]]; then
+      echo "${_unfixed} issue(s) could not be fixed automatically — review output above." >&2
+      exit 1
+    fi
+    # All detected issues were successfully repaired.
   else
     echo "${_FAIL} issue(s) detected. Re-run with --fix to repair automatically." >&2
+    exit 1
   fi
-  exit 1
 fi
