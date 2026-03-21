@@ -98,11 +98,16 @@ fi
 _PASS=0
 _FAIL=0
 _FIXED=0
+# _UNFIXED tracks failures that have not yet been repaired.  It is incremented
+# by fail() and decremented by fixed() / run_fix().  Unlike the derived
+# expression (_FAIL - _FIXED), it is never affected by optional actions (e.g.
+# host-key additions) that do not correspond to a previously recorded [FAIL].
+_UNFIXED=0
 
-pass() { echo "  [PASS] $*"; _PASS=$(( _PASS + 1 )); }
-fail() { echo "  [FAIL] $*" >&2; _FAIL=$(( _FAIL + 1 )); }
-fixed() { echo "  [FIXED] $*"; _FIXED=$(( _FIXED + 1 )); }
-info() { echo "  [INFO] $*"; }
+pass()  { echo "  [PASS] $*"; _PASS=$(( _PASS + 1 )); }
+fail()  { echo "  [FAIL] $*" >&2; _FAIL=$(( _FAIL + 1 )); _UNFIXED=$(( _UNFIXED + 1 )); }
+fixed() { echo "  [FIXED] $*"; _FIXED=$(( _FIXED + 1 )); _UNFIXED=$(( _UNFIXED - 1 )); }
+info()  { echo "  [INFO] $*"; }
 
 # run_fix <description> <cmd...>
 # If --dry-run: print what would happen.  If --fix: run and report.
@@ -111,6 +116,7 @@ run_fix() {
   if $DRY_RUN; then
     echo "  [dry-run] Would: ${desc}"
     _FIXED=$(( _FIXED + 1 ))
+    _UNFIXED=$(( _UNFIXED - 1 ))
   else
     "$@"
     fixed "${desc}"
@@ -412,6 +418,7 @@ else
     if $DRY_RUN; then
       echo "  [dry-run] Would: generate ${KEY_TYPE} key pair as ${SERVICE_USER}"
       _FIXED=$(( _FIXED + 1 ))
+      _UNFIXED=$(( _UNFIXED - 1 ))
     else
       sudo -u "${SERVICE_USER}" \
         HOME="${SSH_BASE}" \
@@ -442,8 +449,8 @@ if [[ ${#SCAN_HOSTS[@]} -gt 0 ]]; then
       if $DRY_RUN; then
         echo "  [dry-run] Would: ssh-keyscan -H ${_scan_host} >> ${KNOWN_HOSTS}"
         # Do not increment _FIXED here: host-key additions are requested actions,
-        # not repairs of recorded [FAIL] items; inflating _FIXED would skew the
-        # _unfixed counter and could mask genuine unresolved failures.
+        # not repairs of recorded [FAIL] items; incrementing _FIXED would also
+        # decrement _UNFIXED and could mask genuine unresolved failures.
         continue
       fi
       # Ensure known_hosts exists atomically before scanning.  Use the same
@@ -487,8 +494,8 @@ if [[ ${#SCAN_HOSTS[@]} -gt 0 ]]; then
           mv -f "${_tmp_kh}" "${KNOWN_HOSTS}"
           trap - EXIT  # temp file renamed; no longer needs cleanup
           # Use info() not fixed(): adding a host key is a requested action,
-          # not a repair of a recorded [FAIL]; counting it in _FIXED would
-          # deflate _unfixed and could mask genuine unresolved failures.
+          # not a repair of a recorded [FAIL]; calling fixed() would decrement
+          # _UNFIXED and could mask genuine unresolved failures.
           info "added host key for '${_scan_host}' to ${KNOWN_HOSTS}"
           # Display the fingerprint of the just-added key so the operator can
           # verify it out-of-band.  Feed only the newly-scanned lines (not the
@@ -550,7 +557,9 @@ echo ""
 if [[ ${_FAIL} -eq 0 ]]; then
   echo "All checks passed."
 else
-  _unfixed=$(( _FAIL - _FIXED ))
+  # Use _UNFIXED directly: it is decremented only when a previously-recorded
+  # [FAIL] is successfully repaired, so it can never be affected by optional
+  # actions (e.g. host-key additions) that do not correspond to a [FAIL].
   if $DRY_RUN; then
     if [[ ${_FIXED} -gt 0 ]]; then
       echo "Would fix ${_FIXED} issue(s) — re-run without --dry-run to apply."
@@ -561,8 +570,8 @@ else
     if [[ ${_FIXED} -gt 0 ]]; then
       echo "${_FIXED} issue(s) fixed."
     fi
-    if [[ ${_unfixed} -gt 0 ]]; then
-      echo "${_unfixed} issue(s) could not be fixed automatically — review output above." >&2
+    if [[ ${_UNFIXED} -gt 0 ]]; then
+      echo "${_UNFIXED} issue(s) could not be fixed automatically — review output above." >&2
       exit 1
     fi
     # All detected issues were successfully repaired.
