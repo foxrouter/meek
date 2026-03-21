@@ -119,10 +119,16 @@ if ! $DRY_RUN && [[ -L "${_SSH_DIR}" ]]; then
   echo "          sudo rm -f '${_SSH_DIR}'" >&2
   exit 1
 fi
+if ! $DRY_RUN && [[ -e "${_SSH_DIR}" && ! -d "${_SSH_DIR}" ]]; then
+  echo "[ERROR] ${_SSH_DIR} exists but is not a directory (unexpected file type)." >&2
+  echo "        Remove it manually and re-run deploy.sh:" >&2
+  echo "          sudo rm -f '${_SSH_DIR}'" >&2
+  exit 1
+fi
 # Use `install -d` which sets ownership and mode in a single command,
 # reducing the window between creation and permission-setting compared to
-# separate mkdir/chown/chmod calls.  The symlink guard above ensures this
-# path does not follow a symlink into an unintended location.
+# separate mkdir/chown/chmod calls.  The guards above ensure this path is
+# not a symlink or an unexpected non-directory file.
 run sudo install -d -m 0700 -o rf_worker -g rf_worker "${_SSH_DIR}"
 # Generate an Ed25519 key pair for rf_worker if one does not already exist.
 if ! $DRY_RUN; then
