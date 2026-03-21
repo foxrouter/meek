@@ -441,7 +441,9 @@ if [[ ${#SCAN_HOSTS[@]} -gt 0 ]]; then
       fi
       if $DRY_RUN; then
         echo "  [dry-run] Would: ssh-keyscan -H ${_scan_host} >> ${KNOWN_HOSTS}"
-        _FIXED=$(( _FIXED + 1 ))
+        # Do not increment _FIXED here: host-key additions are requested actions,
+        # not repairs of recorded [FAIL] items; inflating _FIXED would skew the
+        # _unfixed counter and could mask genuine unresolved failures.
         continue
       fi
       # Ensure known_hosts exists atomically before scanning.  Use the same
@@ -484,7 +486,10 @@ if [[ ${#SCAN_HOSTS[@]} -gt 0 ]]; then
           chown "${SERVICE_USER}:${SERVICE_USER}" "${_tmp_kh}"
           mv -f "${_tmp_kh}" "${KNOWN_HOSTS}"
           trap - EXIT  # temp file renamed; no longer needs cleanup
-          fixed "added host key for '${_scan_host}' to ${KNOWN_HOSTS}"
+          # Use info() not fixed(): adding a host key is a requested action,
+          # not a repair of a recorded [FAIL]; counting it in _FIXED would
+          # deflate _unfixed and could mask genuine unresolved failures.
+          info "added host key for '${_scan_host}' to ${KNOWN_HOSTS}"
           # Display the fingerprint of the just-added key so the operator can
           # verify it out-of-band.  Feed only the newly-scanned lines (not the
           # entire known_hosts file) to ssh-keygen -l to avoid showing

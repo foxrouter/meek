@@ -25,7 +25,7 @@ _FAIL=0
 ok() {
   local desc="$1"
   _PASS=$(( _PASS + 1 ))
-  $VERBOSE && echo "  [PASS] ${desc}"
+  $VERBOSE && echo "  [PASS] ${desc}" || true
 }
 
 fail() {
@@ -33,7 +33,7 @@ fail() {
   local detail="${2:-}"
   _FAIL=$(( _FAIL + 1 ))
   echo "  [FAIL] ${desc}" >&2
-  [[ -n "$detail" ]] && echo "         ${detail}" >&2
+  [[ -n "$detail" ]] && echo "         ${detail}" >&2 || true
 }
 
 assert_contains() {
@@ -632,6 +632,32 @@ test_ssh_pubkey_symlink_does_not_print_target_contents() {
     "UNIQUE_SECRET_MARKER_MUST_NOT_BE_PRINTED" "${out}"
 }
 
+# Regression: --fix --host must exit non-zero when ssh-keyscan fails.
+# This guards against _FIXED over-inflation masking the scan failure:
+# host-key additions are not repairs of [FAIL] items, so a keyscan failure
+# must not be hidden by a previously-incremented _FIXED counter.
+test_keyscan_failure_exits_nonzero() {
+  setup_env
+  # Override the stub ssh-keyscan with one that returns nothing (simulates
+  # unreachable host / network failure).
+  cat > "${_STUB_DIR}/ssh-keyscan" <<'EOF'
+#!/usr/bin/env bash
+# Simulate an unreachable host: print nothing and exit non-zero.
+exit 1
+EOF
+  chmod +x "${_STUB_DIR}/ssh-keyscan"
+  local rc=0
+  env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" --fix --host unreachable.example.invalid \
+    >/dev/null 2>&1 || rc=$?
+  teardown_env
+  assert_exit "keyscan failure: --fix --host exits 1 when scan fails" 1 "${rc}"
+}
+
 # Test that --fix exits 0 when every detected issue is successfully repaired.
 test_fix_exits_zero_when_all_fixed() {
   setup_env
@@ -701,6 +727,7 @@ test_ssh_key_symlink_fix_replaces_it
 test_ssh_pubkey_symlink_rejected
 test_ssh_pubkey_symlink_fix_replaces_it
 test_ssh_pubkey_symlink_does_not_print_target_contents
+test_keyscan_failure_exits_nonzero
 test_fix_exits_zero_when_all_fixed
 test_known_hosts_created_atomically
 
