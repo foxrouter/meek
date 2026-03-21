@@ -155,8 +155,24 @@ EOF
 echo "testhost"
 EOF
 
+  # stub: chown — no-op; real chown requires root to change ownership,
+  # which is unavailable on CI runners.
+  cat > "${_STUB_DIR}/chown" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+
+  # stub: chmod — no-op; avoids failures when the script tries to chmod
+  # paths that may have been created without root permissions in tests.
+  # Pre-existing test fixtures use the real chmod (before PATH override).
+  cat > "${_STUB_DIR}/chmod" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+
   chmod +x "${_STUB_DIR}/id" "${_STUB_DIR}/ssh-keygen" "${_STUB_DIR}/ssh-keyscan" \
-            "${_STUB_DIR}/sudo" "${_STUB_DIR}/hostname"
+            "${_STUB_DIR}/sudo" "${_STUB_DIR}/hostname" \
+            "${_STUB_DIR}/chown" "${_STUB_DIR}/chmod"
 
   # Create the fake application data directory under _TMP
   mkdir -p "${_TMP}/var/lib/rf-adapt-intel"
