@@ -359,10 +359,12 @@ elif [[ -f "${SSH_KEY}" ]]; then
     if $FIX; then
       run_fix "remove symlink ${SSH_KEY}.pub and re-extract public key" \
         bash -c "rm -f '${SSH_KEY}.pub' && \
+                 tmp_pub=\$(mktemp '${SSH_KEY}.pub.XXXXXX') && \
                  sudo -u '${SERVICE_USER}' HOME='${SSH_BASE}' \
-                   ssh-keygen -y -f '${SSH_KEY}' > '${SSH_KEY}.pub' && \
-                 chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_KEY}.pub' && \
-                 chmod 644 '${SSH_KEY}.pub'"
+                   ssh-keygen -y -f '${SSH_KEY}' > \"\${tmp_pub}\" && \
+                 chown '${SERVICE_USER}:${SERVICE_USER}' \"\${tmp_pub}\" && \
+                 chmod 644 \"\${tmp_pub}\" && \
+                 mv -f \"\${tmp_pub}\" '${SSH_KEY}.pub'"
     fi
   elif [[ -f "${SSH_KEY}.pub" ]]; then
     pass "${SSH_KEY}.pub exists (regular file)"
