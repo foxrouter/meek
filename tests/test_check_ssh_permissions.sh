@@ -78,8 +78,8 @@ _TMP=""
 _STUB_DIR=""
 
 # Set up a fake root environment with stub commands.
-# The script is run via `env EUID=0 ...` (we override EUID) so the root
-# check passes without real root.
+# The script bypasses the root guard by setting `_RF_TEST_NO_ROOT=1`, so
+# tests can run without real root privileges.
 setup_env() {
   _TMP="$(mktemp -d /tmp/rf-ssh-perm-test.XXXXXX)"
   _STUB_DIR="$(mktemp -d /tmp/rf-ssh-perm-stubs.XXXXXX)"
