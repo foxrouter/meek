@@ -311,12 +311,14 @@ elif [[ -e "${KNOWN_HOSTS}" ]]; then
   fi
 else
   info "${KNOWN_HOSTS} does not exist yet (will be created by SSH on first connect)"
-  if $FIX; then
+  if $FIX && ! $DRY_RUN; then
     # This is an optional hardening step, not a fix for a recorded failure, so
     # intentionally avoid run_fix here to keep the failure/fix counters accurate.
     # Atomic replace via temp file (same dir → same filesystem → rename(2) is
     # atomic).  This closes the TOCTOU window where the service user could
     # plant a symlink between the earlier -L check and the write.
+    # DRY_RUN is excluded: .ssh dir isn't created in dry-run mode so mktemp
+    # would fail on the non-existent parent directory.
     bash -c "_tmp=\$(mktemp '${SSH_DIR}/known_hosts.XXXXXX') && \
              trap 'rm -f \"\${_tmp}\"' EXIT && \
              chmod 600 \"\${_tmp}\" && \
@@ -442,11 +444,22 @@ if [[ ${#SCAN_HOSTS[@]} -gt 0 ]]; then
         _FIXED=$(( _FIXED + 1 ))
         continue
       fi
-      # Ensure known_hosts exists and is owned correctly before appending.
-      if [[ ! -f "${KNOWN_HOSTS}" ]]; then
-        touch "${KNOWN_HOSTS}"
-        chown "${SERVICE_USER}:${SERVICE_USER}" "${KNOWN_HOSTS}"
-        chmod 600 "${KNOWN_HOSTS}"
+      # Ensure known_hosts exists atomically before scanning.  Use the same
+      # mktemp + rename pattern as the main check above to close the TOCTOU
+      # window where SERVICE_USER could plant a symlink between the earlier -L
+      # guard and the creation step.
+      if [[ ! -e "${KNOWN_HOSTS}" ]]; then
+        bash -c "_tmp=\$(mktemp '${SSH_DIR}/known_hosts.XXXXXX') && \
+                 trap 'rm -f \"\${_tmp}\"' EXIT && \
+                 chmod 600 \"\${_tmp}\" && \
+                 chown '${SERVICE_USER}:${SERVICE_USER}' \"\${_tmp}\" && \
+                 mv -f \"\${_tmp}\" '${KNOWN_HOSTS}'"
+      fi
+      # Re-check after creation: guard against TOCTOU where SERVICE_USER could
+      # have planted a symlink between the check above and now.
+      if [[ -L "${KNOWN_HOSTS}" ]]; then
+        fail "TOCTOU: ${KNOWN_HOSTS} is a symlink; aborting keyscan for ${_scan_host}"
+        continue
       fi
       # Avoid duplicate entries: only add if host key not already present.
       if ssh-keygen -F "${_scan_host}" -f "${KNOWN_HOSTS}" &>/dev/null; then
@@ -456,9 +469,21 @@ if [[ ${#SCAN_HOSTS[@]} -gt 0 ]]; then
         local_scan=""
         if local_scan="$(ssh-keyscan -H -T 10 -- "${_scan_host}" 2>/dev/null)" && \
            [[ -n "${local_scan}" ]]; then
-          printf '%s\n' "${local_scan}" >> "${KNOWN_HOSTS}"
-          chown "${SERVICE_USER}:${SERVICE_USER}" "${KNOWN_HOSTS}"
-          chmod 600 "${KNOWN_HOSTS}"
+          # Atomic append via temp file + rename(2).  This avoids a TOCTOU
+          # window where SERVICE_USER could replace ${KNOWN_HOSTS} with a
+          # symlink between the -L guard above and the append.  mv -f uses
+          # rename(2), which atomically replaces the directory entry without
+          # following symlinks, preventing privilege escalation even if a
+          # symlink is raced in.
+          _tmp_kh="$(mktemp "${SSH_DIR}/known_hosts.XXXXXX")"
+          # Cleanup trap: remove the temp file if any step below fails
+          # before mv completes (set -e exits the script on error).
+          trap 'rm -f "${_tmp_kh}"' EXIT
+          { cat "${KNOWN_HOSTS}" 2>/dev/null; printf '%s\n' "${local_scan}"; } > "${_tmp_kh}"
+          chmod 600 "${_tmp_kh}"
+          chown "${SERVICE_USER}:${SERVICE_USER}" "${_tmp_kh}"
+          mv -f "${_tmp_kh}" "${KNOWN_HOSTS}"
+          trap - EXIT  # temp file renamed; no longer needs cleanup
           fixed "added host key for '${_scan_host}' to ${KNOWN_HOSTS}"
           # Display the fingerprint of the just-added key so the operator can
           # verify it out-of-band.  Feed only the newly-scanned lines (not the
