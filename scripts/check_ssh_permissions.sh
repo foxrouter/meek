@@ -115,8 +115,11 @@ run_fix() {
   local desc="$1"; shift
   if $DRY_RUN; then
     echo "  [dry-run] Would: ${desc}"
+    # Only increment _FIXED (tracks 'would-fix' count shown in dry-run summary).
+    # Do NOT decrement _UNFIXED: no actual repair occurred, and mutating _UNFIXED
+    # in dry-run makes counter semantics inconsistent with the non-dry-run path
+    # (where _UNFIXED is only decremented after a repair actually succeeds).
     _FIXED=$(( _FIXED + 1 ))
-    _UNFIXED=$(( _UNFIXED - 1 ))
   else
     "$@"
     fixed "${desc}"
@@ -431,16 +434,20 @@ elif [[ -e "${SSH_KEY}" ]]; then
 else
   fail "${SSH_KEY} does not exist — key pair missing"
   if $FIX; then
-    if [[ ! -d "${SSH_DIR}" ]]; then
-      run_fix "mkdir -p ${SSH_DIR} before key generation" \
-        bash -c "mkdir -p '${SSH_DIR}' && \
-                 chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_DIR}' && \
-                 chmod 700 '${SSH_DIR}'"
+    # Ensure SSH_DIR exists before running ssh-keygen.  This is a prerequisite
+    # step, not a repair of the recorded [FAIL] above, so it must NOT go through
+    # run_fix() (which would decrement _UNFIXED and underflow the counter).
+    # Check 3 already handles SSH_DIR creation; this is a safety net only.
+    if [[ ! -d "${SSH_DIR}" ]] && ! $DRY_RUN; then
+      bash -c "mkdir -p '${SSH_DIR}' && \
+               chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_DIR}' && \
+               chmod 700 '${SSH_DIR}'"
     fi
     if $DRY_RUN; then
       echo "  [dry-run] Would: generate ${KEY_TYPE} key pair as ${SERVICE_USER}"
+      # Only increment _FIXED (dry-run 'would-fix' count); do NOT decrement
+      # _UNFIXED because no actual repair occurred.
       _FIXED=$(( _FIXED + 1 ))
-      _UNFIXED=$(( _UNFIXED - 1 ))
     else
       sudo -u "${SERVICE_USER}" \
         HOME="${SSH_BASE}" \

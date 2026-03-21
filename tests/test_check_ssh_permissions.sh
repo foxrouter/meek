@@ -40,11 +40,11 @@ assert_contains() {
   local desc="$1"
   local needle="$2"
   local haystack="$3"
-  if echo "${haystack}" | grep -qF -- "${needle}"; then
+  if printf '%s\n' "${haystack}" | grep -qF -- "${needle}"; then
     ok "${desc}"
   else
     fail "${desc}" "Expected to find: '${needle}'"
-    $VERBOSE && echo "--- actual output ---" && echo "${haystack}" && echo "---"
+    $VERBOSE && echo "--- actual output ---" && printf '%s\n' "${haystack}" && echo "---"
   fi
 }
 
@@ -52,11 +52,11 @@ assert_not_contains() {
   local desc="$1"
   local needle="$2"
   local haystack="$3"
-  if ! echo "${haystack}" | grep -qF -- "${needle}"; then
+  if ! printf '%s\n' "${haystack}" | grep -qF -- "${needle}"; then
     ok "${desc}"
   else
     fail "${desc}" "Should NOT contain: '${needle}'"
-    $VERBOSE && echo "--- actual output ---" && echo "${haystack}" && echo "---"
+    $VERBOSE && echo "--- actual output ---" && printf '%s\n' "${haystack}" && echo "---"
   fi
 }
 
