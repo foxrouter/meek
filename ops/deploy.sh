@@ -132,12 +132,25 @@ fi
 run sudo install -d -m 0700 -o rf_worker -g rf_worker "${_SSH_DIR}"
 # Generate an Ed25519 key pair for rf_worker if one does not already exist.
 if ! $DRY_RUN; then
-  if [[ ! -f "${_SSH_DIR}/id_ed25519" ]]; then
+  priv_key="${_SSH_DIR}/id_ed25519"
+  # Refuse to use a symlink or non-regular file for the private key path to
+  # avoid an attacker-controlled target being treated as an existing key.
+  if sudo test -L "${priv_key}"; then
+    echo "[ERROR] ${priv_key} is a symlink; refusing to use it as the rf_worker SSH private key." >&2
+    echo "        Remove the symlink and re-run this deploy script to generate a fresh key:" >&2
+    echo "          sudo rm -f '${priv_key}'" >&2
+    exit 1
+  elif sudo test -e "${priv_key}" && ! sudo test -f "${priv_key}"; then
+    echo "[ERROR] ${priv_key} exists but is not a regular file (unexpected file type)." >&2
+    echo "        Remove it and re-run this deploy script to generate a fresh key:" >&2
+    echo "          sudo rm -f '${priv_key}'" >&2
+    exit 1
+  elif ! sudo test -e "${priv_key}"; then
     echo "Generating SSH key pair for rf_worker..."
     sudo -u rf_worker \
       HOME=/var/lib/rf-adapt-intel \
       ssh-keygen -t ed25519 -N "" \
-        -f "${_SSH_DIR}/id_ed25519" \
+        -f "${priv_key}" \
         -C "rf_worker@$(hostname -s 2>/dev/null || echo localhost)"
   fi
   echo ""
