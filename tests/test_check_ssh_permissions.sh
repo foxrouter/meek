@@ -518,6 +518,90 @@ test_check_only_reports_but_not_fix() {
   assert_not_contains "check-only: no FIXED output" "[FIXED]" "${out}"
 }
 
+test_ssh_key_symlink_rejected() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  # Plant a symlink at the private key path — script must detect and report it
+  ln -s /dev/null "${ssh_dir}/id_ed25519"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "ssh key symlink: reports symlink failure" "symlink" "${out}"
+  assert_contains "ssh key symlink: reports FAIL" "[FAIL]" "${out}"
+}
+
+test_ssh_key_symlink_fix_replaces_it() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  # Plant a symlink at the private key path — with --fix it should be replaced
+  ln -s /dev/null "${ssh_dir}/id_ed25519"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" --fix 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "ssh key symlink --fix: reports FIXED" "FIXED" "${out}"
+}
+
+test_ssh_pubkey_symlink_rejected() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  local ssh_key="${ssh_dir}/id_ed25519"
+  touch "${ssh_key}"
+  chmod 600 "${ssh_key}"
+  # Plant a symlink at the public key path — script must detect and report it
+  ln -s /dev/null "${ssh_dir}/id_ed25519.pub"
+  touch "${ssh_dir}/known_hosts"
+  chmod 600 "${ssh_dir}/known_hosts"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "ssh pubkey symlink: reports symlink failure" "symlink" "${out}"
+  assert_contains "ssh pubkey symlink: reports FAIL" "[FAIL]" "${out}"
+}
+
+test_ssh_pubkey_symlink_fix_replaces_it() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  local ssh_key="${ssh_dir}/id_ed25519"
+  touch "${ssh_key}"
+  chmod 600 "${ssh_key}"
+  # Plant a symlink at the public key path — with --fix it should be replaced
+  ln -s /dev/null "${ssh_dir}/id_ed25519.pub"
+  touch "${ssh_dir}/known_hosts"
+  chmod 600 "${ssh_dir}/known_hosts"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" --fix 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "ssh pubkey symlink --fix: reports FIXED" "FIXED" "${out}"
+}
+
 # ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
@@ -547,6 +631,10 @@ test_ssh_dir_not_a_directory_rejected
 test_ssh_dir_not_a_directory_fix_replaces_it
 test_known_hosts_not_a_file_rejected
 test_write_access_checked_in_dry_run
+test_ssh_key_symlink_rejected
+test_ssh_key_symlink_fix_replaces_it
+test_ssh_pubkey_symlink_rejected
+test_ssh_pubkey_symlink_fix_replaces_it
 
 echo ""
 echo "Results: ${_PASS} passed, ${_FAIL} failed."

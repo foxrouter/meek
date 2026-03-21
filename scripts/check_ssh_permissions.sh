@@ -252,8 +252,8 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- known_hosts ---"
-# Check -L before -f: bash's -f follows symlinks, so a symlink pointing to a
-# regular file would pass -f. Guard the symlink case first.
+# Check -L before -f: bash's -f follows symlinks, so a symlink to a regular
+# file passes -f.  Guard the symlink case first.
 if [[ -L "${KNOWN_HOSTS}" ]]; then
   fail "${KNOWN_HOSTS} is a symlink — this is a security risk"
   if $FIX; then
@@ -313,20 +313,34 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- SSH key pair (${SSH_KEY}) ---"
-if [[ -f "${SSH_KEY}" ]]; then
+# Check -L before -f: bash's -f follows symlinks, so a symlink to a regular
+# file passes -f.  A symlink at the key path could redirect privileged
+# chown/chmod operations to an unintended file.  Guard the symlink case first.
+if [[ -L "${SSH_KEY}" ]]; then
+  fail "${SSH_KEY} is a symlink — this is a security risk"
+  if $FIX; then
+    run_fix "remove symlink ${SSH_KEY} and regenerate ${KEY_TYPE} key pair" \
+      bash -c "rm -f '${SSH_KEY}' '${SSH_KEY}.pub' && \
+               sudo -u '${SERVICE_USER}' HOME='${SSH_BASE}' \
+                 ssh-keygen -t '${KEY_TYPE}' -N '' \
+                   -f '${SSH_KEY}' \
+                   -C '${SERVICE_USER}@$(hostname -s 2>/dev/null || echo localhost)'"
+  fi
+elif [[ -f "${SSH_KEY}" ]]; then
   key_owner="$(stat -c '%U' "${SSH_KEY}" 2>/dev/null || echo unknown)"
   key_mode="$(stat -c '%a' "${SSH_KEY}" 2>/dev/null || echo unknown)"
 
-  pass "${SSH_KEY} exists"
+  pass "${SSH_KEY} exists (regular file)"
 
   if [[ "${key_owner}" == "${SERVICE_USER}" ]]; then
     pass "${SSH_KEY} owned by ${SERVICE_USER}"
   else
     fail "${SSH_KEY} owned by '${key_owner}', expected '${SERVICE_USER}'"
     if $FIX; then
+      # Only include .pub in chown if it exists as a regular file (not symlink).
       run_fix "chown ${SERVICE_USER}:${SERVICE_USER} ${SSH_KEY} ${SSH_KEY}.pub" \
         bash -c "chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_KEY}' \
-                 $( [[ -f "${SSH_KEY}.pub" ]] && echo \"'${SSH_KEY}.pub'\" || true )"
+                 $( [[ ! -L "${SSH_KEY}.pub" ]] && [[ -f "${SSH_KEY}.pub" ]] && echo \"'${SSH_KEY}.pub'\" || true )"
     fi
   fi
 
@@ -339,8 +353,19 @@ if [[ -f "${SSH_KEY}" ]]; then
     fi
   fi
 
-  if [[ -f "${SSH_KEY}.pub" ]]; then
-    pass "${SSH_KEY}.pub exists"
+  # Check .pub with symlink guard (same reasoning as for the private key).
+  if [[ -L "${SSH_KEY}.pub" ]]; then
+    fail "${SSH_KEY}.pub is a symlink — this is a security risk"
+    if $FIX; then
+      run_fix "remove symlink ${SSH_KEY}.pub and re-extract public key" \
+        bash -c "rm -f '${SSH_KEY}.pub' && \
+                 sudo -u '${SERVICE_USER}' HOME='${SSH_BASE}' \
+                   ssh-keygen -y -f '${SSH_KEY}' > '${SSH_KEY}.pub' && \
+                 chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_KEY}.pub' && \
+                 chmod 644 '${SSH_KEY}.pub'"
+    fi
+  elif [[ -f "${SSH_KEY}.pub" ]]; then
+    pass "${SSH_KEY}.pub exists (regular file)"
   else
     info "${SSH_KEY}.pub missing — regenerate with: ssh-keygen -y -f ${SSH_KEY}"
   fi
