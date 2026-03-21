@@ -538,6 +538,11 @@ print_summary() {
       echo "    5. IQ transfer to Brian is enabled (iq-transfer-watcher.service)."
       echo "       Check status: sudo systemctl status iq-transfer-watcher"
       echo "       Config      : /etc/rf_worker/iq-transfer.env"
+      echo "    6. Verify SSH permissions for rf_worker and show the public key:"
+      echo "       sudo bash scripts/check_ssh_permissions.sh"
+      echo "       Then copy rf_worker's public key to Brian's authorized_keys."
+      echo "       To also scan Brian's host key into known_hosts, run:"
+      echo "       sudo bash scripts/check_ssh_permissions.sh --fix --host <brian_host>"
     elif [[ -z "${IQ_DEST}" ]]; then
       echo "    5. To enable automatic IQ transfer to Brian, re-run:"
       echo "       sudo bash install.sh --iq-dest rf_worker@brian.local:/var/lib/rf-adapt-intel/incoming/"

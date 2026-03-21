@@ -1,0 +1,352 @@
+#!/usr/bin/env bash
+# tests/test_check_ssh_permissions.sh — Shell tests for
+# scripts/check_ssh_permissions.sh CLI flags and behavior.
+#
+# Run with:
+#   bash tests/test_check_ssh_permissions.sh [-v]
+#
+# Tests exercise argument parsing, check/fix logic, and dry-run output of
+# scripts/check_ssh_permissions.sh by running it under a temporary fake root
+# environment with stub id/ssh-keygen/ssh-keyscan commands and a synthetic
+# directory tree.  No real root privileges are required.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT="${REPO_ROOT}/scripts/check_ssh_permissions.sh"
+VERBOSE=false
+[[ "${1:-}" == "-v" ]] && VERBOSE=true
+
+# ---------------------------------------------------------------------------
+# Minimal test harness (mirrors tests/test_setup.sh)
+# ---------------------------------------------------------------------------
+_PASS=0
+_FAIL=0
+
+ok() {
+  local desc="$1"
+  _PASS=$(( _PASS + 1 ))
+  $VERBOSE && echo "  [PASS] ${desc}"
+}
+
+fail() {
+  local desc="$1"
+  local detail="${2:-}"
+  _FAIL=$(( _FAIL + 1 ))
+  echo "  [FAIL] ${desc}" >&2
+  [[ -n "$detail" ]] && echo "         ${detail}" >&2
+}
+
+assert_contains() {
+  local desc="$1"
+  local needle="$2"
+  local haystack="$3"
+  if echo "${haystack}" | grep -qF -- "${needle}"; then
+    ok "${desc}"
+  else
+    fail "${desc}" "Expected to find: '${needle}'"
+    $VERBOSE && echo "--- actual output ---" && echo "${haystack}" && echo "---"
+  fi
+}
+
+assert_not_contains() {
+  local desc="$1"
+  local needle="$2"
+  local haystack="$3"
+  if ! echo "${haystack}" | grep -qF -- "${needle}"; then
+    ok "${desc}"
+  else
+    fail "${desc}" "Should NOT contain: '${needle}'"
+    $VERBOSE && echo "--- actual output ---" && echo "${haystack}" && echo "---"
+  fi
+}
+
+assert_exit() {
+  local desc="$1"
+  local expected="$2"
+  local actual="$3"
+  if [[ "$actual" -eq "$expected" ]]; then
+    ok "${desc}"
+  else
+    fail "${desc}" "Expected exit ${expected}, got ${actual}"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Test environment helpers
+# ---------------------------------------------------------------------------
+_TMP=""
+_STUB_DIR=""
+
+# Set up a fake root environment with stub commands.
+# The script is run via `env EUID=0 ...` (we override EUID) so the root
+# check passes without real root.
+setup_env() {
+  _TMP="$(mktemp -d /tmp/rf-ssh-perm-test.XXXXXX)"
+  _STUB_DIR="$(mktemp -d /tmp/rf-ssh-perm-stubs.XXXXXX)"
+  _CURRENT_USER="$(id -un)"
+
+  # stub: id — pretend the service user (= current user in tests) exists
+  cat > "${_STUB_DIR}/id" <<EOF
+#!/usr/bin/env bash
+# If querying for the test service user existence, succeed.
+if [[ "\${*}" == "${_CURRENT_USER}" ]]; then
+  exit 0
+fi
+exec /usr/bin/id "\$@"
+EOF
+
+  # stub: ssh-keygen — handle both -F (host lookup) and key generation (-t)
+  cat > "${_STUB_DIR}/ssh-keygen" <<'EOF'
+#!/usr/bin/env bash
+# Stub: -F <host> returns "not found"; key generation creates stub files.
+if [[ "${1:-}" == "-F" ]]; then
+  # Simulate: host NOT found in known_hosts (so keyscan is triggered).
+  exit 1
+fi
+# Otherwise simulate key generation.
+keyfile=""
+for ((i=1; i<=$#; i++)); do
+  if [[ "${!i}" == "-f" ]]; then
+    j=$(( i + 1 ))
+    keyfile="${!j}"
+    break
+  fi
+done
+if [[ -n "${keyfile}" ]]; then
+  touch "${keyfile}" "${keyfile}.pub"
+  echo "ssh-ed25519 AAAA stub-key rf_worker@testhost" > "${keyfile}.pub"
+  chmod 600 "${keyfile}"
+fi
+exit 0
+EOF
+
+  # stub: ssh-keyscan — return a fake hashed known_hosts line
+  cat > "${_STUB_DIR}/ssh-keyscan" <<'EOF'
+#!/usr/bin/env bash
+echo "|1|fakedhashedhost|AAAAB3NzaC1yc2EAAAADAQABAAAAgQC stub host key"
+exit 0
+EOF
+
+  # stub: sudo — strip -u <user> and VAR=val env assignments, then exec the command
+  cat > "${_STUB_DIR}/sudo" <<'EOF'
+#!/usr/bin/env bash
+# Strip 'sudo -u <user>' prefix and any VAR=value env assignments so the
+# remaining command can be executed directly without real privilege escalation.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -u) shift 2 ;;       # skip -u and the username argument
+    --) shift; break ;;  # end of sudo options
+    *=*) export "$1"; shift ;;  # export VAR=value and continue
+    *) break ;;          # first non-option/non-env-assign arg is the command
+  esac
+done
+exec "$@"
+EOF
+
+  # stub: hostname — return a predictable value
+  cat > "${_STUB_DIR}/hostname" <<'EOF'
+#!/usr/bin/env bash
+echo "testhost"
+EOF
+
+  chmod +x "${_STUB_DIR}/id" "${_STUB_DIR}/ssh-keygen" "${_STUB_DIR}/ssh-keyscan" \
+            "${_STUB_DIR}/sudo" "${_STUB_DIR}/hostname"
+
+  # Create the fake application data directory under _TMP
+  mkdir -p "${_TMP}/var/lib/rf-adapt-intel"
+  chown "$(id -u):$(id -g)" "${_TMP}/var/lib/rf-adapt-intel"
+}
+
+teardown_env() {
+  rm -rf "${_TMP:-}" "${_STUB_DIR:-}"
+}
+
+# Run the script with the given args, injecting the test environment:
+#   - PATH: stub commands before real ones
+#   - SERVICE_USER: current user (exists on this machine without root)
+#   - SSH_BASE: redirected to a temp dir (no real system paths touched)
+#   - _RF_TEST_NO_ROOT: skip the root-privilege check
+run_check() {
+  env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" "$@" 2>&1 || true
+}
+
+# Run and capture exit code separately (for assert_exit tests).
+run_check_rc() {
+  local rc=0
+  env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" "$@" 2>&1 || rc=$?
+  echo "${rc}"
+}
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+test_help_flag() {
+  local out
+  out="$(bash "${SCRIPT}" --help 2>&1 || true)"
+  assert_contains "--help: shows --fix option"    "--fix"    "${out}"
+  assert_contains "--help: shows --dry-run option" "--dry-run" "${out}"
+  assert_contains "--help: shows --host option"   "--host"   "${out}"
+}
+
+test_unknown_flag_fails() {
+  local rc=0
+  bash "${SCRIPT}" --unknown-flag < /dev/null 2>/dev/null || rc=$?
+  assert_exit "--unknown-flag exits non-zero" 1 "${rc}"
+}
+
+test_requires_root() {
+  # Without _RF_TEST_NO_ROOT set, the script must exit non-zero with a root error.
+  local out rc=0
+  out="$(bash "${SCRIPT}" 2>&1)" || rc=$?
+  assert_exit "non-root: exits non-zero" 1 "${rc}"
+  assert_contains "non-root: shows root error" "must be run as root" "${out}"
+}
+
+test_dry_run_reports_issues() {
+  setup_env
+  local out
+  out="$(run_check --dry-run)"
+  teardown_env
+  # Should report that .ssh dir does not exist and mention dry-run actions
+  assert_contains "dry-run: mentions .ssh" ".ssh" "${out}"
+  assert_contains "dry-run: shows dry-run label" "dry-run" "${out}"
+}
+
+test_fix_creates_ssh_dir() {
+  setup_env
+  local out
+  out="$(run_check --fix)"
+  teardown_env
+  # The script should have created the .ssh directory and reported it fixed
+  assert_contains "fix: creates .ssh dir" ".ssh" "${out}"
+  assert_contains "fix: reports FIXED or PASS" "FIXED" "${out}"
+}
+
+test_fix_generates_key_pair() {
+  setup_env
+  local out
+  out="$(run_check --fix)"
+  teardown_env
+  assert_contains "fix: generates key pair" "key pair" "${out}"
+}
+
+test_dry_run_shows_key_generation() {
+  setup_env
+  local out
+  out="$(run_check --dry-run)"
+  teardown_env
+  assert_contains "dry-run: mentions key generation" "key" "${out}"
+}
+
+test_host_flag_triggers_keyscan() {
+  setup_env
+  local out
+  out="$(run_check --fix --host testbrianhost)"
+  teardown_env
+  # ssh-keyscan should have been invoked for testbrianhost
+  assert_contains "host: triggers keyscan" "testbrianhost" "${out}"
+}
+
+test_host_flag_dry_run() {
+  setup_env
+  local out
+  out="$(run_check --dry-run --host testbrianhost)"
+  teardown_env
+  assert_contains "host dry-run: mentions ssh-keyscan" "ssh-keyscan" "${out}"
+  assert_contains "host dry-run: shows dry-run label" "dry-run" "${out}"
+}
+
+test_invalid_key_type_fails() {
+  local rc=0
+  bash "${SCRIPT}" --key-type badtype < /dev/null 2>/dev/null || rc=$?
+  assert_exit "--key-type invalid exits non-zero" 1 "${rc}"
+}
+
+test_valid_rsa_key_type() {
+  setup_env
+  local out
+  out="$(run_check --dry-run --key-type rsa)"
+  teardown_env
+  assert_contains "--key-type rsa: mentions rsa" "rsa" "${out}"
+}
+
+test_host_requires_argument() {
+  local rc=0
+  bash "${SCRIPT}" --host < /dev/null 2>/dev/null || rc=$?
+  assert_exit "--host without arg exits non-zero" 1 "${rc}"
+}
+
+test_already_correct_permissions() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  local ssh_key="${ssh_dir}/id_ed25519"
+  # Pre-create everything correctly so no fixes are needed
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  touch "${ssh_key}" "${ssh_key}.pub"
+  echo "stub-public-key rf_worker@testhost" > "${ssh_key}.pub"
+  chmod 600 "${ssh_key}"
+  touch "${ssh_dir}/known_hosts"
+  chmod 600 "${ssh_dir}/known_hosts"
+  local out
+  out="$(run_check)"
+  teardown_env
+  # All checks should pass
+  assert_contains "correct perms: all pass" "All checks passed" "${out}"
+  assert_not_contains "correct perms: no FAIL" "[FAIL]" "${out}"
+}
+
+test_summary_shows_public_key() {
+  setup_env
+  # Pre-create a public key file
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  local ssh_key="${ssh_dir}/id_ed25519"
+  touch "${ssh_key}" "${ssh_key}.pub"
+  echo "ssh-ed25519 AAAA stub-key rf_worker@testhost" > "${ssh_key}.pub"
+  chmod 600 "${ssh_key}"
+  touch "${ssh_dir}/known_hosts"
+  chmod 600 "${ssh_dir}/known_hosts"
+  local out
+  out="$(run_check)"
+  teardown_env
+  # Should display the public key for copying
+  assert_contains "summary: shows public key" "authorized_keys" "${out}"
+}
+
+# ---------------------------------------------------------------------------
+# Run all tests
+# ---------------------------------------------------------------------------
+echo "=== tests/test_check_ssh_permissions.sh ==="
+test_help_flag
+test_unknown_flag_fails
+test_requires_root
+test_dry_run_reports_issues
+test_fix_creates_ssh_dir
+test_fix_generates_key_pair
+test_dry_run_shows_key_generation
+test_host_flag_triggers_keyscan
+test_host_flag_dry_run
+test_invalid_key_type_fails
+test_valid_rsa_key_type
+test_host_requires_argument
+test_already_correct_permissions
+test_summary_shows_public_key
+
+echo ""
+echo "Results: ${_PASS} passed, ${_FAIL} failed."
+if [[ $_FAIL -gt 0 ]]; then
+  exit 1
+fi

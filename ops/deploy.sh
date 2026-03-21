@@ -103,6 +103,37 @@ run sudo chmod 0750 /var/lib/rf-adapt-intel/snapshots
 run sudo chmod 0750 /var/lib/rf-adapt-intel/incoming
 run sudo chmod 0750 /var/lib/rf-adapt-intel/processed
 
+# Set up the SSH directory for rf_worker under /var/lib/rf-adapt-intel/.ssh/
+# iq-transfer-watcher.service sets HOME=/var/lib/rf-adapt-intel so that SSH
+# and rsync store keys and known_hosts in this path, which is already
+# writable under ReadWritePaths (ProtectHome=yes blocks the real home dir).
+run sudo mkdir -p /var/lib/rf-adapt-intel/.ssh
+run sudo chown rf_worker:rf_worker /var/lib/rf-adapt-intel/.ssh
+run sudo chmod 0700 /var/lib/rf-adapt-intel/.ssh
+# Generate an Ed25519 key pair for rf_worker if one does not already exist.
+if ! $DRY_RUN; then
+  if [[ ! -f /var/lib/rf-adapt-intel/.ssh/id_ed25519 ]]; then
+    echo "Generating SSH key pair for rf_worker..."
+    sudo -u rf_worker \
+      HOME=/var/lib/rf-adapt-intel \
+      ssh-keygen -t ed25519 -N "" \
+        -f /var/lib/rf-adapt-intel/.ssh/id_ed25519 \
+        -C "rf_worker@$(hostname -s 2>/dev/null || echo localhost)"
+  fi
+  echo ""
+  echo "=== rf_worker SSH public key ==="
+  echo "Copy this key to Brian's /home/rf_worker/.ssh/authorized_keys (or the"
+  echo "authorized_keys file for whatever user owns the destination path):"
+  echo ""
+  sudo cat /var/lib/rf-adapt-intel/.ssh/id_ed25519.pub || true
+  echo ""
+  echo "  On Brian, run:"
+  echo "    sudo bash scripts/check_ssh_permissions.sh --fix"
+  echo "  Then add the public key above to the remote user's authorized_keys."
+else
+  echo "[dry-run] Would generate SSH key pair for rf_worker if absent"
+fi
+
 # Verify the directory is accessible by rf_worker before starting the service
 if ! $DRY_RUN; then
   if ! sudo -u rf_worker test -w /var/lib/rf-adapt-intel; then
