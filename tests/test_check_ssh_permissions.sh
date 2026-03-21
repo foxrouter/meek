@@ -485,6 +485,7 @@ test_write_access_checked_in_dry_run() {
 
 
 test_check_only_reports_but_not_fix() {
+  setup_env
   local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
   mkdir -p "${ssh_dir}"
   chmod 700 "${ssh_dir}"

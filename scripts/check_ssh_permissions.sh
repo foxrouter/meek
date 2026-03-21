@@ -326,7 +326,7 @@ if [[ -f "${SSH_KEY}" ]]; then
     if $FIX; then
       run_fix "chown ${SERVICE_USER}:${SERVICE_USER} ${SSH_KEY} ${SSH_KEY}.pub" \
         bash -c "chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_KEY}' \
-                 $( [[ -f ${SSH_KEY}.pub ]] && echo \"'${SSH_KEY}.pub'\" || true )"
+                 $( [[ -f "${SSH_KEY}.pub" ]] && echo \"'${SSH_KEY}.pub'\" || true )"
     fi
   fi
 
@@ -450,7 +450,9 @@ echo ""
 echo "=== Summary ==="
 echo "  Passed : ${_PASS}"
 echo "  Failed : ${_FAIL}"
-if $FIX || $DRY_RUN; then
+if $DRY_RUN; then
+  echo "  Would fix: ${_FIXED}"
+elif $FIX; then
   echo "  Fixed  : ${_FIXED}"
 fi
 echo ""
@@ -458,10 +460,14 @@ echo ""
 if [[ ${_FAIL} -eq 0 ]]; then
   echo "All checks passed."
 else
-  if $FIX && [[ ${_FIXED} -gt 0 ]]; then
+  if $DRY_RUN && [[ ${_FIXED} -gt 0 ]]; then
+    echo "Would fix ${_FIXED} issue(s) — re-run without --dry-run to apply."
+  elif $FIX && [[ ${_FIXED} -gt 0 ]]; then
     echo "${_FIXED} issue(s) fixed."
   fi
-  if $FIX; then
+  if $DRY_RUN; then
+    echo "${_FAIL} issue(s) detected. Re-run without --dry-run (and with --fix) to repair." >&2
+  elif $FIX; then
     echo "${_FAIL} issue(s) could not be fixed automatically — review output above." >&2
   else
     echo "${_FAIL} issue(s) detected. Re-run with --fix to repair automatically." >&2
