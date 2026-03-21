@@ -393,6 +393,18 @@ elif [[ -f "${SSH_KEY}" ]]; then
     fi
   elif [[ -f "${SSH_KEY}.pub" ]]; then
     pass "${SSH_KEY}.pub exists (regular file)"
+  elif [[ -e "${SSH_KEY}.pub" ]]; then
+    fail "${SSH_KEY}.pub exists but is not a regular file — unexpected file type"
+    if $FIX; then
+      run_fix "remove non-regular ${SSH_KEY}.pub and re-extract public key" \
+        bash -c "rm -rf -- '${SSH_KEY}.pub' && \
+                 tmp_pub=\$(mktemp '${SSH_KEY}.pub.XXXXXX') && \
+                 sudo -u '${SERVICE_USER}' HOME='${SSH_BASE}' \
+                   ssh-keygen -y -f '${SSH_KEY}' > \"\${tmp_pub}\" && \
+                 chown '${SERVICE_USER}:${SERVICE_USER}' \"\${tmp_pub}\" && \
+                 chmod 644 \"\${tmp_pub}\" && \
+                 mv -f \"\${tmp_pub}\" '${SSH_KEY}.pub'"
+    fi
   else
     if $FIX; then
       run_fix "regenerate missing ${SSH_KEY}.pub from private key" \
@@ -405,6 +417,16 @@ elif [[ -f "${SSH_KEY}" ]]; then
     else
       info "${SSH_KEY}.pub missing — regenerate with: ssh-keygen -y -f ${SSH_KEY}"
     fi
+  fi
+elif [[ -e "${SSH_KEY}" ]]; then
+  fail "${SSH_KEY} exists but is not a regular file — unexpected file type"
+  if $FIX; then
+    run_fix "remove non-regular ${SSH_KEY} and regenerate ${KEY_TYPE} key pair" \
+      bash -c "rm -rf -- '${SSH_KEY}' '${SSH_KEY}.pub' && \
+               sudo -u '${SERVICE_USER}' HOME='${SSH_BASE}' \
+                 ssh-keygen -t '${KEY_TYPE}' -N '' \
+                   -f '${SSH_KEY}' \
+                   -C '${SERVICE_USER}@$(hostname -s 2>/dev/null || echo localhost)'"
   fi
 else
   fail "${SSH_KEY} does not exist — key pair missing"

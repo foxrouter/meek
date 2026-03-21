@@ -632,6 +632,98 @@ test_ssh_pubkey_symlink_does_not_print_target_contents() {
     "UNIQUE_SECRET_MARKER_MUST_NOT_BE_PRINTED" "${out}"
 }
 
+# Regression: non-regular file at ${SSH_KEY} path (e.g. directory) should be
+# detected as a failure, not silently treated as "missing" (which would let
+# ssh-keygen error out under set -e with a confusing message).
+test_ssh_key_not_a_file_rejected() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  # Plant a directory at the private key path — must be reported as FAIL
+  mkdir -p "${ssh_dir}/id_ed25519"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "priv key non-regular: reports FAIL" "[FAIL]" "${out}"
+  assert_contains "priv key non-regular: mentions unexpected file type" "unexpected file type" "${out}"
+}
+
+test_ssh_key_not_a_file_fix_removes_and_regenerates() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  # Plant a directory at the private key path — --fix must remove it and
+  # regenerate the key pair
+  mkdir -p "${ssh_dir}/id_ed25519"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" --fix 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "priv key non-regular --fix: reports FIXED" "FIXED" "${out}"
+}
+
+# Regression: non-regular file at ${SSH_KEY}.pub path (e.g. directory) should
+# be detected as a failure; the --fix path must not attempt mv onto a directory
+# (which would silently put the temp file inside the dir rather than replacing).
+test_ssh_pubkey_not_a_file_rejected() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  local ssh_key="${ssh_dir}/id_ed25519"
+  touch "${ssh_key}"
+  chmod 600 "${ssh_key}"
+  touch "${ssh_dir}/known_hosts"
+  chmod 600 "${ssh_dir}/known_hosts"
+  # Plant a directory at the public key path — must be reported as FAIL
+  mkdir -p "${ssh_dir}/id_ed25519.pub"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "pubkey non-regular: reports FAIL" "[FAIL]" "${out}"
+  assert_contains "pubkey non-regular: mentions unexpected file type" "unexpected file type" "${out}"
+}
+
+test_ssh_pubkey_not_a_file_fix_removes_and_regenerates() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  local ssh_key="${ssh_dir}/id_ed25519"
+  touch "${ssh_key}"
+  chmod 600 "${ssh_key}"
+  touch "${ssh_dir}/known_hosts"
+  chmod 600 "${ssh_dir}/known_hosts"
+  # Plant a directory at the public key path — --fix must remove it and
+  # re-extract the public key
+  mkdir -p "${ssh_dir}/id_ed25519.pub"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" --fix 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "pubkey non-regular --fix: reports FIXED" "FIXED" "${out}"
+}
+
 # Regression: --fix --host must exit non-zero when ssh-keyscan fails.
 # This guards against _FIXED over-inflation masking the scan failure:
 # host-key additions are not repairs of [FAIL] items, so a keyscan failure
@@ -724,8 +816,12 @@ test_known_hosts_not_a_file_rejected
 test_write_access_checked_in_dry_run
 test_ssh_key_symlink_rejected
 test_ssh_key_symlink_fix_replaces_it
+test_ssh_key_not_a_file_rejected
+test_ssh_key_not_a_file_fix_removes_and_regenerates
 test_ssh_pubkey_symlink_rejected
 test_ssh_pubkey_symlink_fix_replaces_it
+test_ssh_pubkey_not_a_file_rejected
+test_ssh_pubkey_not_a_file_fix_removes_and_regenerates
 test_ssh_pubkey_symlink_does_not_print_target_contents
 test_keyscan_failure_exits_nonzero
 test_fix_exits_zero_when_all_fixed
