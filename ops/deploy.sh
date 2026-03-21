@@ -145,7 +145,16 @@ if ! $DRY_RUN; then
   echo "Copy this key to Brian's /home/rf_worker/.ssh/authorized_keys (or the"
   echo "authorized_keys file for whatever user owns the destination path):"
   echo ""
-  sudo cat "${_SSH_DIR}/id_ed25519.pub" || true
+  pub_key="${_SSH_DIR}/id_ed25519.pub"
+  if sudo test -L "${pub_key}"; then
+    echo "[ERROR] ${pub_key} is a symlink; refusing to print target contents."
+    echo "        Remove the symlink and regenerate the key with ssh-keygen as rf_worker."
+  elif ! sudo test -f "${pub_key}"; then
+    echo "[ERROR] Expected SSH public key ${pub_key} to be a regular file but it is missing or not a file."
+    echo "        Regenerate the key with ssh-keygen as rf_worker, then re-run this deploy script."
+  else
+    sudo cat "${pub_key}" || true
+  fi
   echo ""
   echo "  On Brian, run (from the rf_adapt_intel repo checkout):"
   echo "    sudo bash scripts/check_ssh_permissions.sh --fix"
