@@ -377,7 +377,7 @@ if [[ ${#SCAN_HOSTS[@]} -gt 0 ]]; then
   echo "         Verify the fingerprint below matches the expected host key before"
   echo "         relying on this entry for production use."
   if ! command -v ssh-keyscan &>/dev/null; then
-    echo "  [WARN] ssh-keyscan not found; skipping host-key scan" >&2
+    fail "ssh-keyscan not found; cannot pre-populate known_hosts for requested hosts: ${SCAN_HOSTS[*]}"
   else
     for _scan_host in "${SCAN_HOSTS[@]}"; do
       if [[ -z "${_scan_host}" ]]; then
