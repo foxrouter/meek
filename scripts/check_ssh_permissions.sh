@@ -312,15 +312,16 @@ elif [[ -e "${KNOWN_HOSTS}" ]]; then
 else
   info "${KNOWN_HOSTS} does not exist yet (will be created by SSH on first connect)"
   if $FIX; then
+    # This is an optional hardening step, not a fix for a recorded failure, so
+    # intentionally avoid run_fix here to keep the failure/fix counters accurate.
     # Atomic replace via temp file (same dir → same filesystem → rename(2) is
     # atomic).  This closes the TOCTOU window where the service user could
     # plant a symlink between the earlier -L check and the write.
-    run_fix "create ${KNOWN_HOSTS} (mode 600, owner ${SERVICE_USER})" \
-      bash -c "_tmp=\$(mktemp '${SSH_DIR}/known_hosts.XXXXXX') && \
-               trap 'rm -f \"\${_tmp}\"' EXIT && \
-               chmod 600 \"\${_tmp}\" && \
-               chown '${SERVICE_USER}:${SERVICE_USER}' \"\${_tmp}\" && \
-               mv -f \"\${_tmp}\" '${KNOWN_HOSTS}'"
+    bash -c "_tmp=\$(mktemp '${SSH_DIR}/known_hosts.XXXXXX') && \
+             trap 'rm -f \"\${_tmp}\"' EXIT && \
+             chmod 600 \"\${_tmp}\" && \
+             chown '${SERVICE_USER}:${SERVICE_USER}' \"\${_tmp}\" && \
+             mv -f \"\${_tmp}\" '${KNOWN_HOSTS}'"
   fi
 fi
 
