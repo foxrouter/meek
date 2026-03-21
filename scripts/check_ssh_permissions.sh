@@ -386,7 +386,17 @@ elif [[ -f "${SSH_KEY}" ]]; then
   elif [[ -f "${SSH_KEY}.pub" ]]; then
     pass "${SSH_KEY}.pub exists (regular file)"
   else
-    info "${SSH_KEY}.pub missing — regenerate with: ssh-keygen -y -f ${SSH_KEY}"
+    if $FIX; then
+      run_fix "regenerate missing ${SSH_KEY}.pub from private key" \
+        bash -c "tmp_pub=\$(mktemp '${SSH_KEY}.pub.XXXXXX') && \
+                 sudo -u '${SERVICE_USER}' HOME='${SSH_BASE}' \
+                   ssh-keygen -y -f '${SSH_KEY}' > \"\${tmp_pub}\" && \
+                 chown '${SERVICE_USER}:${SERVICE_USER}' \"\${tmp_pub}\" && \
+                 chmod 644 \"\${tmp_pub}\" && \
+                 mv -f \"\${tmp_pub}\" '${SSH_KEY}.pub'"
+    else
+      info "${SSH_KEY}.pub missing — regenerate with: ssh-keygen -y -f ${SSH_KEY}"
+    fi
   fi
 else
   fail "${SSH_KEY} does not exist — key pair missing"
