@@ -107,17 +107,31 @@ run sudo chmod 0750 /var/lib/rf-adapt-intel/processed
 # iq-transfer-watcher.service sets HOME=/var/lib/rf-adapt-intel so that SSH
 # and rsync store keys and known_hosts in this path, which is already
 # writable under ReadWritePaths (ProtectHome=yes blocks the real home dir).
-run sudo mkdir -p /var/lib/rf-adapt-intel/.ssh
-run sudo chown rf_worker:rf_worker /var/lib/rf-adapt-intel/.ssh
-run sudo chmod 0700 /var/lib/rf-adapt-intel/.ssh
+#
+# Guard against a symlink at .ssh: rf_worker owns the parent directory, so a
+# compromised rf_worker could plant a symlink here.  Following it with a
+# privileged chown/chmod could affect an unintended path.  Fail hard and ask
+# the operator to remove the symlink manually before re-running deploy.
+_SSH_DIR=/var/lib/rf-adapt-intel/.ssh
+if ! $DRY_RUN && [[ -L "${_SSH_DIR}" ]]; then
+  echo "[ERROR] ${_SSH_DIR} is a symlink — refusing to operate on it." >&2
+  echo "        Remove the symlink manually and re-run deploy.sh:" >&2
+  echo "          sudo rm -f '${_SSH_DIR}'" >&2
+  exit 1
+fi
+# Use `install -d` which sets ownership and mode in a single command,
+# reducing the window between creation and permission-setting compared to
+# separate mkdir/chown/chmod calls.  The symlink guard above ensures this
+# path does not follow a symlink into an unintended location.
+run sudo install -d -m 0700 -o rf_worker -g rf_worker "${_SSH_DIR}"
 # Generate an Ed25519 key pair for rf_worker if one does not already exist.
 if ! $DRY_RUN; then
-  if [[ ! -f /var/lib/rf-adapt-intel/.ssh/id_ed25519 ]]; then
+  if [[ ! -f "${_SSH_DIR}/id_ed25519" ]]; then
     echo "Generating SSH key pair for rf_worker..."
     sudo -u rf_worker \
       HOME=/var/lib/rf-adapt-intel \
       ssh-keygen -t ed25519 -N "" \
-        -f /var/lib/rf-adapt-intel/.ssh/id_ed25519 \
+        -f "${_SSH_DIR}/id_ed25519" \
         -C "rf_worker@$(hostname -s 2>/dev/null || echo localhost)"
   fi
   echo ""
@@ -125,9 +139,9 @@ if ! $DRY_RUN; then
   echo "Copy this key to Brian's /home/rf_worker/.ssh/authorized_keys (or the"
   echo "authorized_keys file for whatever user owns the destination path):"
   echo ""
-  sudo cat /var/lib/rf-adapt-intel/.ssh/id_ed25519.pub || true
+  sudo cat "${_SSH_DIR}/id_ed25519.pub" || true
   echo ""
-  echo "  On Brian, run:"
+  echo "  On Brian, run (from the rf_adapt_intel repo checkout):"
   echo "    sudo bash scripts/check_ssh_permissions.sh --fix"
   echo "  Then add the public key above to the remote user's authorized_keys."
 else

@@ -95,13 +95,19 @@ fi
 exec /usr/bin/id "\$@"
 EOF
 
-  # stub: ssh-keygen — handle both -F (host lookup) and key generation (-t)
+  # stub: ssh-keygen — handle -F (host lookup), -l (fingerprint), and key generation
   cat > "${_STUB_DIR}/ssh-keygen" <<'EOF'
 #!/usr/bin/env bash
-# Stub: -F <host> returns "not found"; key generation creates stub files.
+# Stub: -F <host> returns "not found"; -l prints a fake fingerprint;
+# key generation creates stub files.
 if [[ "${1:-}" == "-F" ]]; then
   # Simulate: host NOT found in known_hosts (so keyscan is triggered).
   exit 1
+fi
+if [[ "${1:-}" == "-l" ]]; then
+  # Simulate fingerprint output for the given file.
+  echo "256 SHA256:AAABBBCCC stub-fingerprint (ED25519)"
+  exit 0
 fi
 # Otherwise simulate key generation.
 keyfile=""
@@ -326,6 +332,106 @@ test_summary_shows_public_key() {
   assert_contains "summary: shows public key" "authorized_keys" "${out}"
 }
 
+test_ssh_dir_symlink_rejected() {
+  setup_env
+  # Plant a symlink at .ssh — the script must refuse to operate on it
+  ln -s /tmp "${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "symlink .ssh: reports symlink failure" "symlink" "${out}"
+  assert_contains "symlink .ssh: reports FAIL" "[FAIL]" "${out}"
+}
+
+test_ssh_dir_symlink_fix_replaces_it() {
+  setup_env
+  # Plant a symlink at .ssh — with --fix it should be replaced by a real dir
+  ln -s /tmp "${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" --fix 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "symlink .ssh --fix: reports FIXED" "FIXED" "${out}"
+}
+
+test_base_dir_write_access_checked() {
+  setup_env
+  # Make the base directory not writable by the current user (mode 0555)
+  chmod 0555 "${_TMP}/var/lib/rf-adapt-intel"
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" 2>&1)" || rc=$?
+  # Restore mode so teardown_env can remove the temp dir
+  chmod 0755 "${_TMP}/var/lib/rf-adapt-intel" 2>/dev/null || true
+  teardown_env
+  assert_contains "write access: detects non-writable dir" "not writable" "${out}"
+}
+
+test_exit_nonzero_when_fix_fails_for_some() {
+  setup_env
+  # In check-only mode with .ssh absent, failures are reported without resolution.
+  local rc=0
+  env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" >/dev/null 2>&1 || rc=$?
+  teardown_env
+  # Check-only mode with .ssh absent should exit non-zero
+  assert_exit "check-only with failures: exits non-zero" 1 "${rc}"
+}
+
+test_tofu_warning_printed_on_host_keyscan() {
+  setup_env
+  local out
+  out="$(run_check --fix --host testbrianhost)"
+  teardown_env
+  assert_contains "tofu warning: mentions TOFU" "TOFU" "${out}"
+  assert_contains "tofu warning: mentions verify" "erify" "${out}"
+}
+
+test_fingerprint_shown_after_keyscan() {
+  setup_env
+  local out
+  out="$(run_check --fix --host testbrianhost)"
+  teardown_env
+  # After adding a host key the script should display the fingerprint
+  assert_contains "fingerprint: mentions fingerprint" "fingerprint" "${out}"
+}
+
+test_check_only_reports_but_not_fix() {
+  setup_env
+  # Pre-create everything correctly — check-only mode should report passes only
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  local ssh_key="${ssh_dir}/id_ed25519"
+  touch "${ssh_key}" "${ssh_key}.pub"
+  echo "ssh-ed25519 AAAA stub-key rf_worker@testhost" > "${ssh_key}.pub"
+  chmod 600 "${ssh_key}"
+  touch "${ssh_dir}/known_hosts"
+  chmod 600 "${ssh_dir}/known_hosts"
+  local out
+  out="$(run_check)"
+  teardown_env
+  # In check-only mode with no issues, should not print [FIXED]
+  assert_not_contains "check-only: no FIXED output" "[FIXED]" "${out}"
+}
+
 # ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
@@ -344,6 +450,13 @@ test_valid_rsa_key_type
 test_host_requires_argument
 test_already_correct_permissions
 test_summary_shows_public_key
+test_ssh_dir_symlink_rejected
+test_ssh_dir_symlink_fix_replaces_it
+test_base_dir_write_access_checked
+test_exit_nonzero_when_fix_fails_for_some
+test_tofu_warning_printed_on_host_keyscan
+test_fingerprint_shown_after_keyscan
+test_check_only_reports_but_not_fix
 
 echo ""
 echo "Results: ${_PASS} passed, ${_FAIL} failed."

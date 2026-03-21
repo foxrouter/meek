@@ -159,6 +159,20 @@ if [[ -d "${SSH_BASE}" ]]; then
         chown "${SERVICE_USER}:${SERVICE_USER}" "${SSH_BASE}"
     fi
   fi
+  # Verify actual write access (ownership alone is insufficient if mode bits
+  # or ACLs restrict access).
+  if $DRY_RUN; then
+    echo "  [dry-run] Would: sudo -u ${SERVICE_USER} test -w ${SSH_BASE}"
+  elif sudo -u "${SERVICE_USER}" test -w "${SSH_BASE}" 2>/dev/null; then
+    pass "${SSH_BASE} is writable by ${SERVICE_USER}"
+  else
+    fail "${SSH_BASE} is not writable by ${SERVICE_USER} — check mode bits"
+    if $FIX; then
+      run_fix "chmod 0750 ${SSH_BASE} + chown ${SERVICE_USER}:${SERVICE_USER}" \
+        bash -c "chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_BASE}' && \
+                 chmod 0750 '${SSH_BASE}'"
+    fi
+  fi
 else
   fail "${SSH_BASE} does not exist — run 'sudo bash ops/deploy.sh' first"
   echo ""
@@ -171,8 +185,19 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- .ssh directory (${SSH_DIR}) ---"
-if [[ -d "${SSH_DIR}" ]]; then
-  pass "${SSH_DIR} exists"
+# Reject symlinks: running privileged chown/chmod on a symlink would follow
+# it and potentially affect a path outside the intended tree.
+if [[ -L "${SSH_DIR}" ]]; then
+  fail "${SSH_DIR} is a symlink — this is a security risk; refusing to operate on it"
+  if $FIX; then
+    run_fix "remove symlink ${SSH_DIR} and create real directory (mode 700, owner ${SERVICE_USER})" \
+      bash -c "rm -f '${SSH_DIR}' && \
+               mkdir -p '${SSH_DIR}' && \
+               chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_DIR}' && \
+               chmod 700 '${SSH_DIR}'"
+  fi
+elif [[ -d "${SSH_DIR}" ]]; then
+  pass "${SSH_DIR} exists (regular directory)"
 
   ssh_dir_mode="$(stat -c '%a' "${SSH_DIR}" 2>/dev/null || echo unknown)"
   ssh_dir_owner="$(stat -c '%U' "${SSH_DIR}" 2>/dev/null || echo unknown)"
@@ -317,6 +342,9 @@ fi
 if [[ ${#SCAN_HOSTS[@]} -gt 0 ]]; then
   echo ""
   echo "--- Pre-populating known_hosts ---"
+  echo "  [WARN] Host keys are accepted on first contact (TOFU — trust on first use)."
+  echo "         Verify the fingerprint below matches the expected host key before"
+  echo "         relying on this entry for production use."
   if ! command -v ssh-keyscan &>/dev/null; then
     echo "  [WARN] ssh-keyscan not found; skipping host-key scan" >&2
   else
@@ -347,6 +375,15 @@ if [[ ${#SCAN_HOSTS[@]} -gt 0 ]]; then
           chown "${SERVICE_USER}:${SERVICE_USER}" "${KNOWN_HOSTS}"
           chmod 600 "${KNOWN_HOSTS}"
           fixed "added host key for '${_scan_host}' to ${KNOWN_HOSTS}"
+          # Display the fingerprint of the just-added key so the operator can
+          # verify it out-of-band.  Feed only the newly-scanned lines (not the
+          # entire known_hosts file) to ssh-keygen -l to avoid showing
+          # fingerprints for previously-trusted hosts.
+          echo ""
+          echo "  Host key fingerprint for '${_scan_host}' (verify before trusting):"
+          ssh-keygen -l -f <(printf '%s\n' "${local_scan}") 2>/dev/null || \
+            echo "  (fingerprint unavailable — verify manually with: ssh-keygen -l -f ${KNOWN_HOSTS})"
+          echo ""
         else
           fail "ssh-keyscan could not reach '${_scan_host}'; add manually or ensure the host is reachable"
         fi
@@ -389,15 +426,14 @@ echo ""
 
 if [[ ${_FAIL} -eq 0 ]]; then
   echo "All checks passed."
-elif $FIX; then
-  if [[ ${_FIXED} -gt 0 ]]; then
-    echo "${_FIXED} issue(s) fixed."
-    if [[ ${_FAIL} -gt 0 ]]; then
-      echo "${_FAIL} issue(s) could not be fixed automatically — review output above." >&2
-      exit 1
-    fi
-  fi
 else
-  echo "${_FAIL} issue(s) detected. Re-run with --fix to repair automatically." >&2
+  if $FIX && [[ ${_FIXED} -gt 0 ]]; then
+    echo "${_FIXED} issue(s) fixed."
+  fi
+  if $FIX; then
+    echo "${_FAIL} issue(s) could not be fixed automatically — review output above." >&2
+  else
+    echo "${_FAIL} issue(s) detected. Re-run with --fix to repair automatically." >&2
+  fi
   exit 1
 fi
