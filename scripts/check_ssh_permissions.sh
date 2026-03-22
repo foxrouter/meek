@@ -184,9 +184,10 @@ if [[ -d "${SSH_BASE}" ]]; then
   else
     fail "${SSH_BASE} is not writable by ${SERVICE_USER} — check mode bits"
     if $FIX; then
-      run_fix "chmod 0750 ${SSH_BASE} + chown ${SERVICE_USER}:${SERVICE_USER}" \
-        bash -c "chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_BASE}' && \
-                 chmod 0750 '${SSH_BASE}'"
+      run_fix "chown ${SERVICE_USER}:${SERVICE_USER} ${SSH_BASE}" \
+        chown "${SERVICE_USER}:${SERVICE_USER}" "${SSH_BASE}"
+      run_fix "chmod 0750 ${SSH_BASE}" \
+        chmod 0750 "${SSH_BASE}"
     fi
   fi
 else
@@ -370,10 +371,17 @@ elif [[ -f "${SSH_KEY}" ]]; then
   else
     fail "${SSH_KEY} owned by '${key_owner}', expected '${SERVICE_USER}'"
     if $FIX; then
-      # Only include .pub in chown if it exists as a regular file (not symlink).
-      run_fix "chown ${SERVICE_USER}:${SERVICE_USER} ${SSH_KEY} ${SSH_KEY}.pub" \
-        bash -c "chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_KEY}' \
-                 $( [[ ! -L "${SSH_KEY}.pub" ]] && [[ -f "${SSH_KEY}.pub" ]] && echo \"'${SSH_KEY}.pub'\" || true )"
+      # Only include .pub in chown if it is a real regular file (not symlink).
+      # The symlink re-check happens inside bash -c so chown -h sees a
+      # consistent view; -h / --no-dereference ensures we never follow a
+      # symlink that was raced in after the outer [[ -L ]] guard.
+      run_fix "chown -h ${SERVICE_USER}:${SERVICE_USER} ${SSH_KEY} [${SSH_KEY}.pub]" \
+        bash -c "set -euo pipefail
+                 paths=('${SSH_KEY}')
+                 if [[ ! -L '${SSH_KEY}.pub' ]] && [[ -f '${SSH_KEY}.pub' ]]; then
+                   paths+=('${SSH_KEY}.pub')
+                 fi
+                 chown -h '${SERVICE_USER}:${SERVICE_USER}' \"\${paths[@]}\""
     fi
   fi
 
