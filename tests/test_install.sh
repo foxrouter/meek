@@ -417,7 +417,7 @@ test_transfer_iq_ssh_options() {
     fail "transfer_iq.sh has SSH_KNOWN_HOSTS env var" "Expected to find: 'SSH_KNOWN_HOSTS=\"\${SSH_KNOWN_HOSTS:-'"
   fi
   # Ensure SSH_KEY / SSH_KNOWN_HOSTS are validated for whitespace (required because
-  # _RSYNC_RSH embeds the values verbatim via ${_SSH_OPTS[*]}).
+  # _RSYNC_RSH is constructed from the _SSH_OPTS array and passes these values directly).
   if grep -qF '"ERROR: SSH_KEY must not contain whitespace' "${script}"; then
     ok "transfer_iq.sh validates SSH_KEY for whitespace"
   else
