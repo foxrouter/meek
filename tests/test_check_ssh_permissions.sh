@@ -356,6 +356,7 @@ test_ssh_dir_symlink_rejected() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" 2>&1)" || rc=$?
   teardown_env
+  assert_exit "symlink .ssh: exits non-zero" 1 "${rc}"
   assert_contains "symlink .ssh: reports symlink failure" "symlink" "${out}"
   assert_contains "symlink .ssh: reports FAIL" "[FAIL]" "${out}"
 }
@@ -372,6 +373,7 @@ test_ssh_dir_symlink_fix_replaces_it() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" --fix 2>&1)" || rc=$?
   teardown_env
+  assert_exit "symlink .ssh --fix: exits 0" 0 "${rc}"
   assert_contains "symlink .ssh --fix: reports FIXED" "FIXED" "${out}"
 }
 
@@ -455,6 +457,7 @@ test_ssh_dir_not_a_directory_fix_replaces_it() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" --fix 2>&1)" || rc=$?
   teardown_env
+  assert_exit "non-dir .ssh --fix: exits 0" 0 "${rc}"
   assert_contains "non-dir .ssh --fix: reports FIXED" "FIXED" "${out}"
 }
 
@@ -530,6 +533,7 @@ test_ssh_key_symlink_rejected() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" 2>&1)" || rc=$?
   teardown_env
+  assert_exit "ssh key symlink: exits non-zero" 1 "${rc}"
   assert_contains "ssh key symlink: reports symlink failure" "symlink" "${out}"
   assert_contains "ssh key symlink: reports FAIL" "[FAIL]" "${out}"
 }
@@ -549,6 +553,7 @@ test_ssh_key_symlink_fix_replaces_it() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" --fix 2>&1)" || rc=$?
   teardown_env
+  assert_exit "ssh key symlink --fix: exits 0" 0 "${rc}"
   assert_contains "ssh key symlink --fix: reports FIXED" "FIXED" "${out}"
 }
 
@@ -572,6 +577,7 @@ test_ssh_pubkey_symlink_rejected() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" 2>&1)" || rc=$?
   teardown_env
+  assert_exit "ssh pubkey symlink: exits non-zero" 1 "${rc}"
   assert_contains "ssh pubkey symlink: reports symlink failure" "symlink" "${out}"
   assert_contains "ssh pubkey symlink: reports FAIL" "[FAIL]" "${out}"
 }
@@ -596,6 +602,7 @@ test_ssh_pubkey_symlink_fix_replaces_it() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" --fix 2>&1)" || rc=$?
   teardown_env
+  assert_exit "ssh pubkey symlink --fix: exits 0" 0 "${rc}"
   assert_contains "ssh pubkey symlink --fix: reports FIXED" "FIXED" "${out}"
 }
 
@@ -624,6 +631,7 @@ test_ssh_pubkey_symlink_does_not_print_target_contents() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" 2>&1)" || rc=$?
   teardown_env
+  assert_exit "pubkey symlink no-print: exits non-zero" 1 "${rc}"
   assert_contains "pubkey symlink no-print: reports symlink failure" "symlink" "${out}"
   assert_not_contains "pubkey symlink no-print: symlink target NOT printed" \
     "UNIQUE_SECRET_MARKER_MUST_NOT_BE_PRINTED" "${out}"
@@ -647,6 +655,7 @@ test_ssh_key_not_a_file_rejected() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" 2>&1)" || rc=$?
   teardown_env
+  assert_exit "priv key non-regular: exits non-zero" 1 "${rc}"
   assert_contains "priv key non-regular: reports FAIL" "[FAIL]" "${out}"
   assert_contains "priv key non-regular: mentions unexpected file type" "unexpected file type" "${out}"
 }
@@ -667,6 +676,7 @@ test_ssh_key_not_a_file_fix_removes_and_regenerates() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" --fix 2>&1)" || rc=$?
   teardown_env
+  assert_exit "priv key non-regular --fix: exits 0" 0 "${rc}"
   assert_contains "priv key non-regular --fix: reports FIXED" "FIXED" "${out}"
 }
 
@@ -693,6 +703,7 @@ test_ssh_pubkey_not_a_file_rejected() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" 2>&1)" || rc=$?
   teardown_env
+  assert_exit "pubkey non-regular: exits non-zero" 1 "${rc}"
   assert_contains "pubkey non-regular: reports FAIL" "[FAIL]" "${out}"
   assert_contains "pubkey non-regular: mentions unexpected file type" "unexpected file type" "${out}"
 }
@@ -718,6 +729,7 @@ test_ssh_pubkey_not_a_file_fix_removes_and_regenerates() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" --fix 2>&1)" || rc=$?
   teardown_env
+  assert_exit "pubkey non-regular --fix: exits 0" 0 "${rc}"
   assert_contains "pubkey non-regular --fix: reports FIXED" "FIXED" "${out}"
 }
 
@@ -742,6 +754,7 @@ test_ssh_pubkey_missing_check_reports_fail() {
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" 2>&1)" || rc=$?
   teardown_env
+  assert_exit "pubkey missing: exits non-zero" 1 "${rc}"
   assert_contains "pubkey missing: reports FAIL" "[FAIL]" "${out}"
   assert_contains "pubkey missing: mentions missing" "missing" "${out}"
 }
@@ -767,6 +780,7 @@ test_ssh_pubkey_missing_fix_regenerates() {
   local pub_content
   pub_content="$(cat "${ssh_key}.pub" 2>/dev/null || true)"
   teardown_env
+  assert_exit "pubkey missing --fix: exits 0" 0 "${rc}"
   assert_contains "pubkey missing --fix: reports FIXED" "FIXED" "${out}"
   assert_contains "pubkey missing --fix: pub file contains stub key" \
     "ssh-ed25519 AAAA stub-key" "${pub_content}"
