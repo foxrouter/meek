@@ -233,7 +233,7 @@ def match_snapshot(
     Pass a pre-built index from _build_snap_index() as *_snap_index* to avoid
     the O(n) linear scan when processing many candidates.
     """
-    expected_conf_pct = int(candidate["confidence"] * 1000)
+    expected_conf_pct = int(candidate["confidence"] * 100)
     if _snap_index is not None:
         # O(1) lookup with ±1 tolerance
         pool = (
