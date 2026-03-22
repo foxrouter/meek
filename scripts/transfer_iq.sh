@@ -44,6 +44,16 @@ DB_DEST="${DB_DEST:-}"
 DB_SYNC_INTERVAL="${DB_SYNC_INTERVAL:-60}"
 SSH_KEY="${SSH_KEY:-/var/lib/rf-adapt-intel/.ssh/id_ed25519}"
 SSH_KNOWN_HOSTS="${SSH_KNOWN_HOSTS:-/var/lib/rf-adapt-intel/.ssh/known_hosts}"
+# Shared SSH transport options used by all direct ssh calls and rsync -e.
+_SSH_OPTS=(
+  -o BatchMode=yes
+  -o ConnectTimeout=10
+  -o ServerAliveInterval=5
+  -o ServerAliveCountMax=2
+  -o "IdentityFile=${SSH_KEY}"
+  -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS}"
+)
+_RSYNC_RSH="ssh ${_SSH_OPTS[*]}"
 
 # Reject remote DB_DEST values that rely on remote shell expansion (e.g. ~ or $VAR),
 # since rsync would expand them but the ssh-based WAL/SHM cleanup uses single-quoted
@@ -301,7 +311,7 @@ run_rsync() {
     # Add --checksum if IQ integrity verification is critical (increases bandwidth
     # usage since rsync re-reads both sides to compare checksums).
     if run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
-        -e "ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o IdentityFile=\"${SSH_KEY}\" -o UserKnownHostsFile=\"${SSH_KNOWN_HOSTS}\"" \
+        -e "${_RSYNC_RSH}" \
         -- "${file}" "${DEST}"; then
       log "OK transferred: $(basename "${file}")"
       return 0
@@ -399,10 +409,7 @@ sync_db() {
     _chk_is_remote=true
   fi
   if $_chk_is_remote; then
-    if ssh -o BatchMode=yes -o ConnectTimeout=10 \
-           -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
-           -o IdentityFile="${SSH_KEY}" \
-           -o UserKnownHostsFile="${SSH_KNOWN_HOSTS}" \
+    if ssh "${_SSH_OPTS[@]}" \
            -- "${_chk_host}" \
            "test -d $(_posix_sq "${_chk_path}")" 2>/dev/null; then
       log "ERROR DB_DEST '${DB_DEST}' is a remote directory; a full file path is required"
@@ -467,7 +474,7 @@ sync_db() {
     if [[ -n "${snap_file}" ]]; then
       run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
           --delay-updates --timeout=30 \
-          -e "ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o IdentityFile=\"${SSH_KEY}\" -o UserKnownHostsFile=\"${SSH_KNOWN_HOSTS}\"" \
+          -e "${_RSYNC_RSH}" \
           -- "${snap_file}" "${DB_DEST}" || ok=false
       # After a successful snapshot transfer, remove any stale WAL/SHM at the
       # destination.  If those sidecars are left from a previous live-file sync,
@@ -486,12 +493,7 @@ sync_db() {
           local _wal_q _shm_q _ssh_err
           _wal_q="$(_posix_sq "${_db_dest_path}-wal")"
           _shm_q="$(_posix_sq "${_db_dest_path}-shm")"
-          _ssh_err="$(ssh -o BatchMode=yes \
-              -o ConnectTimeout=10 \
-              -o ServerAliveInterval=5 \
-              -o ServerAliveCountMax=2 \
-              -o IdentityFile="${SSH_KEY}" \
-              -o UserKnownHostsFile="${SSH_KNOWN_HOSTS}" \
+          _ssh_err="$(ssh "${_SSH_OPTS[@]}" \
               -- "${_db_dest_host}" \
               "rm -f -- ${_wal_q} ${_shm_q}" 2>&1)" || {
             log "WARN could not remove stale WAL/SHM at destination; marking sync as failed${_ssh_err:+: ${_ssh_err}}"
@@ -508,18 +510,18 @@ sync_db() {
       # Fallback: sync live DB and sidecars (racy but better than nothing).
       run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
           --delay-updates --timeout=30 \
-          -e "ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o IdentityFile=\"${SSH_KEY}\" -o UserKnownHostsFile=\"${SSH_KNOWN_HOSTS}\"" \
+          -e "${_RSYNC_RSH}" \
           -- "${DB_SOURCE}" "${DB_DEST}" || ok=false
       if $ok && [[ -f "${DB_SOURCE}-wal" ]]; then
         run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
             --delay-updates --timeout=30 \
-            -e "ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o IdentityFile=\"${SSH_KEY}\" -o UserKnownHostsFile=\"${SSH_KNOWN_HOSTS}\"" \
+            -e "${_RSYNC_RSH}" \
             -- "${DB_SOURCE}-wal" "${DB_DEST}-wal" || ok=false
       fi
       if $ok && [[ -f "${DB_SOURCE}-shm" ]]; then
         run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
             --delay-updates --timeout=30 \
-            -e "ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o IdentityFile=\"${SSH_KEY}\" -o UserKnownHostsFile=\"${SSH_KNOWN_HOSTS}\"" \
+            -e "${_RSYNC_RSH}" \
             -- "${DB_SOURCE}-shm" "${DB_DEST}-shm" || ok=false
       fi
       # Remove any stale destination sidecars whose source counterpart no longer
@@ -549,10 +551,7 @@ sync_db() {
             for _fb_p in "${_fb_stale[@]}"; do
               _fb_rm_q="${_fb_rm_q} $(_posix_sq "${_fb_p}")"
             done
-            ssh -o BatchMode=yes -o ConnectTimeout=10 \
-                -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
-                -o IdentityFile="${SSH_KEY}" \
-                -o UserKnownHostsFile="${SSH_KNOWN_HOSTS}" \
+            ssh "${_SSH_OPTS[@]}" \
                 -- "${_fb_host}" "rm -f --${_fb_rm_q}" 2>/dev/null || \
               log "WARN could not remove stale WAL/SHM at fallback destination (non-fatal)"
           else
