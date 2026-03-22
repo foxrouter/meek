@@ -44,6 +44,21 @@ DB_DEST="${DB_DEST:-}"
 DB_SYNC_INTERVAL="${DB_SYNC_INTERVAL:-60}"
 SSH_KEY="${SSH_KEY:-/var/lib/rf-adapt-intel/.ssh/id_ed25519}"
 SSH_KNOWN_HOSTS="${SSH_KNOWN_HOSTS:-/var/lib/rf-adapt-intel/.ssh/known_hosts}"
+# Reject SSH_KEY / SSH_KNOWN_HOSTS values that contain whitespace: the paths
+# are embedded verbatim in _RSYNC_RSH (a plain string used with rsync -e), so
+# whitespace would cause the shell to split the -e command and mis-route the
+# option arguments.  The direct ssh "${_SSH_OPTS[@]}" calls are immune (array
+# expansion preserves words), but _RSYNC_RSH is not.  Paths under the default
+# service-account home never contain whitespace; custom overrides that do must
+# use a symlink or wrapper script instead.
+if [[ "${SSH_KEY}" =~ [[:space:]] ]]; then
+  printf '%s\n' "ERROR: SSH_KEY must not contain whitespace: '${SSH_KEY}'" >&2
+  exit 1
+fi
+if [[ "${SSH_KNOWN_HOSTS}" =~ [[:space:]] ]]; then
+  printf '%s\n' "ERROR: SSH_KNOWN_HOSTS must not contain whitespace: '${SSH_KNOWN_HOSTS}'" >&2
+  exit 1
+fi
 # Shared SSH transport options used by all direct ssh calls and rsync -e.
 _SSH_OPTS=(
   -o BatchMode=yes
