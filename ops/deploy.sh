@@ -97,11 +97,93 @@ fi
 
 # Create runtime data directories owned by rf_worker
 run sudo mkdir -p /var/lib/rf-adapt-intel/{snapshots,incoming,processed}
-run sudo chown -R rf_worker:rf_worker /var/lib/rf-adapt-intel
+run sudo chown -hR rf_worker:rf_worker /var/lib/rf-adapt-intel
 run sudo chmod 0750 /var/lib/rf-adapt-intel
 run sudo chmod 0750 /var/lib/rf-adapt-intel/snapshots
 run sudo chmod 0750 /var/lib/rf-adapt-intel/incoming
 run sudo chmod 0750 /var/lib/rf-adapt-intel/processed
+
+# Set up the SSH directory for rf_worker under /var/lib/rf-adapt-intel/.ssh/
+# iq-transfer-watcher.service sets HOME=/var/lib/rf-adapt-intel so that SSH
+# and rsync store keys and known_hosts in this path, which is already
+# writable under ReadWritePaths (ProtectHome=yes blocks the real home dir).
+#
+# Guard against a symlink at .ssh: rf_worker owns the parent directory, so a
+# compromised rf_worker could plant a symlink here.  Following it with a
+# privileged chown/chmod could affect an unintended path.  Fail hard and ask
+# the operator to remove the symlink manually before re-running deploy.
+_SSH_DIR=/var/lib/rf-adapt-intel/.ssh
+if ! $DRY_RUN && [[ -L "${_SSH_DIR}" ]]; then
+  echo "[ERROR] ${_SSH_DIR} is a symlink — refusing to operate on it." >&2
+  echo "        Remove the symlink manually and re-run deploy.sh:" >&2
+  echo "          sudo rm -f '${_SSH_DIR}'" >&2
+  exit 1
+fi
+if ! $DRY_RUN && [[ -e "${_SSH_DIR}" && ! -d "${_SSH_DIR}" ]]; then
+  echo "[ERROR] ${_SSH_DIR} exists but is not a directory (unexpected file type)." >&2
+  echo "        Remove it manually and re-run deploy.sh:" >&2
+  echo "          sudo rm -f '${_SSH_DIR}'" >&2
+  exit 1
+fi
+# Use `install -d` which sets ownership and mode in a single command,
+# reducing the window between creation and permission-setting compared to
+# separate mkdir/chown/chmod calls.  The guards above ensure this path is
+# not a symlink or an unexpected non-directory file.
+run sudo install -d -m 0700 -o rf_worker -g rf_worker "${_SSH_DIR}"
+# Generate an Ed25519 key pair for rf_worker if one does not already exist.
+if ! $DRY_RUN; then
+  priv_key="${_SSH_DIR}/id_ed25519"
+  # Refuse to use a symlink or non-regular file for the private key path to
+  # avoid an attacker-controlled target being treated as an existing key.
+  if sudo test -L "${priv_key}"; then
+    echo "[ERROR] ${priv_key} is a symlink; refusing to use it as the rf_worker SSH private key." >&2
+    echo "        Remove the symlink and re-run this deploy script to generate a fresh key:" >&2
+    echo "          sudo rm -f '${priv_key}'" >&2
+    exit 1
+  elif sudo test -e "${priv_key}" && ! sudo test -f "${priv_key}"; then
+    echo "[ERROR] ${priv_key} exists but is not a regular file (unexpected file type)." >&2
+    echo "        Remove it and re-run this deploy script to generate a fresh key:" >&2
+    echo "          sudo rm -f '${priv_key}'" >&2
+    exit 1
+  elif ! sudo test -e "${priv_key}"; then
+    echo "Generating SSH key pair for rf_worker..."
+    sudo -u rf_worker \
+      HOME=/var/lib/rf-adapt-intel \
+      ssh-keygen -t ed25519 -N "" \
+        -f "${priv_key}" \
+        -C "rf_worker@$(hostname -s 2>/dev/null || echo localhost)"
+  fi
+  echo ""
+  echo "=== rf_worker SSH public key ==="
+  echo "Copy this key to Brian's /home/rf_worker/.ssh/authorized_keys (or the"
+  echo "authorized_keys file for whatever user owns the destination path):"
+  echo ""
+  pub_key="${_SSH_DIR}/id_ed25519.pub"
+  if sudo -u rf_worker test -L "${pub_key}"; then
+    echo "[ERROR] ${pub_key} is a symlink; refusing to print target contents." >&2
+    echo "        Remove the symlink and regenerate the key with ssh-keygen as rf_worker." >&2
+    echo "        Then re-run this deploy script to verify the public key." >&2
+    exit 1
+  elif ! sudo -u rf_worker test -f "${pub_key}"; then
+    echo "[ERROR] Expected SSH public key ${pub_key} to be a regular file but it is missing or not a file." >&2
+    echo "        Regenerate the key with ssh-keygen as rf_worker, then re-run this deploy script." >&2
+    exit 1
+  else
+    sudo -u rf_worker cat "${pub_key}"
+  fi
+  echo ""
+  echo "  On Brian, log in as the destination user and append the public key above to:"
+  echo "    ~/.ssh/authorized_keys    # on Brian"
+  echo "  (This deploy step only generates/verifies the key on this node; it does not"
+  echo "   install it into any remote authorized_keys file.)"
+  echo ""
+  echo "  Optional: from the rf_adapt_intel repo checkout on Brian, run:"
+  echo "    sudo bash scripts/check_ssh_permissions.sh --fix"
+  echo "  to tighten SSH directory/file permissions. That script will also print a"
+  echo "  helper command you can use instead of manually editing authorized_keys."
+else
+  echo "[dry-run] Would generate SSH key pair for rf_worker if absent"
+fi
 
 # Verify the directory is accessible by rf_worker before starting the service
 if ! $DRY_RUN; then

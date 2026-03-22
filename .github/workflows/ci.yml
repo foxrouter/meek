@@ -79,6 +79,9 @@ jobs:
       - name: test_canary.sh
         run: bash tests/test_canary.sh -v
 
+      - name: test_check_ssh_permissions.sh
+        run: bash tests/test_check_ssh_permissions.sh -v
+
   # ─────────────────────────────────────────────────────────────────────────
   # 2. Build iq_metrics (C++, no hardware deps) + validate vs Python
   # ─────────────────────────────────────────────────────────────────────────
