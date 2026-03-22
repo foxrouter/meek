@@ -348,7 +348,7 @@ class TestSnapshotMatching(unittest.TestCase):
     def test_index_finds_files(self):
         np.random.seed(0)
         for i in range(3):
-            self._make_snap(1_000_000 + i, 750, np.ones(32, dtype=np.complex64))
+            self._make_snap(1_000_000 + i, 75, np.ones(32, dtype=np.complex64))
         snaps = dc.index_snapshots(self._tmp)
         self.assertEqual(len(snaps), 3)
 
@@ -360,7 +360,7 @@ class TestSnapshotMatching(unittest.TestCase):
 
     def test_match_by_conf_pct(self):
         np.random.seed(0)
-        self._make_snap(999_000_000, 750, np.ones(32, dtype=np.complex64))
+        self._make_snap(999_000_000, 75, np.ones(32, dtype=np.complex64))
         snaps = dc.index_snapshots(self._tmp)
         cand  = {
             "confidence":   0.750,
@@ -368,7 +368,7 @@ class TestSnapshotMatching(unittest.TestCase):
         }
         snap  = dc.match_snapshot(cand, snaps)
         self.assertIsNotNone(snap)
-        self.assertEqual(snap["conf_pct"], 750)
+        self.assertEqual(snap["conf_pct"], 75)
 
     def test_no_match_returns_none(self):
         snaps = dc.index_snapshots(self._tmp)  # empty dir
@@ -385,23 +385,23 @@ class TestSnapshotMatching(unittest.TestCase):
 
     def test_index_with_band_tag(self):
         """Files with _b<band> tag are indexed and band_name is extracted."""
-        self._make_snap(2_000_000, 800, np.ones(32, dtype=np.complex64), band="ISM-433")
+        self._make_snap(2_000_000, 80, np.ones(32, dtype=np.complex64), band="ISM-433")
         snaps = dc.index_snapshots(self._tmp)
         self.assertEqual(len(snaps), 1)
         self.assertEqual(snaps[0]["band_name"], "ISM-433")
-        self.assertEqual(snaps[0]["conf_pct"], 800)
+        self.assertEqual(snaps[0]["conf_pct"], 80)
 
     def test_index_without_band_tag_has_empty_band_name(self):
         """Legacy files without _b<band> tag still index with empty band_name."""
-        self._make_snap(3_000_000, 700, np.ones(32, dtype=np.complex64))
+        self._make_snap(3_000_000, 70, np.ones(32, dtype=np.complex64))
         snaps = dc.index_snapshots(self._tmp)
         self.assertEqual(len(snaps), 1)
         self.assertEqual(snaps[0]["band_name"], "")
 
     def test_index_mixed_legacy_and_banded(self):
         """Legacy and banded snapshots can coexist in the same directory."""
-        self._make_snap(4_000_000, 650, np.ones(32, dtype=np.complex64))
-        self._make_snap(5_000_000, 900, np.ones(32, dtype=np.complex64), band="LORA-868")
+        self._make_snap(4_000_000, 65, np.ones(32, dtype=np.complex64))
+        self._make_snap(5_000_000, 90, np.ones(32, dtype=np.complex64), band="LORA-868")
         snaps = dc.index_snapshots(self._tmp)
         self.assertEqual(len(snaps), 2)
         by_ts = {s["ts_ns"]: s for s in snaps}
@@ -486,12 +486,12 @@ class TestEndToEnd(unittest.TestCase):
         )
         conn.close()
 
-        # Create matching snapshot files (conf_pct = int(conf * 1000))
+        # Create matching snapshot files (conf_pct = int(conf * 100))
         self._snap_paths: Dict[int, str] = {}
         pairs = [
-            (sig_ids[0], 810, make_fsk2()),
-            (sig_ids[1], 720, make_ook()),
-            (sig_ids[2], 650, make_qpsk()),
+            (sig_ids[0], 81, make_fsk2()),
+            (sig_ids[1], 72, make_ook()),
+            (sig_ids[2], 65, make_qpsk()),
         ]
         for sig_id, conf_pct, samples in pairs:
             ts_ns = 1_700_000_000_000_000_000 + sig_id * 1_000_000
@@ -822,7 +822,7 @@ class TestResampleIq(unittest.TestCase):
         samples_hi = make_fsk2(n_syms=400, sps=16, fs=fs_capture)
         tmp = tempfile.mkdtemp()
         try:
-            snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")
+            snap_path = os.path.join(tmp, "snap_1234567890000000000_c81.cf32")
             with open(snap_path, "wb") as fh:
                 fh.write(cf32_bytes(samples_hi))
             candidate = {
@@ -888,7 +888,7 @@ class TestResampleIq(unittest.TestCase):
 
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp)
-        snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")
+        snap_path = os.path.join(tmp, "snap_1234567890000000000_c81.cf32")
         # Write a minimal CF32 file large enough for sha256_file to succeed
         with open(snap_path, "wb") as fh:
             fh.write(np.zeros(100, dtype=np.float32).tobytes())
@@ -924,7 +924,7 @@ class TestResampleIq(unittest.TestCase):
 
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp)
-        snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")
+        snap_path = os.path.join(tmp, "snap_1234567890000000000_c81.cf32")
         with open(snap_path, "wb") as fh:
             fh.write(np.zeros(100, dtype=np.float32).tobytes())
 
@@ -955,7 +955,7 @@ class TestResampleIq(unittest.TestCase):
         # Write a minimal CF32 snapshot file (8 float32 values = 32 bytes = 4 complex samples)
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp)
-        snap_path = os.path.join(tmp, "snap_1234567890000000000_c810.cf32")
+        snap_path = os.path.join(tmp, "snap_1234567890000000000_c81.cf32")
         with open(snap_path, "wb") as fh:
             fh.write(np.zeros(8, dtype=np.float32).tobytes())
 
