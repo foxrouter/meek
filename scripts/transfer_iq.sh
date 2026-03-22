@@ -66,6 +66,7 @@ _SSH_OPTS=(
   -o ConnectTimeout=10
   -o ServerAliveInterval=5
   -o ServerAliveCountMax=2
+  -o IdentitiesOnly=yes
   -o "IdentityFile=${SSH_KEY}"
   -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS}"
 )
