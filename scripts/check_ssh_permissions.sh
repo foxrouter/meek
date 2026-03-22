@@ -92,6 +92,11 @@ if [[ ${#SCAN_HOSTS[@]} -gt 0 ]] || $DRY_RUN; then
   FIX=true
 fi
 
+# Precompute hostname for SSH key comment so it is expanded once in the outer
+# shell and can be safely embedded in bash -c strings without relying on
+# command substitution inside single-quoted arguments.
+_KEY_COMMENT_HOST="$(hostname -s 2>/dev/null || echo localhost)"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -352,7 +357,7 @@ if [[ -L "${SSH_KEY}" ]]; then
                sudo -u '${SERVICE_USER}' HOME='${SSH_BASE}' \
                  ssh-keygen -t '${KEY_TYPE}' -N '' \
                    -f '${SSH_KEY}' \
-                   -C '${SERVICE_USER}@$(hostname -s 2>/dev/null || echo localhost)'"
+                   -C '${SERVICE_USER}@${_KEY_COMMENT_HOST}'"
   fi
 elif [[ -f "${SSH_KEY}" ]]; then
   key_owner="$(stat -c '%U' "${SSH_KEY}" 2>/dev/null || echo unknown)"
@@ -430,7 +435,7 @@ elif [[ -e "${SSH_KEY}" ]]; then
                sudo -u '${SERVICE_USER}' HOME='${SSH_BASE}' \
                  ssh-keygen -t '${KEY_TYPE}' -N '' \
                    -f '${SSH_KEY}' \
-                   -C '${SERVICE_USER}@$(hostname -s 2>/dev/null || echo localhost)'"
+                   -C '${SERVICE_USER}@${_KEY_COMMENT_HOST}'"
   fi
 else
   fail "${SSH_KEY} does not exist — key pair missing"
@@ -454,7 +459,7 @@ else
         HOME="${SSH_BASE}" \
         ssh-keygen -t "${KEY_TYPE}" -N "" \
           -f "${SSH_KEY}" \
-          -C "${SERVICE_USER}@$(hostname -s 2>/dev/null || echo localhost)"
+          -C "${SERVICE_USER}@${_KEY_COMMENT_HOST}"
       fixed "generated ${KEY_TYPE} key pair at ${SSH_KEY}"
     fi
   fi
