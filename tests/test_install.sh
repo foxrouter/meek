@@ -363,15 +363,33 @@ test_transfer_iq_ssh_options() {
     fail "transfer_iq.sh exists" "File not found: ${script}"
     return
   fi
-  if grep -qF 'IdentityFile' "${script}"; then
-    ok "transfer_iq.sh contains IdentityFile option"
+  # Ensure _SSH_OPTS wires IdentityFile through to ssh, not just a stray string.
+  if grep -qE '_SSH_OPTS=.*-o[[:space:]]+IdentityFile=' "${script}"; then
+    ok "transfer_iq.sh _SSH_OPTS includes -o IdentityFile option"
   else
-    fail "transfer_iq.sh contains IdentityFile option" "Expected to find: 'IdentityFile'"
+    fail "transfer_iq.sh _SSH_OPTS includes -o IdentityFile option" \
+      "Expected to find: '_SSH_OPTS=... -o IdentityFile=...'"
   fi
-  if grep -qF 'UserKnownHostsFile' "${script}"; then
-    ok "transfer_iq.sh contains UserKnownHostsFile option"
+  # Ensure _SSH_OPTS wires UserKnownHostsFile through to ssh.
+  if grep -qE '_SSH_OPTS=.*-o[[:space:]]+UserKnownHostsFile=' "${script}"; then
+    ok "transfer_iq.sh _SSH_OPTS includes -o UserKnownHostsFile option"
   else
-    fail "transfer_iq.sh contains UserKnownHostsFile option" "Expected to find: 'UserKnownHostsFile'"
+    fail "transfer_iq.sh _SSH_OPTS includes -o UserKnownHostsFile option" \
+      "Expected to find: '_SSH_OPTS=... -o UserKnownHostsFile=...'"
+  fi
+  # Ensure _RSYNC_RSH actually uses _SSH_OPTS.
+  if grep -qE '_RSYNC_RSH=.*\$\{_SSH_OPTS\}' "${script}"; then
+    ok "transfer_iq.sh _RSYNC_RSH includes \${_SSH_OPTS}"
+  else
+    fail "transfer_iq.sh _RSYNC_RSH includes \${_SSH_OPTS}" \
+      "Expected to find: '_RSYNC_RSH=... \${_SSH_OPTS}...'"
+  fi
+  # Ensure rsync is invoked with -e \"\${_RSYNC_RSH}\" so these options are used.
+  if grep -qE 'rsync .* -e "\$\{_RSYNC_RSH\}"' "${script}"; then
+    ok "transfer_iq.sh uses -e \"\${_RSYNC_RSH}\" in rsync calls"
+  else
+    fail "transfer_iq.sh uses -e \"\${_RSYNC_RSH}\" in rsync calls" \
+      "Expected to find: 'rsync ... -e \"\${_RSYNC_RSH}\" ...'"
   fi
   if grep -qF 'SSH_KEY="${SSH_KEY:-' "${script}"; then
     ok "transfer_iq.sh has SSH_KEY env var"
