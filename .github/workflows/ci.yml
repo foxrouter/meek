@@ -26,7 +26,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -76,6 +76,12 @@ jobs:
       - name: test_install.sh
         run: bash tests/test_install.sh -v
 
+      - name: test_canary.sh
+        run: bash tests/test_canary.sh -v
+
+      - name: test_check_ssh_permissions.sh
+        run: bash tests/test_check_ssh_permissions.sh -v
+
   # ─────────────────────────────────────────────────────────────────────────
   # 2. Build iq_metrics (C++, no hardware deps) + validate vs Python
   # ─────────────────────────────────────────────────────────────────────────
@@ -85,7 +91,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -180,7 +186,7 @@ jobs:
       # for this job which runs iq_metrics via Python subprocess.
       ASAN_OPTIONS: detect_leaks=0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -223,7 +229,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -256,7 +262,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
