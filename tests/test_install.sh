@@ -377,14 +377,19 @@ test_transfer_iq_ssh_options() {
     fail "transfer_iq.sh _SSH_OPTS includes -o UserKnownHostsFile option" \
       "Expected to find: '-o \"UserKnownHostsFile=\${SSH_KNOWN_HOSTS}\"'"
   fi
-  # Ensure _RSYNC_RSH includes the SSH key and known_hosts options so they are
-  # propagated to all rsync SSH invocations, without depending on a specific
-  # implementation detail (e.g. ${_SSH_OPTS[*]} expansion).
-  if grep -qE '_RSYNC_RSH=.*IdentityFile=\$\{SSH_KEY\}.*UserKnownHostsFile=\$\{SSH_KNOWN_HOSTS\}' "${script}"; then
-    ok 'transfer_iq.sh _RSYNC_RSH includes IdentityFile and UserKnownHostsFile options'
+  # Ensure _RSYNC_RSH is constructed from the ssh command plus _SSH_OPTS so
+  # the SSH key and known_hosts options are propagated to all rsync SSH
+  # invocations, without assuming they appear on the same line.
+  if grep -qF '_rsync_rsh_cmd=ssh' "${script}" \
+    && grep -qF 'for _opt in "${_SSH_OPTS[@]}"' "${script}" \
+    && grep -qF '_rsync_rsh_cmd="${_rsync_rsh_cmd} ${_opt}"' "${script}" \
+    && grep -qF '_RSYNC_RSH="${_rsync_rsh_cmd}"' "${script}" \
+    && grep -qF 'IdentityFile=${SSH_KEY}' "${script}" \
+    && grep -qF 'UserKnownHostsFile=${SSH_KNOWN_HOSTS}' "${script}"; then
+    ok 'transfer_iq.sh _RSYNC_RSH constructed from _rsync_rsh_cmd with IdentityFile and UserKnownHostsFile options'
   else
-    fail 'transfer_iq.sh _RSYNC_RSH includes IdentityFile and UserKnownHostsFile options' \
-      "Expected _RSYNC_RSH definition to include IdentityFile=\${SSH_KEY} and UserKnownHostsFile=\${SSH_KNOWN_HOSTS}"
+    fail 'transfer_iq.sh _RSYNC_RSH constructed from _rsync_rsh_cmd with IdentityFile and UserKnownHostsFile options' \
+      "Expected _RSYNC_RSH to be built from _rsync_rsh_cmd, with _rsync_rsh_cmd initialised as ssh, options appended from _SSH_OPTS, and IdentityFile=\${SSH_KEY} / UserKnownHostsFile=\${SSH_KNOWN_HOSTS} present in the SSH options"
   fi
   # Ensure rsync is invoked with -e "${_RSYNC_RSH}" at all expected call sites
   # so these options are consistently used.
