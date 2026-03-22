@@ -409,6 +409,7 @@ elif [[ -f "${SSH_KEY}" ]]; then
                  mv -f \"\${tmp_pub}\" '${SSH_KEY}.pub'"
     fi
   else
+    fail "${SSH_KEY}.pub is missing"
     if $FIX; then
       run_fix "regenerate missing ${SSH_KEY}.pub from private key" \
         bash -c "tmp_pub=\$(mktemp '${SSH_KEY}.pub.XXXXXX') && \
@@ -418,7 +419,7 @@ elif [[ -f "${SSH_KEY}" ]]; then
                  chmod 644 \"\${tmp_pub}\" && \
                  mv -f \"\${tmp_pub}\" '${SSH_KEY}.pub'"
     else
-      info "${SSH_KEY}.pub missing — regenerate with: ssh-keygen -y -f ${SSH_KEY}"
+      info "Regenerate with: ssh-keygen -y -f ${SSH_KEY}"
     fi
   fi
 elif [[ -e "${SSH_KEY}" ]]; then

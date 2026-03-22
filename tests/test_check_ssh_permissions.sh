@@ -174,9 +174,9 @@ EOF
             "${_STUB_DIR}/sudo" "${_STUB_DIR}/hostname" \
             "${_STUB_DIR}/chown" "${_STUB_DIR}/chmod"
 
-  # Create the fake application data directory under _TMP
+  # Create the fake application data directory under _TMP.
+  # No chown needed: mkdir -p already creates it owned by the current user.
   mkdir -p "${_TMP}/var/lib/rf-adapt-intel"
-  chown "$(id -u):$(id -g)" "${_TMP}/var/lib/rf-adapt-intel"
 }
 
 teardown_env() {
@@ -724,6 +724,53 @@ test_ssh_pubkey_not_a_file_fix_removes_and_regenerates() {
   assert_contains "pubkey non-regular --fix: reports FIXED" "FIXED" "${out}"
 }
 
+# Regression: when private key exists but .pub is missing, check-only must
+# report [FAIL] (not silently ignore it), and --fix must report [FIXED].
+test_ssh_pubkey_missing_check_reports_fail() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  local ssh_key="${ssh_dir}/id_ed25519"
+  touch "${ssh_key}"
+  chmod 600 "${ssh_key}"
+  touch "${ssh_dir}/known_hosts"
+  chmod 600 "${ssh_dir}/known_hosts"
+  # Intentionally no .pub file — check-only must report FAIL
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "pubkey missing: reports FAIL" "[FAIL]" "${out}"
+  assert_contains "pubkey missing: mentions missing" "missing" "${out}"
+}
+
+test_ssh_pubkey_missing_fix_regenerates() {
+  setup_env
+  local ssh_dir="${_TMP}/var/lib/rf-adapt-intel/.ssh"
+  mkdir -p "${ssh_dir}"
+  chmod 700 "${ssh_dir}"
+  local ssh_key="${ssh_dir}/id_ed25519"
+  touch "${ssh_key}"
+  chmod 600 "${ssh_key}"
+  touch "${ssh_dir}/known_hosts"
+  chmod 600 "${ssh_dir}/known_hosts"
+  # Intentionally no .pub file — --fix must regenerate it and report FIXED
+  local out rc=0
+  out="$(env \
+    PATH="${_STUB_DIR}:${PATH}" \
+    SERVICE_USER="${_CURRENT_USER}" \
+    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
+    _RF_TEST_NO_ROOT=1 \
+    bash "${SCRIPT}" --fix 2>&1)" || rc=$?
+  teardown_env
+  assert_contains "pubkey missing --fix: reports FIXED" "FIXED" "${out}"
+}
+
 # Regression: --fix --host must exit non-zero when ssh-keyscan fails.
 # This guards against _FIXED over-inflation masking the scan failure:
 # host-key additions are not repairs of [FAIL] items, so a keyscan failure
@@ -822,6 +869,8 @@ test_ssh_pubkey_symlink_rejected
 test_ssh_pubkey_symlink_fix_replaces_it
 test_ssh_pubkey_not_a_file_rejected
 test_ssh_pubkey_not_a_file_fix_removes_and_regenerates
+test_ssh_pubkey_missing_check_reports_fail
+test_ssh_pubkey_missing_fix_regenerates
 test_ssh_pubkey_symlink_does_not_print_target_contents
 test_keyscan_failure_exits_nonzero
 test_fix_exits_zero_when_all_fixed
