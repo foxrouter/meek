@@ -99,12 +99,12 @@ CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT DEFAULT (datetime('now')),
     source TEXT,
-    note TEXT
+    notes TEXT
 );
 CREATE TABLE IF NOT EXISTS methods (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    params_json TEXT,
+    params TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS examples (
@@ -132,7 +132,7 @@ def _populate_db(conn: sqlite3.Connection,
     conn.executescript(_SCHEMA)
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO methods (name, params_json) VALUES (?, ?)",
+        "INSERT INTO methods (name, params) VALUES (?, ?)",
         ("modulation_classifier",
          '{"type":"heuristic","version":2,"classes":["cw_like","fsk_like","psk_qam_like","ook_am_like"]}'),
     )
@@ -141,7 +141,7 @@ def _populate_db(conn: sqlite3.Connection,
     for mod, conf, band in records:
         trace = _TRACE_TMPL.format(mod=mod, conf=conf, band=band)
         cur.execute(
-            "INSERT INTO signals (source, note) VALUES (?, ?)",
+            "INSERT INTO signals (source, notes) VALUES (?, ?)",
             ("test_fixture", trace),
         )
         sig_id = cur.lastrowid
