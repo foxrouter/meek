@@ -387,7 +387,7 @@ test_transfer_iq_ssh_options() {
   # Ensure rsync is invoked with -e "${_RSYNC_RSH}" at all expected call sites
   # so these options are consistently used.
   local rsync_rsh_count
-  rsync_rsh_count="$(grep -cF '-e "${_RSYNC_RSH}"' "${script}" || true)"
+  rsync_rsh_count="$(grep -cF -- '-e "${_RSYNC_RSH}"' "${script}" || true)"
   if [[ "${rsync_rsh_count}" -eq 5 ]]; then
     ok 'transfer_iq.sh uses -e "${_RSYNC_RSH}" in all rsync calls (5 occurrences)'
   else
@@ -395,8 +395,9 @@ test_transfer_iq_ssh_options() {
       "Expected 5 occurrences of '-e \"\${_RSYNC_RSH}\"', found: ${rsync_rsh_count}"
   fi
   # Ensure direct ssh invocations all use "${_SSH_OPTS[@]}".
+  # Filter out comment lines first so only actual call sites are counted.
   local ssh_opts_call_count
-  ssh_opts_call_count="$(grep -cF 'ssh \"${_SSH_OPTS[@]}\"' "${script}" || true)"
+  ssh_opts_call_count="$(grep -v '^[[:space:]]*#' "${script}" | grep -cF 'ssh "${_SSH_OPTS[@]}"' || true)"
   if [[ "${ssh_opts_call_count}" -eq 3 ]]; then
     ok 'transfer_iq.sh ssh calls use "${_SSH_OPTS[@]}" (3 occurrences)'
   else
