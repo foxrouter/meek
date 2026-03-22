@@ -390,6 +390,7 @@ test_base_dir_write_access_checked() {
   chmod 0755 "${_TMP}/var/lib/rf-adapt-intel" 2>/dev/null || true
   teardown_env
   assert_contains "write access: detects non-writable dir" "not writable" "${out}"
+  assert_exit "write access: exits non-zero on non-writable base dir" 1 "${rc}"
 }
 
 test_exit_nonzero_when_fix_fails_for_some() {

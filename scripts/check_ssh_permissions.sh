@@ -184,10 +184,8 @@ if [[ -d "${SSH_BASE}" ]]; then
   else
     fail "${SSH_BASE} is not writable by ${SERVICE_USER} — check mode bits"
     if $FIX; then
-      run_fix "chown ${SERVICE_USER}:${SERVICE_USER} ${SSH_BASE}" \
-        chown "${SERVICE_USER}:${SERVICE_USER}" "${SSH_BASE}"
-      run_fix "chmod 0750 ${SSH_BASE}" \
-        chmod 0750 "${SSH_BASE}"
+      run_fix "chown ${SERVICE_USER}:${SERVICE_USER} and chmod 0750 on ${SSH_BASE}" \
+        bash -c 'chown "$1:$1" "$2" && chmod 0750 "$2"' _ "${SERVICE_USER}" "${SSH_BASE}"
     fi
   fi
 else
