@@ -394,6 +394,8 @@ sync_db() {
   if $_chk_is_remote; then
     if ssh -o BatchMode=yes -o ConnectTimeout=10 \
            -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
+           -o IdentityFile=/var/lib/rf-adapt-intel/.ssh/id_ed25519 \
+           -o UserKnownHostsFile=/var/lib/rf-adapt-intel/.ssh/known_hosts \
            -- "${_chk_host}" \
            "test -d $(_posix_sq "${_chk_path}")" 2>/dev/null; then
       log "ERROR DB_DEST '${DB_DEST}' is a remote directory; a full file path is required"
@@ -479,6 +481,8 @@ sync_db() {
               -o ConnectTimeout=10 \
               -o ServerAliveInterval=5 \
               -o ServerAliveCountMax=2 \
+              -o IdentityFile=/var/lib/rf-adapt-intel/.ssh/id_ed25519 \
+              -o UserKnownHostsFile=/var/lib/rf-adapt-intel/.ssh/known_hosts \
               -- "${_db_dest_host}" \
               "rm -f -- ${_wal_q} ${_shm_q}" 2>&1)" || {
             log "WARN could not remove stale WAL/SHM at destination; marking sync as failed${_ssh_err:+: ${_ssh_err}}"
@@ -532,6 +536,8 @@ sync_db() {
             done
             ssh -o BatchMode=yes -o ConnectTimeout=10 \
                 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
+                -o IdentityFile=/var/lib/rf-adapt-intel/.ssh/id_ed25519 \
+                -o UserKnownHostsFile=/var/lib/rf-adapt-intel/.ssh/known_hosts \
                 -- "${_fb_host}" "rm -f --${_fb_rm_q}" 2>/dev/null || \
               log "WARN could not remove stale WAL/SHM at fallback destination (non-fatal)"
           else
