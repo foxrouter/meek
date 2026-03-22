@@ -363,16 +363,26 @@ test_transfer_iq_ssh_options() {
     fail "transfer_iq.sh exists" "File not found: ${script}"
     return
   fi
-  local content
-  content="$(cat "${script}")"
-  assert_contains "transfer_iq.sh contains IdentityFile option" \
-    "IdentityFile" "${content}"
-  assert_contains "transfer_iq.sh contains UserKnownHostsFile option" \
-    "UserKnownHostsFile" "${content}"
-  assert_contains "transfer_iq.sh has SSH_KEY env var" \
-    'SSH_KEY="${SSH_KEY:-' "${content}"
-  assert_contains "transfer_iq.sh has SSH_KNOWN_HOSTS env var" \
-    'SSH_KNOWN_HOSTS="${SSH_KNOWN_HOSTS:-' "${content}"
+  if grep -qF 'IdentityFile' "${script}"; then
+    ok "transfer_iq.sh contains IdentityFile option"
+  else
+    fail "transfer_iq.sh contains IdentityFile option" "Expected to find: 'IdentityFile'"
+  fi
+  if grep -qF 'UserKnownHostsFile' "${script}"; then
+    ok "transfer_iq.sh contains UserKnownHostsFile option"
+  else
+    fail "transfer_iq.sh contains UserKnownHostsFile option" "Expected to find: 'UserKnownHostsFile'"
+  fi
+  if grep -qF 'SSH_KEY="${SSH_KEY:-' "${script}"; then
+    ok "transfer_iq.sh has SSH_KEY env var"
+  else
+    fail "transfer_iq.sh has SSH_KEY env var" "Expected to find: 'SSH_KEY=\"\${SSH_KEY:-'"
+  fi
+  if grep -qF 'SSH_KNOWN_HOSTS="${SSH_KNOWN_HOSTS:-' "${script}"; then
+    ok "transfer_iq.sh has SSH_KNOWN_HOSTS env var"
+  else
+    fail "transfer_iq.sh has SSH_KNOWN_HOSTS env var" "Expected to find: 'SSH_KNOWN_HOSTS=\"\${SSH_KNOWN_HOSTS:-'"
+  fi
 }
 
 # ---------------------------------------------------------------------------

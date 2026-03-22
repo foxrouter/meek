@@ -2,6 +2,7 @@
 Description=Process incoming IQ files (batch dispatcher, Brian)
 Documentation=https://github.com/foxrouter/meek
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
@@ -19,7 +20,6 @@ EnvironmentFile=-/etc/default/rf-adapt-intel
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=rf-incoming-processor
-StartLimitIntervalSec=0
 
 # Filesystem protection
 ProtectSystem=full
