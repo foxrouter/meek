@@ -2,6 +2,7 @@
 Description=Process incoming IQ files (batch dispatcher, Brian)
 Documentation=https://github.com/foxrouter/meek
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
