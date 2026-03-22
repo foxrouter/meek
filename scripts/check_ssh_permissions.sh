@@ -206,10 +206,10 @@ if [[ -L "${SSH_DIR}" ]]; then
   fail "${SSH_DIR} is a symlink — this is a security risk; refusing to operate on it"
   if $FIX; then
     run_fix "remove symlink ${SSH_DIR} and create real directory (mode 700, owner ${SERVICE_USER})" \
-      bash -c "rm -f '${SSH_DIR}' && \
-               mkdir -p '${SSH_DIR}' && \
-               chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_DIR}' && \
-               chmod 700 '${SSH_DIR}'"
+      bash -c 'rm -f "$1" && \
+               mkdir -p "$1" && \
+               chown "$2:$2" "$1" && \
+               chmod 700 "$1"' _ "${SSH_DIR}" "${SERVICE_USER}"
   fi
 elif [[ -d "${SSH_DIR}" ]]; then
   pass "${SSH_DIR} exists (regular directory)"
