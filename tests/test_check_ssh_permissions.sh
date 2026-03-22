@@ -95,10 +95,12 @@ fi
 exec /usr/bin/id "\$@"
 EOF
 
-  # stub: ssh-keygen — handle -F (host lookup), -l (fingerprint), and key generation
+  # stub: ssh-keygen — handle -F (host lookup), -l (fingerprint), -y (pub extract),
+  # and key generation
   cat > "${_STUB_DIR}/ssh-keygen" <<'EOF'
 #!/usr/bin/env bash
 # Stub: -F <host> returns "not found"; -l prints a fake fingerprint;
+# -y -f <key> prints the public key to stdout (without creating files);
 # key generation creates stub files.
 if [[ "${1:-}" == "-F" ]]; then
   # Simulate: host NOT found in known_hosts (so keyscan is triggered).
@@ -107,6 +109,12 @@ fi
 if [[ "${1:-}" == "-l" ]]; then
   # Simulate fingerprint output for the given file.
   echo "256 SHA256:AAABBBCCC stub-fingerprint (ED25519)"
+  exit 0
+fi
+if [[ "${1:-}" == "-y" ]]; then
+  # Simulate: print the public key for the given private key (-f <keyfile>).
+  # This is used by check_ssh_permissions.sh to regenerate a missing .pub.
+  echo "ssh-ed25519 AAAA stub-key rf_worker@testhost"
   exit 0
 fi
 # Otherwise simulate key generation.
@@ -195,18 +203,6 @@ run_check() {
     SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" "$@" 2>&1 || true
-}
-
-# Run and capture exit code separately (for assert_exit tests).
-run_check_rc() {
-  local rc=0
-  env \
-    PATH="${_STUB_DIR}:${PATH}" \
-    SERVICE_USER="${_CURRENT_USER}" \
-    SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
-    _RF_TEST_NO_ROOT=1 \
-    bash "${SCRIPT}" "$@" 2>&1 || rc=$?
-  echo "${rc}"
 }
 
 # ---------------------------------------------------------------------------
@@ -767,8 +763,12 @@ test_ssh_pubkey_missing_fix_regenerates() {
     SSH_BASE="${_TMP}/var/lib/rf-adapt-intel" \
     _RF_TEST_NO_ROOT=1 \
     bash "${SCRIPT}" --fix 2>&1)" || rc=$?
+  local pub_content
+  pub_content="$(cat "${ssh_key}.pub" 2>/dev/null || true)"
   teardown_env
   assert_contains "pubkey missing --fix: reports FIXED" "FIXED" "${out}"
+  assert_contains "pubkey missing --fix: pub file contains stub key" \
+    "ssh-ed25519 AAAA stub-key" "${pub_content}"
 }
 
 # Regression: --fix --host must exit non-zero when ssh-keyscan fails.

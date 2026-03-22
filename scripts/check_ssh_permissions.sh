@@ -518,7 +518,16 @@ if [[ ${#SCAN_HOSTS[@]} -gt 0 ]]; then
           # Cleanup trap: remove the temp file if any step below fails
           # before mv completes (set -e exits the script on error).
           trap 'rm -f "${_tmp_kh}"' EXIT
-          { cat "${KNOWN_HOSTS}" 2>/dev/null; printf '%s\n' "${local_scan}"; } > "${_tmp_kh}"
+          # Read any existing known_hosts content without elevated privileges:
+          # drop to SERVICE_USER for the read so a raced symlink to a
+          # sensitive file (e.g. /etc/shadow) cannot be read as root.
+          if [[ "$(id -u)" -eq 0 ]]; then
+            sudo -u "${SERVICE_USER}" bash -c 'cat "$1" 2>/dev/null' \
+              _ "${KNOWN_HOSTS}" > "${_tmp_kh}" || true
+          else
+            cat "${KNOWN_HOSTS}" 2>/dev/null > "${_tmp_kh}" || true
+          fi
+          printf '%s\n' "${local_scan}" >> "${_tmp_kh}"
           chmod 600 "${_tmp_kh}"
           chown "${SERVICE_USER}:${SERVICE_USER}" "${_tmp_kh}"
           mv -f "${_tmp_kh}" "${KNOWN_HOSTS}"
