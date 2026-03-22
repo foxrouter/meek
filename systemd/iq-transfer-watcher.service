@@ -16,6 +16,12 @@ Group=rf_worker
 WorkingDirectory=/var/lib/rf-adapt-intel
 StateDirectory=rf-adapt-intel
 
+# Override HOME so that SSH/rsync store keys and known_hosts under
+# /var/lib/rf-adapt-intel/.ssh/ — a path already covered by ReadWritePaths in
+# the hardening drop-in — instead of in rf_worker's home directory, which is
+# inaccessible when ProtectHome=yes is active.
+Environment=HOME=/var/lib/rf-adapt-intel
+
 # IQ_DEST, IQ_BW_KBPS, IQ_MAX_RETRIES — set in /etc/rf_worker/iq-transfer.env
 EnvironmentFile=-/etc/rf_worker/iq-transfer.env
 EnvironmentFile=-/etc/default/iq-transfer-watcher

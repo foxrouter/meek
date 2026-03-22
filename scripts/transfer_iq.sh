@@ -23,6 +23,10 @@
 #   DB_DEST         rsync destination for the DB, e.g. rf_worker@brian_host:/var/lib/rf-adapt-intel/rf_adapt_intel.db
 #                   If unset, DB sync is skipped.
 #   DB_SYNC_INTERVAL  Minimum seconds between DB syncs in watch mode (default 60).
+#   SSH_KEY           Path to the SSH private key used for rsync/ssh transfers
+#                     (default /var/lib/rf-adapt-intel/.ssh/id_ed25519).
+#   SSH_KNOWN_HOSTS   Path to the SSH known_hosts file used for rsync/ssh transfers
+#                     (default /var/lib/rf-adapt-intel/.ssh/known_hosts).
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
@@ -38,6 +42,40 @@ DRY_RUN=false
 DB_SOURCE="${DB_SOURCE:-/var/lib/rf-adapt-intel/rf_adapt_intel.db}"
 DB_DEST="${DB_DEST:-}"
 DB_SYNC_INTERVAL="${DB_SYNC_INTERVAL:-60}"
+SSH_KEY="${SSH_KEY:-/var/lib/rf-adapt-intel/.ssh/id_ed25519}"
+SSH_KNOWN_HOSTS="${SSH_KNOWN_HOSTS:-/var/lib/rf-adapt-intel/.ssh/known_hosts}"
+# Reject SSH_KEY / SSH_KNOWN_HOSTS values that contain whitespace: the paths
+# are embedded verbatim in _RSYNC_RSH (a plain command string passed to
+# rsync via -e), so unquoted whitespace inside those values would change how
+# rsync parses the remote shell and its options and could mis-route arguments.
+# The direct ssh "${_SSH_OPTS[@]}" calls are immune (array expansion preserves
+# words), but _RSYNC_RSH is not. Paths under the default service-account home
+# never contain whitespace; custom overrides that do must use a symlink or
+# wrapper script instead.
+if [[ "${SSH_KEY}" =~ [[:space:]] ]]; then
+  printf '%s\n' "ERROR: SSH_KEY must not contain whitespace: '${SSH_KEY}'" >&2
+  exit 1
+fi
+if [[ "${SSH_KNOWN_HOSTS}" =~ [[:space:]] ]]; then
+  printf '%s\n' "ERROR: SSH_KNOWN_HOSTS must not contain whitespace: '${SSH_KNOWN_HOSTS}'" >&2
+  exit 1
+fi
+# Shared SSH transport options used by all direct ssh calls and rsync -e.
+_SSH_OPTS=(
+  -o BatchMode=yes
+  -o ConnectTimeout=10
+  -o ServerAliveInterval=5
+  -o ServerAliveCountMax=2
+  -o IdentitiesOnly=yes
+  -o "IdentityFile=${SSH_KEY}"
+  -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS}"
+)
+# Build _RSYNC_RSH with an explicit space delimiter so it does not depend on $IFS.
+_rsync_rsh_cmd=ssh
+for _opt in "${_SSH_OPTS[@]}"; do
+  _rsync_rsh_cmd="${_rsync_rsh_cmd} ${_opt}"
+done
+_RSYNC_RSH="${_rsync_rsh_cmd}"
 
 # Reject remote DB_DEST values that rely on remote shell expansion (e.g. ~ or $VAR),
 # since rsync would expand them but the ssh-based WAL/SHM cleanup uses single-quoted
@@ -295,6 +333,7 @@ run_rsync() {
     # Add --checksum if IQ integrity verification is critical (increases bandwidth
     # usage since rsync re-reads both sides to compare checksums).
     if run_logged rsync -az --bwlimit="${BW_KBPS}" --partial --timeout=30 \
+        -e "${_RSYNC_RSH}" \
         -- "${file}" "${DEST}"; then
       log "OK transferred: $(basename "${file}")"
       return 0
@@ -392,8 +431,7 @@ sync_db() {
     _chk_is_remote=true
   fi
   if $_chk_is_remote; then
-    if ssh -o BatchMode=yes -o ConnectTimeout=10 \
-           -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
+    if ssh "${_SSH_OPTS[@]}" \
            -- "${_chk_host}" \
            "test -d $(_posix_sq "${_chk_path}")" 2>/dev/null; then
       log "ERROR DB_DEST '${DB_DEST}' is a remote directory; a full file path is required"
@@ -457,7 +495,9 @@ sync_db() {
     local ok=true
     if [[ -n "${snap_file}" ]]; then
       run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
-          --delay-updates --timeout=30 -- "${snap_file}" "${DB_DEST}" || ok=false
+          --delay-updates --timeout=30 \
+          -e "${_RSYNC_RSH}" \
+          -- "${snap_file}" "${DB_DEST}" || ok=false
       # After a successful snapshot transfer, remove any stale WAL/SHM at the
       # destination.  If those sidecars are left from a previous live-file sync,
       # SQLite on the receiver would apply the old WAL data to the new consistent
@@ -475,10 +515,7 @@ sync_db() {
           local _wal_q _shm_q _ssh_err
           _wal_q="$(_posix_sq "${_db_dest_path}-wal")"
           _shm_q="$(_posix_sq "${_db_dest_path}-shm")"
-          _ssh_err="$(ssh -o BatchMode=yes \
-              -o ConnectTimeout=10 \
-              -o ServerAliveInterval=5 \
-              -o ServerAliveCountMax=2 \
+          _ssh_err="$(ssh "${_SSH_OPTS[@]}" \
               -- "${_db_dest_host}" \
               "rm -f -- ${_wal_q} ${_shm_q}" 2>&1)" || {
             log "WARN could not remove stale WAL/SHM at destination; marking sync as failed${_ssh_err:+: ${_ssh_err}}"
@@ -494,14 +531,20 @@ sync_db() {
     else
       # Fallback: sync live DB and sidecars (racy but better than nothing).
       run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
-          --delay-updates --timeout=30 -- "${DB_SOURCE}" "${DB_DEST}" || ok=false
+          --delay-updates --timeout=30 \
+          -e "${_RSYNC_RSH}" \
+          -- "${DB_SOURCE}" "${DB_DEST}" || ok=false
       if $ok && [[ -f "${DB_SOURCE}-wal" ]]; then
         run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
-            --delay-updates --timeout=30 -- "${DB_SOURCE}-wal" "${DB_DEST}-wal" || ok=false
+            --delay-updates --timeout=30 \
+            -e "${_RSYNC_RSH}" \
+            -- "${DB_SOURCE}-wal" "${DB_DEST}-wal" || ok=false
       fi
       if $ok && [[ -f "${DB_SOURCE}-shm" ]]; then
         run_logged rsync -az --bwlimit="${BW_KBPS}" --partial-dir=.rsync-tmp \
-            --delay-updates --timeout=30 -- "${DB_SOURCE}-shm" "${DB_DEST}-shm" || ok=false
+            --delay-updates --timeout=30 \
+            -e "${_RSYNC_RSH}" \
+            -- "${DB_SOURCE}-shm" "${DB_DEST}-shm" || ok=false
       fi
       # Remove any stale destination sidecars whose source counterpart no longer
       # exists (e.g. WAL checkpointed and deleted by the writer).  Without this,
@@ -530,8 +573,7 @@ sync_db() {
             for _fb_p in "${_fb_stale[@]}"; do
               _fb_rm_q="${_fb_rm_q} $(_posix_sq "${_fb_p}")"
             done
-            ssh -o BatchMode=yes -o ConnectTimeout=10 \
-                -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
+            ssh "${_SSH_OPTS[@]}" \
                 -- "${_fb_host}" "rm -f --${_fb_rm_q}" 2>/dev/null || \
               log "WARN could not remove stale WAL/SHM at fallback destination (non-fatal)"
           else

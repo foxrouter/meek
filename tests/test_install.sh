@@ -355,6 +355,89 @@ test_no_sdr_all_decoders_dry_run() {
 }
 
 # ---------------------------------------------------------------------------
+# transfer_iq.sh content checks
+# ---------------------------------------------------------------------------
+test_transfer_iq_ssh_options() {
+  local script="${REPO_ROOT}/scripts/transfer_iq.sh"
+  if [[ ! -f "${script}" ]]; then
+    fail "transfer_iq.sh exists" "File not found: ${script}"
+    return
+  fi
+  # Ensure _SSH_OPTS wires IdentityFile through to ssh, not just a stray string.
+  if grep -qF -- '-o "IdentityFile=${SSH_KEY}"' "${script}"; then
+    ok "transfer_iq.sh _SSH_OPTS includes -o IdentityFile option"
+  else
+    fail "transfer_iq.sh _SSH_OPTS includes -o IdentityFile option" \
+      "Expected to find: '-o \"IdentityFile=\${SSH_KEY}\"'"
+  fi
+  # Ensure _SSH_OPTS wires UserKnownHostsFile through to ssh.
+  if grep -qF -- '-o "UserKnownHostsFile=${SSH_KNOWN_HOSTS}"' "${script}"; then
+    ok "transfer_iq.sh _SSH_OPTS includes -o UserKnownHostsFile option"
+  else
+    fail "transfer_iq.sh _SSH_OPTS includes -o UserKnownHostsFile option" \
+      "Expected to find: '-o \"UserKnownHostsFile=\${SSH_KNOWN_HOSTS}\"'"
+  fi
+  # Ensure _RSYNC_RSH is constructed from the ssh command plus _SSH_OPTS so
+  # the SSH key and known_hosts options are propagated to all rsync SSH
+  # invocations, without assuming they appear on the same line.
+  if grep -qF '_rsync_rsh_cmd=ssh' "${script}" \
+    && grep -qF 'for _opt in "${_SSH_OPTS[@]}"' "${script}" \
+    && grep -qF '_rsync_rsh_cmd="${_rsync_rsh_cmd} ${_opt}"' "${script}" \
+    && grep -qF '_RSYNC_RSH="${_rsync_rsh_cmd}"' "${script}" \
+    && grep -qF 'IdentityFile=${SSH_KEY}' "${script}" \
+    && grep -qF 'UserKnownHostsFile=${SSH_KNOWN_HOSTS}' "${script}"; then
+    ok 'transfer_iq.sh _RSYNC_RSH constructed from _rsync_rsh_cmd with IdentityFile and UserKnownHostsFile options'
+  else
+    fail 'transfer_iq.sh _RSYNC_RSH constructed from _rsync_rsh_cmd with IdentityFile and UserKnownHostsFile options' \
+      "Expected _RSYNC_RSH to be built from _rsync_rsh_cmd, with _rsync_rsh_cmd initialised as ssh, options appended from _SSH_OPTS, and IdentityFile=\${SSH_KEY} / UserKnownHostsFile=\${SSH_KNOWN_HOSTS} present in the SSH options"
+  fi
+  # Ensure rsync is invoked with -e "${_RSYNC_RSH}" at all expected call sites
+  # so these options are consistently used.
+  local rsync_rsh_count
+  rsync_rsh_count="$(grep -cF -- '-e "${_RSYNC_RSH}"' "${script}" || true)"
+  if [[ "${rsync_rsh_count}" -eq 5 ]]; then
+    ok 'transfer_iq.sh uses -e "${_RSYNC_RSH}" in all rsync calls (5 occurrences)'
+  else
+    fail 'transfer_iq.sh uses -e "${_RSYNC_RSH}" in all rsync calls (5 occurrences)' \
+      "Expected 5 occurrences of '-e \"\${_RSYNC_RSH}\"', found: ${rsync_rsh_count}"
+  fi
+  # Ensure direct ssh invocations all use "${_SSH_OPTS[@]}".
+  # Filter out comment lines first so only actual call sites are counted.
+  local ssh_opts_call_count
+  ssh_opts_call_count="$(grep -v '^[[:space:]]*#' "${script}" | grep -cF 'ssh "${_SSH_OPTS[@]}"' || true)"
+  if [[ "${ssh_opts_call_count}" -eq 3 ]]; then
+    ok 'transfer_iq.sh ssh calls use "${_SSH_OPTS[@]}" (3 occurrences)'
+  else
+    fail 'transfer_iq.sh ssh calls use "${_SSH_OPTS[@]}" (3 occurrences)' \
+      "Expected 3 occurrences of 'ssh \"\${_SSH_OPTS[@]}\"', found: ${ssh_opts_call_count}"
+  fi
+  if grep -qF 'SSH_KEY="${SSH_KEY:-' "${script}"; then
+    ok "transfer_iq.sh has SSH_KEY env var"
+  else
+    fail "transfer_iq.sh has SSH_KEY env var" "Expected to find: 'SSH_KEY=\"\${SSH_KEY:-'"
+  fi
+  if grep -qF 'SSH_KNOWN_HOSTS="${SSH_KNOWN_HOSTS:-' "${script}"; then
+    ok "transfer_iq.sh has SSH_KNOWN_HOSTS env var"
+  else
+    fail "transfer_iq.sh has SSH_KNOWN_HOSTS env var" "Expected to find: 'SSH_KNOWN_HOSTS=\"\${SSH_KNOWN_HOSTS:-'"
+  fi
+  # Ensure SSH_KEY / SSH_KNOWN_HOSTS are validated for whitespace (required because
+  # _RSYNC_RSH is constructed from the _SSH_OPTS array and passes these values directly).
+  if grep -qF '"ERROR: SSH_KEY must not contain whitespace' "${script}"; then
+    ok "transfer_iq.sh validates SSH_KEY for whitespace"
+  else
+    fail "transfer_iq.sh validates SSH_KEY for whitespace" \
+      "Expected to find whitespace guard for SSH_KEY"
+  fi
+  if grep -qF '"ERROR: SSH_KNOWN_HOSTS must not contain whitespace' "${script}"; then
+    ok "transfer_iq.sh validates SSH_KNOWN_HOSTS for whitespace"
+  else
+    fail "transfer_iq.sh validates SSH_KNOWN_HOSTS for whitespace" \
+      "Expected to find whitespace guard for SSH_KNOWN_HOSTS"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 echo "=== tests/test_install.sh ==="
@@ -372,6 +455,7 @@ test_no_sdr_dry_run_installs_incoming_processor
 test_no_sdr_dry_run_skips_sdr_packages
 test_no_sdr_dry_run_summary
 test_no_sdr_all_decoders_dry_run
+test_transfer_iq_ssh_options
 
 echo ""
 echo "Results: ${_PASS} passed, ${_FAIL} failed."
