@@ -246,16 +246,16 @@ else
       # directory (-d), so it is a regular file or special node that rm -f
       # can remove without recursion.
       run_fix "remove ${SSH_DIR} and create real directory (mode 700, owner ${SERVICE_USER})" \
-        bash -c "rm -f '${SSH_DIR}' && \
-                 mkdir -p '${SSH_DIR}' && \
-                 chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_DIR}' && \
-                 chmod 700 '${SSH_DIR}'"
+        bash -c 'rm -f "$1" && \
+                 mkdir -p "$1" && \
+                 chown "$2:$2" "$1" && \
+                 chmod 700 "$1"' _ "${SSH_DIR}" "${SERVICE_USER}"
     fi
   else
     fail "${SSH_DIR} does not exist"
     if $FIX; then
       run_fix "mkdir -p ${SSH_DIR} (mode 700, owner ${SERVICE_USER})" \
-        bash -c "mkdir -p '${SSH_DIR}' && chown '${SERVICE_USER}:${SERVICE_USER}' '${SSH_DIR}' && chmod 700 '${SSH_DIR}'"
+        bash -c 'mkdir -p "$1" && chown "$2:$2" "$1" && chmod 700 "$1"' _ "${SSH_DIR}" "${SERVICE_USER}"
     fi
   fi
 fi
