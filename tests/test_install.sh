@@ -384,12 +384,24 @@ test_transfer_iq_ssh_options() {
     fail 'transfer_iq.sh _RSYNC_RSH includes ${_SSH_OPTS[*]}' \
       "Expected to find: '_RSYNC_RSH=... \${_SSH_OPTS[*]}...'"
   fi
-  # Ensure rsync is invoked with -e "${_RSYNC_RSH}" so these options are used.
-  if grep -qF '-e "${_RSYNC_RSH}"' "${script}"; then
-    ok 'transfer_iq.sh uses -e "${_RSYNC_RSH}" in rsync calls'
+  # Ensure rsync is invoked with -e "${_RSYNC_RSH}" at all expected call sites
+  # so these options are consistently used.
+  local rsync_rsh_count
+  rsync_rsh_count="$(grep -cF '-e "${_RSYNC_RSH}"' "${script}" || true)"
+  if [[ "${rsync_rsh_count}" -eq 5 ]]; then
+    ok 'transfer_iq.sh uses -e "${_RSYNC_RSH}" in all rsync calls (5 occurrences)'
   else
-    fail 'transfer_iq.sh uses -e "${_RSYNC_RSH}" in rsync calls' \
-      "Expected to find: '-e \"\${_RSYNC_RSH}\"'"
+    fail 'transfer_iq.sh uses -e "${_RSYNC_RSH}" in all rsync calls (5 occurrences)' \
+      "Expected 5 occurrences of '-e \"\${_RSYNC_RSH}\"', found: ${rsync_rsh_count}"
+  fi
+  # Ensure direct ssh invocations all use "${_SSH_OPTS[@]}".
+  local ssh_opts_call_count
+  ssh_opts_call_count="$(grep -cF 'ssh \"${_SSH_OPTS[@]}\"' "${script}" || true)"
+  if [[ "${ssh_opts_call_count}" -eq 3 ]]; then
+    ok 'transfer_iq.sh ssh calls use "${_SSH_OPTS[@]}" (3 occurrences)'
+  else
+    fail 'transfer_iq.sh ssh calls use "${_SSH_OPTS[@]}" (3 occurrences)' \
+      "Expected 3 occurrences of 'ssh \"\${_SSH_OPTS[@]}\"', found: ${ssh_opts_call_count}"
   fi
   if grep -qF 'SSH_KEY="${SSH_KEY:-' "${script}"; then
     ok "transfer_iq.sh has SSH_KEY env var"
