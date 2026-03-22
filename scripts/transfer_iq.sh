@@ -70,7 +70,12 @@ _SSH_OPTS=(
   -o "IdentityFile=${SSH_KEY}"
   -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS}"
 )
-_RSYNC_RSH="ssh ${_SSH_OPTS[*]}"
+# Build _RSYNC_RSH with an explicit space delimiter so it does not depend on $IFS.
+_rsync_rsh_cmd='ssh'
+for _opt in "${_SSH_OPTS[@]}"; do
+  _rsync_rsh_cmd+=" ${_opt}"
+done
+_RSYNC_RSH="${_rsync_rsh_cmd}"
 
 # Reject remote DB_DEST values that rely on remote shell expansion (e.g. ~ or $VAR),
 # since rsync would expand them but the ssh-based WAL/SHM cleanup uses single-quoted
