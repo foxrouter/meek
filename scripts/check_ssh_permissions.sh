@@ -577,12 +577,12 @@ if [[ -L "${_pub_key_file}" ]]; then
   info "Public key path ${_pub_key_file} is a symlink — skipping display."
   info "Run with --fix to remove the symlink and regenerate the key pair."
 elif [[ -f "${_pub_key_file}" ]]; then
-  info "rf_worker public key (copy to Brian's authorized_keys):"
+  info "${SERVICE_USER} public key (copy to Brian's authorized_keys):"
   echo ""
   cat "${_pub_key_file}"
   echo ""
   echo "  On Brian (decode-only node), run:"
-  echo "    sudo -u rf_worker bash -c \"mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys\" << 'PUBKEY'"
+  echo "    sudo -u ${SERVICE_USER} bash -c \"mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys\" << 'PUBKEY'"
   cat "${_pub_key_file}"
   echo "PUBKEY"
 else
