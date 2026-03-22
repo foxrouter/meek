@@ -146,18 +146,17 @@ _CANDIDATES_SQL = """
         s.id          AS signal_id,
         s.timestamp   AS db_timestamp,
         s.source,
-        s.note        AS decision_trace,
+        s.notes       AS decision_trace,
         e.id          AS example_id,
         e.confidence,
         e.result,
         e.notes,
         m.name        AS method_name,
-        m.params_json
+        m.params
     FROM signals  s
     JOIN examples e ON e.signal_id = s.id
     JOIN methods  m ON e.method_id  = m.id
     WHERE e.confidence >= ?
-      AND e.result = 'candidate'
     ORDER BY e.confidence DESC, s.id DESC
     LIMIT ?
 """
@@ -167,7 +166,7 @@ def query_candidates(
     db_path: str, min_confidence: float, limit: int
 ) -> List[Dict[str, Any]]:
     """Return candidate rows (dicts) from signals + examples tables."""
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.execute(_CANDIDATES_SQL, (min_confidence, limit))
