@@ -172,9 +172,15 @@ if ! $DRY_RUN; then
     sudo -u rf_worker cat "${pub_key}"
   fi
   echo ""
-  echo "  On Brian, run (from the rf_adapt_intel repo checkout):"
+  echo "  On Brian, log in as the destination user and append the public key above to:"
+  echo "    ~/.ssh/authorized_keys    # on Brian"
+  echo "  (This deploy step only generates/verifies the key on this node; it does not"
+  echo "   install it into any remote authorized_keys file.)"
+  echo ""
+  echo "  Optional: from the rf_adapt_intel repo checkout on Brian, run:"
   echo "    sudo bash scripts/check_ssh_permissions.sh --fix"
-  echo "  Then add the public key above to the remote user's authorized_keys."
+  echo "  to tighten SSH directory/file permissions. That script will also print a"
+  echo "  helper command you can use instead of manually editing authorized_keys."
 else
   echo "[dry-run] Would generate SSH key pair for rf_worker if absent"
 fi
