@@ -377,12 +377,14 @@ test_transfer_iq_ssh_options() {
     fail "transfer_iq.sh _SSH_OPTS includes -o UserKnownHostsFile option" \
       "Expected to find: '-o \"UserKnownHostsFile=\${SSH_KNOWN_HOSTS}\"'"
   fi
-  # Ensure _RSYNC_RSH actually uses _SSH_OPTS (via array expansion).
-  if grep -qE '_RSYNC_RSH=.*\$\{_SSH_OPTS\[\*\]\}' "${script}"; then
-    ok 'transfer_iq.sh _RSYNC_RSH includes ${_SSH_OPTS[*]}'
+  # Ensure _RSYNC_RSH includes the SSH key and known_hosts options so they are
+  # propagated to all rsync SSH invocations, without depending on a specific
+  # implementation detail (e.g. ${_SSH_OPTS[*]} expansion).
+  if grep -qE '_RSYNC_RSH=.*IdentityFile=\$\{SSH_KEY\}.*UserKnownHostsFile=\$\{SSH_KNOWN_HOSTS\}' "${script}"; then
+    ok 'transfer_iq.sh _RSYNC_RSH includes IdentityFile and UserKnownHostsFile options'
   else
-    fail 'transfer_iq.sh _RSYNC_RSH includes ${_SSH_OPTS[*]}' \
-      "Expected to find: '_RSYNC_RSH=... \${_SSH_OPTS[*]}...'"
+    fail 'transfer_iq.sh _RSYNC_RSH includes IdentityFile and UserKnownHostsFile options' \
+      "Expected _RSYNC_RSH definition to include IdentityFile=\${SSH_KEY} and UserKnownHostsFile=\${SSH_KNOWN_HOSTS}"
   fi
   # Ensure rsync is invoked with -e "${_RSYNC_RSH}" at all expected call sites
   # so these options are consistently used.
