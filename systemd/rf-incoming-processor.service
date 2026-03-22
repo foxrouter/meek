@@ -19,6 +19,7 @@ EnvironmentFile=-/etc/default/rf-adapt-intel
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=rf-incoming-processor
+StartLimitIntervalSec=0
 
 # Filesystem protection
 ProtectSystem=full

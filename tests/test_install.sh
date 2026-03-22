@@ -355,6 +355,27 @@ test_no_sdr_all_decoders_dry_run() {
 }
 
 # ---------------------------------------------------------------------------
+# transfer_iq.sh content checks
+# ---------------------------------------------------------------------------
+test_transfer_iq_ssh_options() {
+  local script="${REPO_ROOT}/scripts/transfer_iq.sh"
+  if [[ ! -f "${script}" ]]; then
+    fail "transfer_iq.sh exists" "File not found: ${script}"
+    return
+  fi
+  local content
+  content="$(cat "${script}")"
+  assert_contains "transfer_iq.sh contains IdentityFile option" \
+    "IdentityFile" "${content}"
+  assert_contains "transfer_iq.sh contains UserKnownHostsFile option" \
+    "UserKnownHostsFile" "${content}"
+  assert_contains "transfer_iq.sh has SSH_KEY env var" \
+    'SSH_KEY="${SSH_KEY:-' "${content}"
+  assert_contains "transfer_iq.sh has SSH_KNOWN_HOSTS env var" \
+    'SSH_KNOWN_HOSTS="${SSH_KNOWN_HOSTS:-' "${content}"
+}
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 echo "=== tests/test_install.sh ==="
@@ -372,6 +393,7 @@ test_no_sdr_dry_run_installs_incoming_processor
 test_no_sdr_dry_run_skips_sdr_packages
 test_no_sdr_dry_run_summary
 test_no_sdr_all_decoders_dry_run
+test_transfer_iq_ssh_options
 
 echo ""
 echo "Results: ${_PASS} passed, ${_FAIL} failed."
