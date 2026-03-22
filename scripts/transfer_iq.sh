@@ -71,9 +71,9 @@ _SSH_OPTS=(
   -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS}"
 )
 # Build _RSYNC_RSH with an explicit space delimiter so it does not depend on $IFS.
-_rsync_rsh_cmd='ssh'
+_rsync_rsh_cmd=ssh
 for _opt in "${_SSH_OPTS[@]}"; do
-  _rsync_rsh_cmd+=" ${_opt}"
+  _rsync_rsh_cmd="${_rsync_rsh_cmd} ${_opt}"
 done
 _RSYNC_RSH="${_rsync_rsh_cmd}"
 
