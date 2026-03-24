@@ -63,3 +63,4 @@ candidates.csv
 resp.json
 patch_decode_candidates.py
 tools/decode_candidates.py.bak
+cleanup-caches.sh.bak
