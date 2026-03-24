@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=rf_worker
+Group=rf_worker
 EnvironmentFile=-/etc/rf_worker/thresholds.env
 # SSH keys are stored under /var/lib/rf-adapt-intel/.ssh (provisioned by
 # deploy.sh); set HOME so rsync/ssh discover the right identity and known_hosts
