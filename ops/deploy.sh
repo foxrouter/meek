@@ -228,11 +228,13 @@ run sudo install -m 755 -o root -g root "${REPO_ROOT}/ops/canary.sh" \
 run sudo systemctl daemon-reload
 run sudo systemctl enable --now rf-adapt-intel-monitor.timer
 if [[ -f /etc/systemd/system/db-sync.timer ]]; then
-  if [[ -f /etc/rf_worker/thresholds.env ]]; then
-    # shellcheck disable=SC1091
-    source /etc/rf_worker/thresholds.env
+  # Prefer an explicit DB_SYNC_DEST from the environment, but fall back to
+  # parsing it from the systemd EnvironmentFile without executing it.
+  db_sync_dest="${DB_SYNC_DEST:-}"
+  if [[ -z "${db_sync_dest}" && -f /etc/rf_worker/thresholds.env ]]; then
+    db_sync_dest="$(grep -E '^[[:space:]]*DB_SYNC_DEST=' /etc/rf_worker/thresholds.env | tail -n1 | cut -d= -f2- | tr -d '"')"
   fi
-  if [[ -n "${DB_SYNC_DEST:-}" ]]; then
+  if [[ -n "${db_sync_dest}" ]]; then
     run sudo systemctl enable db-sync.timer
   fi
 fi
