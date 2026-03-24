@@ -197,11 +197,19 @@ fi
 
 DB_SYNC_SVC="${REPO_ROOT}/systemd/db-sync.service"
 DB_SYNC_TMR="${REPO_ROOT}/systemd/db-sync.timer"
+DB_SYNC_DROPIN_SRC="${REPO_ROOT}/systemd/db-sync.service.d"
+DB_SYNC_DROPIN_DST="/etc/systemd/system/db-sync.service.d"
 if [[ -f "${DB_SYNC_SVC}" && -f "${DB_SYNC_TMR}" ]]; then
   run sudo install -m 644 -o root -g root "${DB_SYNC_SVC}" \
       /etc/systemd/system/db-sync.service
   run sudo install -m 644 -o root -g root "${DB_SYNC_TMR}" \
       /etc/systemd/system/db-sync.timer
+  if [[ -f "${DB_SYNC_DROPIN_SRC}/hardening.conf" ]]; then
+    run sudo mkdir -p "${DB_SYNC_DROPIN_DST}"
+    run sudo install -m 644 -o root -g root \
+        "${DB_SYNC_DROPIN_SRC}/hardening.conf" \
+        "${DB_SYNC_DROPIN_DST}/hardening.conf"
+  fi
 else
   echo "[WARN] Skipping db-sync unit install; expected both files but found:" \
        "service=$( [[ -f \"${DB_SYNC_SVC}\" ]] && echo present || echo missing )," \

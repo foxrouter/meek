@@ -7,12 +7,19 @@ Wants=network-online.target
 Type=oneshot
 User=rf_worker
 EnvironmentFile=-/etc/rf_worker/thresholds.env
+# SSH keys are stored under /var/lib/rf-adapt-intel/.ssh (provisioned by
+# deploy.sh); set HOME so rsync/ssh discover the right identity and known_hosts
+# even with ProtectHome=yes active in the hardening drop-in.
+Environment=HOME=/var/lib/rf-adapt-intel
+TimeoutStartSec=120
 ExecCondition=/usr/bin/test -n "$DB_SYNC_DEST"
-ExecStart=/bin/bash -lc '\
+ExecStart=/bin/bash -c '\
   set -euo pipefail; \
-  tmp_db="$(mktemp /tmp/rf_adapt_intel.db.XXXXXX)"; \
+  rsync_rsh="ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentityFile=/var/lib/rf-adapt-intel/.ssh/id_ed25519 -o UserKnownHostsFile=/var/lib/rf-adapt-intel/.ssh/known_hosts"; \
+  tmp_db=$(mktemp /tmp/rf_adapt_intel.db.XXXXXX); \
   cleanup() { rm -f "${tmp_db}"; }; \
   trap cleanup EXIT; \
-  /usr/bin/sqlite3 /var/lib/rf-adapt-intel/rf_adapt_intel.db ".backup '\''${tmp_db}'\''"; \
-  /usr/bin/rsync -az --checksum --protect-args -- "${tmp_db}" "${DB_SYNC_DEST}" \
+  /usr/bin/sqlite3 /var/lib/rf-adapt-intel/rf_adapt_intel.db ".backup ${tmp_db}"; \
+  /usr/bin/rsync -az --checksum --protect-args --timeout=30 \
+    -e "${rsync_rsh}" -- "${tmp_db}" "${DB_SYNC_DEST}" \
 '
