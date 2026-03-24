@@ -195,6 +195,15 @@ if ! $DRY_RUN; then
   fi
 fi
 
+DB_SYNC_SVC="${REPO_ROOT}/systemd/db-sync.service"
+DB_SYNC_TMR="${REPO_ROOT}/systemd/db-sync.timer"
+if [[ -f "${DB_SYNC_SVC}" ]]; then
+  run sudo install -m 644 -o root -g root "${DB_SYNC_SVC}" \
+      /etc/systemd/system/db-sync.service
+  run sudo install -m 644 -o root -g root "${DB_SYNC_TMR}" \
+      /etc/systemd/system/db-sync.timer
+fi
+
 # Install canary monitor service + 30-minute timer
 echo ""
 echo "=== Installing canary monitor timer ==="
@@ -218,6 +227,9 @@ run sudo install -m 755 -o root -g root "${REPO_ROOT}/ops/canary.sh" \
 # main service unit are picked up before any `enable --now` fires the timer.
 run sudo systemctl daemon-reload
 run sudo systemctl enable --now rf-adapt-intel-monitor.timer
+if [[ -f /etc/systemd/system/db-sync.timer ]]; then
+  run sudo systemctl enable db-sync.timer
+fi
 
 # Enable process-worker (create the WantedBy symlink without starting yet)
 run sudo systemctl enable "${SERVICE}"

@@ -1,0 +1,12 @@
+[Unit]
+Description=Sync rf_adapt_intel.db from Ray to Brian
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=rf_worker
+EnvironmentFile=-/etc/rf_worker/thresholds.env
+ExecStart=/usr/bin/rsync -az --checksum --protect-args \
+  /var/lib/rf-adapt-intel/rf_adapt_intel.db \
+  ${DB_SYNC_DEST}
