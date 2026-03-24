@@ -17,10 +17,12 @@ ExecCondition=/usr/bin/test -n "$DB_SYNC_DEST"
 ExecStart=/bin/bash -c '\
   set -euo pipefail; \
   rsync_rsh="ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentityFile=/var/lib/rf-adapt-intel/.ssh/id_ed25519 -o UserKnownHostsFile=/var/lib/rf-adapt-intel/.ssh/known_hosts"; \
+  src_db=/var/lib/rf-adapt-intel/rf_adapt_intel.db; \
   tmp_db=$(mktemp /tmp/rf_adapt_intel.db.XXXXXX); \
   cleanup() { rm -f "${tmp_db}"; }; \
   trap cleanup EXIT; \
-  /usr/bin/sqlite3 /var/lib/rf-adapt-intel/rf_adapt_intel.db ".backup ${tmp_db}"; \
-  /usr/bin/rsync -az --checksum --protect-args --timeout=30 \
+  /usr/bin/sqlite3 "${src_db}" ".backup ${tmp_db}"; \
+  /usr/bin/touch -r "${src_db}" "${tmp_db}"; \
+  /usr/bin/rsync -az --protect-args --timeout=30 \
     -e "${rsync_rsh}" -- "${tmp_db}" "${DB_SYNC_DEST}" \
 '
