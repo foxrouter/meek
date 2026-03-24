@@ -235,7 +235,7 @@ if [[ -f /etc/systemd/system/db-sync.timer ]]; then
     db_sync_dest="$(grep -E '^[[:space:]]*DB_SYNC_DEST=' /etc/rf_worker/thresholds.env | tail -n1 | cut -d= -f2- | tr -d '"')"
   fi
   if [[ -n "${db_sync_dest}" ]]; then
-    run sudo systemctl enable db-sync.timer
+    run sudo systemctl enable --now db-sync.timer
   fi
 fi
 
