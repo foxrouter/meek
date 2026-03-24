@@ -197,11 +197,15 @@ fi
 
 DB_SYNC_SVC="${REPO_ROOT}/systemd/db-sync.service"
 DB_SYNC_TMR="${REPO_ROOT}/systemd/db-sync.timer"
-if [[ -f "${DB_SYNC_SVC}" ]]; then
+if [[ -f "${DB_SYNC_SVC}" && -f "${DB_SYNC_TMR}" ]]; then
   run sudo install -m 644 -o root -g root "${DB_SYNC_SVC}" \
       /etc/systemd/system/db-sync.service
   run sudo install -m 644 -o root -g root "${DB_SYNC_TMR}" \
       /etc/systemd/system/db-sync.timer
+else
+  echo "[WARN] Skipping db-sync unit install; expected both files but found:" \
+       "service=$( [[ -f \"${DB_SYNC_SVC}\" ]] && echo present || echo missing )," \
+       "timer=$( [[ -f \"${DB_SYNC_TMR}\" ]] && echo present || echo missing )"
 fi
 
 # Install canary monitor service + 30-minute timer
