@@ -228,15 +228,10 @@ run sudo install -m 755 -o root -g root "${REPO_ROOT}/ops/canary.sh" \
 run sudo systemctl daemon-reload
 run sudo systemctl enable --now rf-adapt-intel-monitor.timer
 if [[ -f /etc/systemd/system/db-sync.timer ]]; then
-  # Prefer an explicit DB_SYNC_DEST from the environment, but fall back to
-  # parsing it from the systemd EnvironmentFile without executing it.
-  db_sync_dest="${DB_SYNC_DEST:-}"
-  if [[ -z "${db_sync_dest}" && -f /etc/rf_worker/thresholds.env ]]; then
-    db_sync_dest="$(grep -E '^[[:space:]]*DB_SYNC_DEST=' /etc/rf_worker/thresholds.env | tail -n1 | cut -d= -f2- | tr -d '"')"
-  fi
-  if [[ -n "${db_sync_dest}" ]]; then
-    run sudo systemctl enable --now db-sync.timer
-  fi
+  # Enable the db-sync timer whenever it is installed; db-sync.service
+  # should use ExecCondition or its own logic to decide whether to run
+  # based on DB_SYNC_DEST from its EnvironmentFile.
+  run sudo systemctl enable --now db-sync.timer
 fi
 
 # Enable process-worker (create the WantedBy symlink without starting yet)
