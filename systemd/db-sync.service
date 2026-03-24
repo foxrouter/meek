@@ -7,6 +7,6 @@ Wants=network-online.target
 Type=oneshot
 User=rf_worker
 EnvironmentFile=-/etc/rf_worker/thresholds.env
-ExecStart=/usr/bin/rsync -az --checksum --protect-args \
+ExecStart=/usr/bin/rsync -az --checksum --protect-args -- \
   /var/lib/rf-adapt-intel/rf_adapt_intel.db \
-  ${DB_SYNC_DEST}
+  "${DB_SYNC_DEST}"
