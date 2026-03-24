@@ -29,17 +29,25 @@ ExecStart=/bin/bash -c '\
   chmod --reference="${src_db}" "${tmp_db}" 2>/dev/null \
     || chmod "$(stat -c "%a" "${src_db}" 2>/dev/null || echo 640)" "${tmp_db}" 2>/dev/null \
     || true; \
-  if [[ "${dest}" == *:* ]]; then \
-    dest_host="${dest%%:*}"; \
-    dest_path="${dest#*:}"; \
-    if ssh ${ssh_opts} -- "${dest_host}" test -d "${dest_path}" 2>/dev/null; then \
+  remote=0; dest_host=""; dest_path="${dest}"; \
+  if [[ "${dest}" =~ ^([^/@]*@)?\[([^]]*)\]:(.*)$ ]]; then \
+    remote=1; dest_host="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"; dest_path="${BASH_REMATCH[3]}"; \
+  elif [[ "${dest}" == *:* && "${dest%%:*}" != */* ]]; then \
+    remote=1; dest_host="${dest%%:*}"; dest_path="${dest#*:}"; \
+  fi; \
+  if (( remote )); then \
+    if [[ "${dest_path}" == \~* || "${dest_path}" == *\$* ]]; then \
+      echo "ERROR: DB_SYNC_DEST must not use shell expansion in the remote path; use an absolute path" >&2; \
+      exit 1; \
+    fi; \
+    if ssh ${ssh_opts} -- "${dest_host}" sh -c "test -d \"\$1\"" _ "${dest_path}" 2>/dev/null; then \
       echo "ERROR: DB_SYNC_DEST is a remote directory; a full file path is required" >&2; \
       exit 1; \
     fi; \
     /usr/bin/rsync -az --protect-args --timeout=30 \
       -e "${rsync_rsh}" -- "${tmp_db}" "${dest}"; \
-    ssh ${ssh_opts} -- "${dest_host}" \
-      "rm -f -- \"${dest_path}-wal\" \"${dest_path}-shm\"" || true; \
+    ssh ${ssh_opts} -- "${dest_host}" sh -c "rm -f -- \"\$1\" \"\$2\"" _ \
+      "${dest_path}-wal" "${dest_path}-shm"; \
   else \
     if [[ -d "${dest}" ]]; then \
       echo "ERROR: DB_SYNC_DEST is a local directory; a full file path is required" >&2; \
@@ -47,6 +55,6 @@ ExecStart=/bin/bash -c '\
     fi; \
     /usr/bin/rsync -az --protect-args --timeout=30 \
       -e "${rsync_rsh}" -- "${tmp_db}" "${dest}"; \
-    rm -f -- "${dest}-wal" "${dest}-shm" || true; \
+    rm -f -- "${dest}-wal" "${dest}-shm"; \
   fi \
 '
