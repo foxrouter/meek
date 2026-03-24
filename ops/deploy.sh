@@ -228,7 +228,13 @@ run sudo install -m 755 -o root -g root "${REPO_ROOT}/ops/canary.sh" \
 run sudo systemctl daemon-reload
 run sudo systemctl enable --now rf-adapt-intel-monitor.timer
 if [[ -f /etc/systemd/system/db-sync.timer ]]; then
-  run sudo systemctl enable db-sync.timer
+  if [[ -f /etc/rf_worker/thresholds.env ]]; then
+    # shellcheck disable=SC1091
+    source /etc/rf_worker/thresholds.env
+  fi
+  if [[ -n "${DB_SYNC_DEST:-}" ]]; then
+    run sudo systemctl enable db-sync.timer
+  fi
 fi
 
 # Enable process-worker (create the WantedBy symlink without starting yet)
