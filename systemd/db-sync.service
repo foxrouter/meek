@@ -11,7 +11,8 @@ ExecCondition=/usr/bin/test -n "$DB_SYNC_DEST"
 ExecStart=/bin/bash -lc '\
   set -euo pipefail; \
   tmp_db="$(mktemp /tmp/rf_adapt_intel.db.XXXXXX)"; \
+  cleanup() { rm -f "${tmp_db}"; }; \
+  trap cleanup EXIT; \
   /usr/bin/sqlite3 /var/lib/rf-adapt-intel/rf_adapt_intel.db ".backup '\''${tmp_db}'\''"; \
-  /usr/bin/rsync -az --checksum --protect-args -- "${tmp_db}" "${DB_SYNC_DEST}"; \
-  rm -f "${tmp_db}" \
+  /usr/bin/rsync -az --checksum --protect-args -- "${tmp_db}" "${DB_SYNC_DEST}" \
 '
