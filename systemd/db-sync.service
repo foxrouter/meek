@@ -40,6 +40,18 @@ ExecStart=/bin/bash -c '\
       echo "ERROR: DB_SYNC_DEST must not use shell expansion in the remote path; use an absolute path" >&2; \
       exit 1; \
     fi; \
+    if [[ "${dest_path}" == :* ]]; then \
+      echo "ERROR: rsync-daemon syntax (host::module) is not supported; use host:/path" >&2; \
+      exit 1; \
+    fi; \
+    if [[ -z "${dest_path}" ]]; then \
+      echo "ERROR: DB_SYNC_DEST remote path is empty; a full file path is required" >&2; \
+      exit 1; \
+    fi; \
+    if [[ "${dest_path}" == */ ]]; then \
+      echo "ERROR: DB_SYNC_DEST must not end with /; a full file path is required" >&2; \
+      exit 1; \
+    fi; \
     if ssh ${ssh_opts} -- "${dest_host}" sh -c "test -d -- \"\$1\"" _ "${dest_path}" 2>/dev/null; then \
       echo "ERROR: DB_SYNC_DEST is a remote directory; a full file path is required" >&2; \
       exit 1; \
@@ -49,6 +61,10 @@ ExecStart=/bin/bash -c '\
     ssh ${ssh_opts} -- "${dest_host}" sh -c "rm -f -- \"\$1\" \"\$2\"" _ \
       "${dest_path}-wal" "${dest_path}-shm"; \
   else \
+    if [[ "${dest}" == */ ]]; then \
+      echo "ERROR: DB_SYNC_DEST must not end with /; a full file path is required" >&2; \
+      exit 1; \
+    fi; \
     if [[ -d "${dest}" ]]; then \
       echo "ERROR: DB_SYNC_DEST is a local directory; a full file path is required" >&2; \
       exit 1; \
