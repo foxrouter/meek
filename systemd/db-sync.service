@@ -24,5 +24,5 @@ ExecStart=/bin/bash -c '\
   /usr/bin/sqlite3 "${src_db}" ".backup ${tmp_db}"; \
   /usr/bin/touch -r "${src_db}" "${tmp_db}"; \
   /usr/bin/rsync -az --protect-args --timeout=30 \
-    -e "${rsync_rsh}" -- "${tmp_db}" "${DB_SYNC_DEST}" \
+    -e "${rsync_rsh}" -- "${tmp_db}" "${DB_SYNC_DEST}"
 '
