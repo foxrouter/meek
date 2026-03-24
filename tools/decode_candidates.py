@@ -166,7 +166,7 @@ def query_candidates(
     db_path: str, min_confidence: float, limit: int
 ) -> List[Dict[str, Any]]:
     """Return candidate rows (dicts) from signals + examples tables."""
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.execute(_CANDIDATES_SQL, (min_confidence, limit))
