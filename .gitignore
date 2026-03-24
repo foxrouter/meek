@@ -58,3 +58,6 @@ tools/decode_candidates.py.bak
 tests/test_decode_candidates.py.bak
 tests/test_decode_candidates.py.bak2
 meek/
+cleanup-caches.sh
+candidates.csv
+resp.json
