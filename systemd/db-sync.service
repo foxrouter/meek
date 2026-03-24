@@ -16,13 +16,37 @@ TimeoutStartSec=120
 ExecCondition=/usr/bin/test -n "$DB_SYNC_DEST"
 ExecStart=/bin/bash -c '\
   set -euo pipefail; \
-  rsync_rsh="ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentityFile=/var/lib/rf-adapt-intel/.ssh/id_ed25519 -o UserKnownHostsFile=/var/lib/rf-adapt-intel/.ssh/known_hosts"; \
+  dest="${DB_SYNC_DEST:-}"; \
+  [[ -n "${dest}" ]] || exit 0; \
+  ssh_opts="-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentityFile=/var/lib/rf-adapt-intel/.ssh/id_ed25519 -o UserKnownHostsFile=/var/lib/rf-adapt-intel/.ssh/known_hosts"; \
+  rsync_rsh="ssh ${ssh_opts}"; \
   src_db=/var/lib/rf-adapt-intel/rf_adapt_intel.db; \
   tmp_db=$(mktemp /tmp/rf_adapt_intel.db.XXXXXX); \
   cleanup() { rm -f "${tmp_db}"; }; \
   trap cleanup EXIT; \
   /usr/bin/sqlite3 "${src_db}" ".backup ${tmp_db}"; \
   /usr/bin/touch -r "${src_db}" "${tmp_db}"; \
-  /usr/bin/rsync -az --protect-args --timeout=30 \
-    -e "${rsync_rsh}" -- "${tmp_db}" "${DB_SYNC_DEST}"
+  chmod --reference="${src_db}" "${tmp_db}" 2>/dev/null \
+    || chmod "$(stat -c "%a" "${src_db}" 2>/dev/null || echo 640)" "${tmp_db}" 2>/dev/null \
+    || true; \
+  if [[ "${dest}" == *:* ]]; then \
+    dest_host="${dest%%:*}"; \
+    dest_path="${dest#*:}"; \
+    if ssh ${ssh_opts} -- "${dest_host}" test -d "${dest_path}" 2>/dev/null; then \
+      echo "ERROR: DB_SYNC_DEST is a remote directory; a full file path is required" >&2; \
+      exit 1; \
+    fi; \
+    /usr/bin/rsync -az --protect-args --timeout=30 \
+      -e "${rsync_rsh}" -- "${tmp_db}" "${dest}"; \
+    ssh ${ssh_opts} -- "${dest_host}" \
+      "rm -f -- \"${dest_path}-wal\" \"${dest_path}-shm\"" || true; \
+  else \
+    if [[ -d "${dest}" ]]; then \
+      echo "ERROR: DB_SYNC_DEST is a local directory; a full file path is required" >&2; \
+      exit 1; \
+    fi; \
+    /usr/bin/rsync -az --protect-args --timeout=30 \
+      -e "${rsync_rsh}" -- "${tmp_db}" "${dest}"; \
+    rm -f -- "${dest}-wal" "${dest}-shm" || true; \
+  fi \
 '
