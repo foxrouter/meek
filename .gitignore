@@ -50,3 +50,11 @@ tools/iq_metrics
 benchmarks/results/*.json
 # Keep the placeholder so git tracks the directory
 !benchmarks/results/.gitkeep
+patch_decode_candidates.py
+pt.py
+pt2.py
+test_decode_candidates.py
+tools/decode_candidates.py.bak
+tests/test_decode_candidates.py.bak
+tests/test_decode_candidates.py.bak2
+meek/
