@@ -27,7 +27,7 @@ ExecStart=/bin/bash -c '\
   /usr/bin/sqlite3 "${src_db}" ".backup ${tmp_db}"; \
   /usr/bin/touch -r "${src_db}" "${tmp_db}"; \
   chmod --reference="${src_db}" "${tmp_db}" 2>/dev/null \
-    || chmod "$(stat -c "%a" "${src_db}" 2>/dev/null || echo 640)" "${tmp_db}" 2>/dev/null \
+    || chmod "$(stat -c "%%a" "${src_db}" 2>/dev/null || echo 640)" "${tmp_db}" 2>/dev/null \
     || true; \
   remote=0; dest_host=""; dest_path="${dest}"; \
   if [[ "${dest}" =~ ^([^/@]*@)?\[([^]]*)\]:(.*)$ ]]; then \
