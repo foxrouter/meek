@@ -133,9 +133,18 @@ run_fix() {
 
 # ---------------------------------------------------------------------------
 # Pre-flight: must run as root (so we can chown and switch user)
-# _RF_TEST_NO_ROOT may be set in unit-test environments to skip this check.
+# Test-only overrides (never set in production):
+#   _RF_TEST_NO_ROOT=1      – skip the root check entirely
+#   _RF_TEST_EUID=<uid>     – treat <uid> as the effective UID instead of
+#                             $EUID, so the check works correctly when the
+#                             test runner itself is already root (e.g. sudo).
 # ---------------------------------------------------------------------------
-if [[ -z "${_RF_TEST_NO_ROOT:-}" ]] && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+if [[ -n "${_RF_TEST_EUID:-}" ]] && ! [[ "${_RF_TEST_EUID}" =~ ^(0|[1-9][0-9]*)$ ]]; then
+  echo "[ERROR] _RF_TEST_EUID must be a decimal integer UID, got '${_RF_TEST_EUID}'." >&2
+  exit 1
+fi
+_effective_euid="${_RF_TEST_EUID:-${EUID:-$(id -u)}}"
+if [[ -z "${_RF_TEST_NO_ROOT:-}" ]] && (( 10#${_effective_euid} != 0 )); then
   echo "[ERROR] This script must be run as root (sudo bash $0)." >&2
   exit 1
 fi

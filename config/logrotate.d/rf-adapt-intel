@@ -1,0 +1,9 @@
+/var/lib/rf-adapt-intel/worker.log {
+    size 50M
+    rotate 5
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
