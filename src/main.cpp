@@ -75,11 +75,9 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
 #include <cerrno>
 #include <chrono>
 #include <complex>
-#include <condition_variable>
 #include <csignal>
 #include <cstdint>
 #include <cstring>
-#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -91,6 +89,7 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
 #include <sstream>
 #include <stop_token>
 #include <string>
+#include <pthread.h>
 #include <thread>
 #include <vector>
 
@@ -403,6 +402,8 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
                          std::atomic<std::uint64_t>& cap_overflow,
                          std::atomic<std::uint64_t>& cap_progress, std::atomic<bool>& cap_exiting) {
   std::vector<std::complex<float>> buf(cfg.block_len);
+  SampleBlock blk;
+  blk.samples.reserve(cfg.block_len);
 
   while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
     const auto n = sdr.read_samples(std::span{buf});
@@ -431,7 +432,6 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
       continue;
     }
 
-    SampleBlock blk;
     blk.samples.assign(buf.begin(), buf.begin() + n);
     blk.timestamp_ns =
         static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -468,8 +468,8 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
 
 static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_buf,
                       SpscRingBuffer<ClassificationResult, 64>& out_buf, const Config& cfg,
-                      std::mutex& snap_mu, std::condition_variable& snap_cv,
-                      std::deque<SnapTask>& snap_queue, std::atomic<std::uint64_t>& snap_dropped,
+                      SpscRingBuffer<SnapTask, 64>& snap_queue,
+                      std::atomic<std::uint64_t>& snap_dropped,
                       std::atomic<std::uint64_t>& proc_dropped,
                       std::atomic<std::uint64_t>& proc_progress,
                       const std::atomic<bool>& cap_exiting, std::atomic<bool>& proc_exiting) {
@@ -597,27 +597,16 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     // unbounded memory growth.  Save only the best analysis window so the
     // snapshot contains the actual signal, not surrounding noise.
     if (cr.confidence >= cfg.snapshot_conf && cr.snr_gate_pass) {
-      bool enqueued = false;
-      {
-        std::lock_guard lk(snap_mu);
-        if (snap_queue.size() < 64) {
-          SnapTask task;
-          const auto snap_begin = blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
-          const auto snap_end = snap_begin + static_cast<std::ptrdiff_t>(best_len);
-          task.samples.assign(snap_begin, snap_end);
-          task.dir = cfg.snapshot_dir;
-          task.conf = cr.confidence;
-          task.ts_ns = cr.timestamp_ns;
-          task.band_name = cr.band_name;
-          snap_queue.push_back(std::move(task));
-          enqueued = true;
-        } else {
-          snap_dropped.fetch_add(1, std::memory_order_relaxed);
-        }
-      }
-      if (enqueued) {
-        snap_cv.notify_one();
-      }
+      SnapTask task;
+      const auto snap_begin = blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
+      const auto snap_end   = snap_begin + static_cast<std::ptrdiff_t>(best_len);
+      task.samples.assign(snap_begin, snap_end);
+      task.dir       = cfg.snapshot_dir;
+      task.conf      = cr.confidence;
+      task.ts_ns     = cr.timestamp_ns;
+      task.band_name = cr.band_name;
+      if (!snap_queue.push(std::move(task)))
+        snap_dropped.fetch_add(1, std::memory_order_relaxed);
     }
 
     // Backpressure: spin-wait up to 10ms before dropping the result.
@@ -911,12 +900,9 @@ int main(int argc, char** argv) {
   SpscRingBuffer<SampleBlock, 64> cap_to_proc;
   SpscRingBuffer<ClassificationResult, 64> proc_to_out;
 
-  // Snapshot worker — joinable background thread; uses std::deque for O(1)
-  // pop_front() instead of std::vector::erase(begin()) which is O(n).
-  // Queue is capped at 64 entries in proc_loop to bound memory use.
-  std::mutex snap_mu;
-  std::condition_variable snap_cv;
-  std::deque<SnapTask> snap_queue;
+  // Snapshot worker — SpscRingBuffer<SnapTask, 64>: one producer (proc_loop),
+  // one consumer (snap_thread).  Lock-free; no mutex in the hot path.
+  SpscRingBuffer<SnapTask, 64> snap_queue;
   std::atomic<std::uint64_t> snap_errors{0};
   std::atomic<std::uint64_t> snap_dropped{0};
   std::atomic<std::uint64_t> cap_dropped{0};
@@ -942,27 +928,16 @@ int main(int argc, char** argv) {
   std::jthread snap_thread([&](std::stop_token st) {
     while (!st.stop_requested()) {
       SnapTask task;
-      {
-        std::unique_lock<std::mutex> lk(snap_mu);
-        snap_cv.wait(lk, [&] { return !snap_queue.empty() || st.stop_requested(); });
-        if (snap_queue.empty())
-          break;
-        task = std::move(snap_queue.front());
-        snap_queue.pop_front();
-      }
-      write_snapshot(task.dir, std::span{task.samples}, task.conf, task.ts_ns, task.band_name,
-                     snap_errors);
+      if (snap_queue.pop(task))
+        write_snapshot(task.dir, std::span{task.samples},
+                       task.conf, task.ts_ns, task.band_name, snap_errors);
+      else
+        std::this_thread::sleep_for(std::chrono::microseconds(500));
     }
-    // Drain remaining tasks: move the queue out under the lock, then
-    // release it before writing so proc_loop is never blocked on I/O.
-    std::deque<SnapTask> remaining;
-    {
-      std::lock_guard lk(snap_mu);
-      remaining = std::move(snap_queue);
-    }
-    for (auto& t : remaining) {
-      write_snapshot(t.dir, std::span{t.samples}, t.conf, t.ts_ns, t.band_name, snap_errors);
-    }
+    SnapTask task;
+    while (snap_queue.pop(task))
+      write_snapshot(task.dir, std::span{task.samples},
+                     task.conf, task.ts_ns, task.band_name, snap_errors);
   });
 
   // Only create the shared MetricsSnapshot when the Prometheus HTTP server will
@@ -978,8 +953,15 @@ int main(int argc, char** argv) {
     capture_loop(st, *sdr, cap_to_proc, cfg, cap_dropped, cap_overflow, cap_progress, cap_exiting);
   });
 
+  {
+    struct sched_param sp{};
+    sp.sched_priority = 10;
+    if (pthread_setschedparam(cap_thread.native_handle(), SCHED_FIFO, &sp) != 0)
+      std::cerr << "[WARN] SCHED_FIFO not available — capture thread at default priority\n";
+  }
+
   std::jthread proc_thread([&](std::stop_token st) {
-    proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_mu, snap_cv, snap_queue, snap_dropped,
+    proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_queue, snap_dropped,
               proc_dropped, proc_progress, cap_exiting, proc_exiting);
   });
 
@@ -1130,7 +1112,6 @@ int main(int argc, char** argv) {
   // Step 3: drain snapshots — snap_thread drain is now exhaustive; no late
   // SnapTasks can arrive after step 2's join.
   snap_thread.request_stop();
-  snap_cv.notify_all();
   snap_thread.join();
 
   // Step 4: drain output — out_thread drains proc_to_out and flushes DB.
