@@ -95,14 +95,31 @@ if ! id -nG rf_worker 2>/dev/null | grep -qw plugdev; then
   run sudo usermod -aG plugdev rf_worker
 fi
 
-# Create runtime data directories owned by rf_worker
-run sudo mkdir -p /var/lib/rf-adapt-intel/{snapshots,incoming,processed}
-run sudo chown -hR rf_worker:rf_worker /var/lib/rf-adapt-intel
-run sudo chmod 0750 /var/lib/rf-adapt-intel
-run sudo chmod g+w  /var/lib/rf-adapt-intel
-run sudo chmod 0750 /var/lib/rf-adapt-intel/snapshots
-run sudo chmod 0750 /var/lib/rf-adapt-intel/incoming
-run sudo chmod 0750 /var/lib/rf-adapt-intel/processed
+# Create runtime data directories owned by rf_worker.
+# Guard each subdirectory against a symlink or unexpected non-directory file
+# before running privileged chmod on it — a group member with write access to
+# the parent could otherwise pre-plant a symlink and have chmod follow it.
+for _dir in snapshots incoming processed; do
+  _subdir="/var/lib/rf-adapt-intel/${_dir}"
+  if ! $DRY_RUN && [[ -L "${_subdir}" ]]; then
+    echo "[ERROR] ${_subdir} is a symlink — refusing to operate on it." >&2
+    echo "        Remove the symlink manually and re-run deploy.sh:" >&2
+    echo "          sudo rm -f '${_subdir}'" >&2
+    exit 1
+  fi
+  if ! $DRY_RUN && [[ -e "${_subdir}" && ! -d "${_subdir}" ]]; then
+    echo "[ERROR] ${_subdir} exists but is not a directory (unexpected file type)." >&2
+    echo "        Remove it manually and re-run deploy.sh:" >&2
+    echo "          sudo rm -f '${_subdir}'" >&2
+    exit 1
+  fi
+done
+run sudo install -d -m 0750 -o rf_worker -g rf_worker \
+  /var/lib/rf-adapt-intel \
+  /var/lib/rf-adapt-intel/snapshots \
+  /var/lib/rf-adapt-intel/incoming \
+  /var/lib/rf-adapt-intel/processed
+run sudo chmod g+w /var/lib/rf-adapt-intel
 
 # Set up the SSH directory for rf_worker under /var/lib/rf-adapt-intel/.ssh/
 # iq-transfer-watcher.service sets HOME=/var/lib/rf-adapt-intel so that SSH
