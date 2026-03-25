@@ -38,6 +38,22 @@ fi
 # touching /var/lib/ on the test host.
 _RF_DATA_DIR="${_RF_DATA_DIR:-/var/lib/rf-adapt-intel}"
 
+# Sanity-check _RF_DATA_DIR to avoid operating on unintended locations.
+if [[ "${_RF_DATA_DIR}" != /* ]]; then
+  echo "[ERROR] _RF_DATA_DIR must be an absolute path, got: ${_RF_DATA_DIR}" >&2
+  exit 1
+fi
+if [[ -e "${_RF_DATA_DIR}" ]]; then
+  if [[ -L "${_RF_DATA_DIR}" ]]; then
+    echo "[ERROR] _RF_DATA_DIR must not be a symlink: ${_RF_DATA_DIR}" >&2
+    exit 1
+  fi
+  if [[ ! -d "${_RF_DATA_DIR}" ]]; then
+    echo "[ERROR] _RF_DATA_DIR exists but is not a directory: ${_RF_DATA_DIR}" >&2
+    exit 1
+  fi
+fi
+
 run() {
   if $DRY_RUN; then
     echo "[dry-run] $*"
@@ -134,9 +150,11 @@ done
 run sudo chmod g+w "${_RF_DATA_DIR}"
 
 # Set up the SSH directory for rf_worker under ${_RF_DATA_DIR}/.ssh/
-# iq-transfer-watcher.service sets HOME=${_RF_DATA_DIR} so that SSH
-# and rsync store keys and known_hosts in this path, which is already
-# writable under ReadWritePaths (ProtectHome=yes blocks the real home dir).
+# Note: iq-transfer-watcher.service hard-codes HOME=/var/lib/rf-adapt-intel
+# (and WorkingDirectory=/var/lib/rf-adapt-intel); _RF_DATA_DIR is test-only
+# unless the unit files are updated to match.  SSH and rsync store keys and
+# known_hosts under that fixed path, which is writable under ReadWritePaths
+# (ProtectHome=yes blocks the real home dir).
 #
 # Guard against a symlink at .ssh: rf_worker owns the parent directory, so a
 # compromised rf_worker could plant a symlink here.  Following it with a

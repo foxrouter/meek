@@ -140,10 +140,10 @@ test_chmod_gw_follows_all_subdir_installs() {
 
   # Verify ordering: line number of 'chmod g+w' > last 'install -d' line for all subdirs.
   local chmod_line snapshots_line incoming_line processed_line
-  chmod_line="$(printf '%s\n' "${out}" | grep -n "chmod g+w" | tail -1 | cut -d: -f1)"
-  snapshots_line="$(printf '%s\n' "${out}" | grep -n "install -d.*snapshots" | tail -1 | cut -d: -f1)"
-  incoming_line="$(printf '%s\n' "${out}" | grep -n "install -d.*incoming" | tail -1 | cut -d: -f1)"
-  processed_line="$(printf '%s\n' "${out}" | grep -n "install -d.*processed" | tail -1 | cut -d: -f1)"
+  chmod_line="$(printf '%s\n' "${out}" | grep -n "chmod g+w" | tail -1 | cut -d: -f1 || true)"
+  snapshots_line="$(printf '%s\n' "${out}" | grep -n "install -d.*snapshots" | tail -1 | cut -d: -f1 || true)"
+  incoming_line="$(printf '%s\n' "${out}" | grep -n "install -d.*incoming" | tail -1 | cut -d: -f1 || true)"
+  processed_line="$(printf '%s\n' "${out}" | grep -n "install -d.*processed" | tail -1 | cut -d: -f1 || true)"
 
   if [[ -n "${chmod_line}" && -n "${snapshots_line}" && -n "${incoming_line}" && -n "${processed_line}" \
         && "${chmod_line}" -gt "${snapshots_line}" \
