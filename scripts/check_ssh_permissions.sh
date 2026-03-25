@@ -139,7 +139,12 @@ run_fix() {
 #                             $EUID, so the check works correctly when the
 #                             test runner itself is already root (e.g. sudo).
 # ---------------------------------------------------------------------------
-if [[ -z "${_RF_TEST_NO_ROOT:-}" ]] && [[ "${_RF_TEST_EUID:-${EUID:-$(id -u)}}" -ne 0 ]]; then
+if [[ -n "${_RF_TEST_EUID:-}" ]] && ! [[ "${_RF_TEST_EUID}" =~ ^[0-9]+$ ]]; then
+  echo "[ERROR] _RF_TEST_EUID must be an integer UID, got '${_RF_TEST_EUID}'." >&2
+  exit 1
+fi
+_effective_euid="${_RF_TEST_EUID:-${EUID:-$(id -u)}}"
+if [[ -z "${_RF_TEST_NO_ROOT:-}" ]] && [[ "${_effective_euid}" -ne 0 ]]; then
   echo "[ERROR] This script must be run as root (sudo bash $0)." >&2
   exit 1
 fi
