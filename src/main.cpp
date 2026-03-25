@@ -671,7 +671,9 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   // arrive.  The active path always writes (no throttle) and resets this
   // variable so the 250 ms window restarts cleanly after a burst of items.
   auto last_idle_out_progress = std::chrono::steady_clock::now();
-  JsonLog jlog(cfg.worker_log, 50ULL * 1024 * 1024, cfg.worker_log_max_backups);
+  // Internal rotation is disabled (max_bytes=0); logrotate manages worker.log
+  // via copytruncate so the open file descriptor is preserved across rotations.
+  JsonLog jlog(cfg.worker_log, 0);
 
   // Set to true once we have performed an acquire-load of proc_exiting=true,
   // establishing visibility of all ClassificationResults pushed by proc_loop.
