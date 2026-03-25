@@ -58,7 +58,6 @@ struct Config {
   std::string metrics_file{"/var/lib/rf-adapt-intel/metrics.prom"};
   std::string heartbeat_file{"/var/lib/rf-adapt-intel/heartbeat"};
   std::string worker_log{"/var/lib/rf-adapt-intel/worker.log"};
-  int worker_log_max_backups{5};
 
   // Retention
   int snapshot_retention_days{0};
@@ -211,14 +210,9 @@ inline std::string env_str(const char* name, const char* def) {
   cfg.metrics_file = detail::env_str("RF_METRICS_FILE", "/var/lib/rf-adapt-intel/metrics.prom");
   cfg.heartbeat_file = detail::env_str("RF_HEARTBEAT_FILE", "/var/lib/rf-adapt-intel/heartbeat");
   cfg.worker_log = detail::env_str("RF_WORKER_LOG", "/var/lib/rf-adapt-intel/worker.log");
-  {
-    const auto raw = static_cast<int>(detail::env_ll("RF_WORKER_LOG_MAX_BACKUPS", 5));
-    if (raw < 1) {
-      std::cerr << "[CFG] RF_WORKER_LOG_MAX_BACKUPS=" << raw << " is invalid; clamping to 1\n";
-      cfg.worker_log_max_backups = 1;
-    } else {
-      cfg.worker_log_max_backups = raw;
-    }
+  if (std::getenv("RF_WORKER_LOG_MAX_BACKUPS")) {
+    std::cerr << "[CFG] RF_WORKER_LOG_MAX_BACKUPS is ignored: internal JsonLog rotation is "
+                 "disabled (logrotate manages worker.log via copytruncate)\n";
   }
 
   // Retention
