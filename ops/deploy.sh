@@ -96,9 +96,18 @@ if ! id -nG rf_worker 2>/dev/null | grep -qw plugdev; then
 fi
 
 # Create runtime data directories owned by rf_worker.
-# Guard each subdirectory against a symlink or unexpected non-directory file
-# before running privileged chmod on it — a group member with write access to
-# the parent could otherwise pre-plant a symlink and have chmod follow it.
+#
+# To close a TOCTOU window: first lock the parent to 0750 (no group-write),
+# then validate + create each subdirectory while the parent is non-writable by
+# the group, and only re-enable g+w on the parent once all subdirs are in place.
+# This prevents a group member from pre-planting a symlink and having a
+# subsequent privileged install/chmod follow it.
+
+# Step 1 — ensure the parent exists and is NOT group-writable during setup.
+run sudo install -d -m 0750 -o rf_worker -g rf_worker /var/lib/rf-adapt-intel
+
+# Step 2 — validate each subdir and create it immediately after its check,
+#           while the parent is still locked to 0750.
 for _dir in snapshots incoming processed; do
   _subdir="/var/lib/rf-adapt-intel/${_dir}"
   if ! $DRY_RUN && [[ -L "${_subdir}" ]]; then
@@ -113,12 +122,10 @@ for _dir in snapshots incoming processed; do
     echo "          sudo rm -f '${_subdir}'" >&2
     exit 1
   fi
+  run sudo install -d -m 0750 -o rf_worker -g rf_worker "${_subdir}"
 done
-run sudo install -d -m 0750 -o rf_worker -g rf_worker \
-  /var/lib/rf-adapt-intel \
-  /var/lib/rf-adapt-intel/snapshots \
-  /var/lib/rf-adapt-intel/incoming \
-  /var/lib/rf-adapt-intel/processed
+
+# Step 3 — all subdirs are verified; now grant group-write on the parent.
 run sudo chmod g+w /var/lib/rf-adapt-intel
 
 # Set up the SSH directory for rf_worker under /var/lib/rf-adapt-intel/.ssh/
