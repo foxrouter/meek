@@ -133,22 +133,26 @@ test_chmod_gw_follows_all_subdir_installs() {
   assert_exit "clean dry-run exits 0" 0 "${rc}"
 
   # Verify each expected line is present in the output.
-  assert_contains "dry-run: installs snapshots" "install -d" "${out}"
-  assert_contains "dry-run: installs incoming"  "install -d" "${out}"
-  assert_contains "dry-run: installs processed" "install -d" "${out}"
-  assert_contains "dry-run: chmod g+w present"  "chmod g+w"  "${out}"
+  assert_contains "dry-run: installs snapshots" "${_TMP}/snapshots" "${out}"
+  assert_contains "dry-run: installs incoming"  "${_TMP}/incoming"  "${out}"
+  assert_contains "dry-run: installs processed" "${_TMP}/processed" "${out}"
+  assert_contains "dry-run: chmod g+w present"  "chmod g+w"         "${out}"
 
-  # Verify ordering: line number of 'chmod g+w' > last 'install -d ... processed' line.
-  local chmod_line processed_line
+  # Verify ordering: line number of 'chmod g+w' > last 'install -d' line for all subdirs.
+  local chmod_line snapshots_line incoming_line processed_line
   chmod_line="$(printf '%s\n' "${out}" | grep -n "chmod g+w" | tail -1 | cut -d: -f1)"
+  snapshots_line="$(printf '%s\n' "${out}" | grep -n "install -d.*snapshots" | tail -1 | cut -d: -f1)"
+  incoming_line="$(printf '%s\n' "${out}" | grep -n "install -d.*incoming" | tail -1 | cut -d: -f1)"
   processed_line="$(printf '%s\n' "${out}" | grep -n "install -d.*processed" | tail -1 | cut -d: -f1)"
 
-  if [[ -n "${chmod_line}" && -n "${processed_line}" \
+  if [[ -n "${chmod_line}" && -n "${snapshots_line}" && -n "${incoming_line}" && -n "${processed_line}" \
+        && "${chmod_line}" -gt "${snapshots_line}" \
+        && "${chmod_line}" -gt "${incoming_line}" \
         && "${chmod_line}" -gt "${processed_line}" ]]; then
-    ok "chmod g+w follows the last subdir install -d"
+    ok "chmod g+w follows the last install -d for all subdirs"
   else
-    fail "chmod g+w follows the last subdir install -d" \
-      "chmod g+w at line ${chmod_line:-?}, last install -d processed at line ${processed_line:-?}"
+    fail "chmod g+w follows the last install -d for all subdirs" \
+      "chmod g+w at line ${chmod_line:-?}, snapshots at line ${snapshots_line:-?}, incoming at line ${incoming_line:-?}, processed at line ${processed_line:-?}"
   fi
 }
 
