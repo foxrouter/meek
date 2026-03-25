@@ -89,6 +89,7 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
 #include <sstream>
 #include <stop_token>
 #include <string>
+#include <system_error>
 #include <pthread.h>
 #include <thread>
 #include <vector>
@@ -977,9 +978,8 @@ int main(int argc, char** argv) {
     sp.sched_priority = 10;
     const int rc = pthread_setschedparam(cap_thread.native_handle(), SCHED_FIFO, &sp);
     if (rc != 0) {
-      char errbuf[64]{};
-      strerror_r(rc, errbuf, sizeof(errbuf));
-      std::cerr << "[WARN] SCHED_FIFO failed (" << errbuf << ")";
+      const auto msg = std::error_code(rc, std::generic_category()).message();
+      std::cerr << "[WARN] SCHED_FIFO failed (" << msg << ")";
       if (rc == EPERM)
         std::cerr << " — grant CAP_SYS_NICE or run as root";
       std::cerr << ": capture thread at default priority\n";
