@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -46,8 +47,10 @@ struct Config {
 
   // Demodulation hints — reserved for future liquid-dsp demodulation;
   // not currently read by classify_block() or any processing path.
+#ifdef HAVE_LIQUID
   double rsym{128'000.0};
   double fdev{50'000.0};
+#endif  // HAVE_LIQUID
 
   // Output paths
   std::string db_path{"/var/lib/rf-adapt-intel/rf_adapt_intel.db"};
@@ -177,8 +180,17 @@ inline std::string env_str(const char* name, const char* def) {
   }
 
   // Demodulation
+#ifdef HAVE_LIQUID
   cfg.rsym = detail::env_d("RSYM", 128'000.0);
   cfg.fdev = detail::env_d("FDEV", 50'000.0);
+#else
+  {
+    const char* rsym_env = std::getenv("RSYM");
+    const char* fdev_env = std::getenv("FDEV");
+    if ((rsym_env && *rsym_env != '\0') || (fdev_env && *fdev_env != '\0'))
+      std::cerr << "[CFG] WARN: RSYM/FDEV set but liquid-dsp not compiled in — ignored\n";
+  }
+#endif  // HAVE_LIQUID
 
   // Mod hint
   {

@@ -82,6 +82,9 @@ jobs:
       - name: test_check_ssh_permissions.sh
         run: bash tests/test_check_ssh_permissions.sh -v
 
+      - name: test_deploy.sh
+        run: bash tests/test_deploy.sh -v
+
   # ─────────────────────────────────────────────────────────────────────────
   # 2. Build iq_metrics (C++, no hardware deps) + validate vs Python
   # ─────────────────────────────────────────────────────────────────────────
