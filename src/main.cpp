@@ -446,6 +446,9 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
     bool pushed = false;
     for (int retry = 0; retry < 100; ++retry) {
       if (out_buf.push(std::move(blk))) {
+        // blk.samples was moved into the ring buffer; restore capacity so the
+        // next iteration's assign() does not reallocate.
+        blk.samples.reserve(cfg.block_len);
         pushed = true;
         break;
       }
@@ -597,16 +600,24 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     // unbounded memory growth.  Save only the best analysis window so the
     // snapshot contains the actual signal, not surrounding noise.
     if (cr.confidence >= cfg.snapshot_conf && cr.snr_gate_pass) {
-      SnapTask task;
-      const auto snap_begin = blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
-      const auto snap_end   = snap_begin + static_cast<std::ptrdiff_t>(best_len);
-      task.samples.assign(snap_begin, snap_end);
-      task.dir       = cfg.snapshot_dir;
-      task.conf      = cr.confidence;
-      task.ts_ns     = cr.timestamp_ns;
-      task.band_name = cr.band_name;
-      if (!snap_queue.push(std::move(task)))
+      // Avoid constructing the snapshot task and copying samples if the queue
+      // is already full; this keeps the hot path cheap when snapshots back up.
+      if (snap_queue.size_approx() >= snap_queue.capacity()) {
         snap_dropped.fetch_add(1, std::memory_order_relaxed);
+      } else {
+        SnapTask task;
+        const auto snap_begin =
+            blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
+        const auto snap_end =
+            snap_begin + static_cast<std::ptrdiff_t>(best_len);
+        task.samples.assign(snap_begin, snap_end);
+        task.dir       = cfg.snapshot_dir;
+        task.conf      = cr.confidence;
+        task.ts_ns     = cr.timestamp_ns;
+        task.band_name = cr.band_name;
+        if (!snap_queue.push(std::move(task)))
+          snap_dropped.fetch_add(1, std::memory_order_relaxed);
+      }
     }
 
     // Backpressure: spin-wait up to 10ms before dropping the result.
@@ -926,13 +937,21 @@ int main(int argc, char** argv) {
   std::atomic<std::uint64_t> out_progress{startup_time_ns};
 
   std::jthread snap_thread([&](std::stop_token st) {
+    // Exponential backoff: start at 500µs, double on each consecutive empty
+    // pop, cap at 8ms.  Resets to 500µs after each successful pop so latency
+    // stays low when snapshots arrive in bursts.
+    auto backoff_delay = std::chrono::microseconds(500);
+    constexpr auto kMaxBackoff = std::chrono::microseconds(8000);
     while (!st.stop_requested()) {
       SnapTask task;
-      if (snap_queue.pop(task))
+      if (snap_queue.pop(task)) {
+        backoff_delay = std::chrono::microseconds(500);
         write_snapshot(task.dir, std::span{task.samples},
                        task.conf, task.ts_ns, task.band_name, snap_errors);
-      else
-        std::this_thread::sleep_for(std::chrono::microseconds(500));
+      } else {
+        std::this_thread::sleep_for(backoff_delay);
+        backoff_delay = std::min(backoff_delay * 2, kMaxBackoff);
+      }
     }
     SnapTask task;
     while (snap_queue.pop(task))
@@ -956,8 +975,15 @@ int main(int argc, char** argv) {
   {
     struct sched_param sp{};
     sp.sched_priority = 10;
-    if (pthread_setschedparam(cap_thread.native_handle(), SCHED_FIFO, &sp) != 0)
-      std::cerr << "[WARN] SCHED_FIFO not available — capture thread at default priority\n";
+    const int rc = pthread_setschedparam(cap_thread.native_handle(), SCHED_FIFO, &sp);
+    if (rc != 0) {
+      char errbuf[64]{};
+      strerror_r(rc, errbuf, sizeof(errbuf));
+      std::cerr << "[WARN] SCHED_FIFO failed (" << errbuf << ")";
+      if (rc == EPERM)
+        std::cerr << " — grant CAP_SYS_NICE or run as root";
+      std::cerr << ": capture thread at default priority\n";
+    }
   }
 
   std::jthread proc_thread([&](std::stop_token st) {
