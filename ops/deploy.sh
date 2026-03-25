@@ -195,27 +195,6 @@ if ! $DRY_RUN; then
   fi
 fi
 
-DB_SYNC_SVC="${REPO_ROOT}/systemd/db-sync.service"
-DB_SYNC_TMR="${REPO_ROOT}/systemd/db-sync.timer"
-DB_SYNC_DROPIN_SRC="${REPO_ROOT}/systemd/db-sync.service.d"
-DB_SYNC_DROPIN_DST="/etc/systemd/system/db-sync.service.d"
-if [[ -f "${DB_SYNC_SVC}" && -f "${DB_SYNC_TMR}" ]]; then
-  run sudo install -m 644 -o root -g root "${DB_SYNC_SVC}" \
-      /etc/systemd/system/db-sync.service
-  run sudo install -m 644 -o root -g root "${DB_SYNC_TMR}" \
-      /etc/systemd/system/db-sync.timer
-  if [[ -f "${DB_SYNC_DROPIN_SRC}/hardening.conf" ]]; then
-    run sudo mkdir -p "${DB_SYNC_DROPIN_DST}"
-    run sudo install -m 644 -o root -g root \
-        "${DB_SYNC_DROPIN_SRC}/hardening.conf" \
-        "${DB_SYNC_DROPIN_DST}/hardening.conf"
-  fi
-else
-  echo "[WARN] Skipping db-sync unit install; expected both files but found:" \
-       "service=$( [[ -f \"${DB_SYNC_SVC}\" ]] && echo present || echo missing )," \
-       "timer=$( [[ -f \"${DB_SYNC_TMR}\" ]] && echo present || echo missing )"
-fi
-
 # Install canary monitor service + 30-minute timer
 echo ""
 echo "=== Installing canary monitor timer ==="
@@ -239,12 +218,6 @@ run sudo install -m 755 -o root -g root "${REPO_ROOT}/ops/canary.sh" \
 # main service unit are picked up before any `enable --now` fires the timer.
 run sudo systemctl daemon-reload
 run sudo systemctl enable --now rf-adapt-intel-monitor.timer
-if [[ -f /etc/systemd/system/db-sync.timer ]]; then
-  # Enable the db-sync timer whenever it is installed; db-sync.service
-  # should use ExecCondition or its own logic to decide whether to run
-  # based on DB_SYNC_DEST from its EnvironmentFile.
-  run sudo systemctl enable --now db-sync.timer
-fi
 
 # Enable process-worker (create the WantedBy symlink without starting yet)
 run sudo systemctl enable "${SERVICE}"
