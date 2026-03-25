@@ -43,15 +43,20 @@ if [[ "${_RF_DATA_DIR}" != /* ]]; then
   echo "[ERROR] _RF_DATA_DIR must be an absolute path, got: ${_RF_DATA_DIR}" >&2
   exit 1
 fi
-if [[ -e "${_RF_DATA_DIR}" ]]; then
-  if [[ -L "${_RF_DATA_DIR}" ]]; then
-    echo "[ERROR] _RF_DATA_DIR must not be a symlink: ${_RF_DATA_DIR}" >&2
-    exit 1
-  fi
-  if [[ ! -d "${_RF_DATA_DIR}" ]]; then
-    echo "[ERROR] _RF_DATA_DIR exists but is not a directory: ${_RF_DATA_DIR}" >&2
-    exit 1
-  fi
+# Non-default _RF_DATA_DIR is test-only; refuse it in production deploys.
+if [[ "${_RF_DATA_DIR}" != "/var/lib/rf-adapt-intel" ]] && ! $DRY_RUN; then
+  echo "[ERROR] _RF_DATA_DIR may only be overridden in --dry-run mode." >&2
+  echo "        Production deploys always use /var/lib/rf-adapt-intel." >&2
+  exit 1
+fi
+# Use -L before -e: -e is false for dangling symlinks, so check -L first.
+if [[ -L "${_RF_DATA_DIR}" ]]; then
+  echo "[ERROR] _RF_DATA_DIR must not be a symlink: ${_RF_DATA_DIR}" >&2
+  exit 1
+fi
+if [[ -e "${_RF_DATA_DIR}" && ! -d "${_RF_DATA_DIR}" ]]; then
+  echo "[ERROR] _RF_DATA_DIR exists but is not a directory: ${_RF_DATA_DIR}" >&2
+  exit 1
 fi
 
 run() {
