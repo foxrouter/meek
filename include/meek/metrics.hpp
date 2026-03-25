@@ -107,8 +107,9 @@ struct ProcMetrics {
       << "# HELP rf_sdr_overflow_total "
       << "SDR hardware overflow events (SOAPY_SDR_OVERFLOW); stream alive but samples lost\n"
       << "# TYPE rf_sdr_overflow_total counter\n"
-      << "rf_sdr_overflow_total " << m.sdr_overflow << "\n"
-      << "# HELP rf_demod_total Demodulation attempts by result; "
+      << "rf_sdr_overflow_total " << m.sdr_overflow << "\n";
+#ifdef HAVE_LIQUID
+  out << "# HELP rf_demod_total Demodulation attempts by result; "
       << "labels are mutually exclusive per attempt: "
       << "lock_ok=no-CRC success, crc_ok=CRC passed, "
       << "crc_fail=CRC failed, lock_fail=lock failed\n"
@@ -117,6 +118,7 @@ struct ProcMetrics {
       << "rf_demod_total{result=\"crc_ok\"}    " << m.demod_crc_ok << "\n"
       << "rf_demod_total{result=\"crc_fail\"}  " << m.demod_crc_fail << "\n"
       << "rf_demod_total{result=\"lock_fail\"} " << m.demod_lock_fail << "\n";
+#endif  // HAVE_LIQUID
   return out.str();
 }
 

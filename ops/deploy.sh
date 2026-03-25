@@ -99,6 +99,7 @@ fi
 run sudo mkdir -p /var/lib/rf-adapt-intel/{snapshots,incoming,processed}
 run sudo chown -hR rf_worker:rf_worker /var/lib/rf-adapt-intel
 run sudo chmod 0750 /var/lib/rf-adapt-intel
+run sudo chmod g+w  /var/lib/rf-adapt-intel
 run sudo chmod 0750 /var/lib/rf-adapt-intel/snapshots
 run sudo chmod 0750 /var/lib/rf-adapt-intel/incoming
 run sudo chmod 0750 /var/lib/rf-adapt-intel/processed
