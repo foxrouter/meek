@@ -135,7 +135,7 @@ run_fix() {
 # Pre-flight: must run as root (so we can chown and switch user)
 # _RF_TEST_NO_ROOT may be set in unit-test environments to skip this check.
 # ---------------------------------------------------------------------------
-if [[ -z "${_RF_TEST_NO_ROOT:-}" ]] && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+if [[ -z "${_RF_TEST_NO_ROOT:-}" ]] && [[ "${_RF_TEST_EUID:-${EUID:-$(id -u)}}" -ne 0 ]]; then
   echo "[ERROR] This script must be run as root (sudo bash $0)." >&2
   exit 1
 fi

@@ -226,7 +226,7 @@ test_unknown_flag_fails() {
 test_requires_root() {
   # Without _RF_TEST_NO_ROOT set, the script must exit non-zero with a root error.
   local out rc=0
-  out="$(bash "${SCRIPT}" 2>&1)" || rc=$?
+  out="$(env _RF_TEST_EUID=1000 bash "${SCRIPT}" 2>&1)" || rc=$?
   assert_exit "non-root: exits non-zero" 1 "${rc}"
   assert_contains "non-root: shows root error" "must be run as root" "${out}"
 }

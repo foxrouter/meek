@@ -589,6 +589,8 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     cr.timestamp_ns = blk.timestamp_ns;
     cr.center_freq_hz = blk.center_freq_hz;
     cr.sample_rate_hz = blk.sample_rate_hz;
+    if (!cr.snr_gate_pass || !cr.bw_gate_pass || cr.mod_class == ModClass::UNKNOWN)
+      cr.demod_status = DemodStatus::SKIPPED;
 
     // Enqueue CF32 snapshot when confidence exceeds the snapshot threshold.
     // Cap at 64 pending tasks (~2 MB) so stalled snapshot I/O cannot cause
@@ -765,7 +767,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
 
       {
         json j;
-        j["schema_version"] = "2";
+        j["schema_version"] = "3";
         j["ts_ns"] = cr.timestamp_ns;
         j["mod"] = mod_class_name(cr.mod_class);
         j["confidence"] = cr.confidence;
@@ -782,6 +784,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
         j["bw_gate_pass"] = cr.bw_gate_pass;
         j["band"] = cr.band_name;
         j["decision_trace"] = cr.decision_trace;
+        j["demod_status"] = demod_status_name(cr.demod_status);
         jlog.write(j);
       }
 
@@ -818,6 +821,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
     }
   }
 
+  jlog.flush();
   metrics.snap_errors = snap_errors.load(std::memory_order_relaxed);
   metrics.snap_dropped = snap_dropped.load(std::memory_order_relaxed);
   metrics.frames_cap_dropped = cap_dropped.load(std::memory_order_relaxed);
