@@ -33,6 +33,11 @@ if $DRY_RUN; then
   echo "[dry-run] No changes will be written."
 fi
 
+# Runtime data directory.  Override via _RF_DATA_DIR for testing so the
+# symlink/permission checks can exercise real filesystem paths without
+# touching /var/lib/ on the test host.
+_RF_DATA_DIR="${_RF_DATA_DIR:-/var/lib/rf-adapt-intel}"
+
 run() {
   if $DRY_RUN; then
     echo "[dry-run] $*"
@@ -104,19 +109,19 @@ fi
 # subsequent privileged install/chmod follow it.
 
 # Step 1 — ensure the parent exists and is NOT group-writable during setup.
-run sudo install -d -m 0750 -o rf_worker -g rf_worker /var/lib/rf-adapt-intel
+run sudo install -d -m 0750 -o rf_worker -g rf_worker "${_RF_DATA_DIR}"
 
 # Step 2 — validate each subdir and create it immediately after its check,
 #           while the parent is still locked to 0750.
 for _dir in snapshots incoming processed; do
-  _subdir="/var/lib/rf-adapt-intel/${_dir}"
-  if ! $DRY_RUN && [[ -L "${_subdir}" ]]; then
+  _subdir="${_RF_DATA_DIR}/${_dir}"
+  if [[ -L "${_subdir}" ]]; then
     echo "[ERROR] ${_subdir} is a symlink — refusing to operate on it." >&2
     echo "        Remove the symlink manually and re-run deploy.sh:" >&2
     echo "          sudo rm -f '${_subdir}'" >&2
     exit 1
   fi
-  if ! $DRY_RUN && [[ -e "${_subdir}" && ! -d "${_subdir}" ]]; then
+  if [[ -e "${_subdir}" && ! -d "${_subdir}" ]]; then
     echo "[ERROR] ${_subdir} exists but is not a directory (unexpected file type)." >&2
     echo "        Remove it manually and re-run deploy.sh:" >&2
     echo "          sudo rm -f '${_subdir}'" >&2
@@ -126,10 +131,10 @@ for _dir in snapshots incoming processed; do
 done
 
 # Step 3 — all subdirs are verified; now grant group-write on the parent.
-run sudo chmod g+w /var/lib/rf-adapt-intel
+run sudo chmod g+w "${_RF_DATA_DIR}"
 
-# Set up the SSH directory for rf_worker under /var/lib/rf-adapt-intel/.ssh/
-# iq-transfer-watcher.service sets HOME=/var/lib/rf-adapt-intel so that SSH
+# Set up the SSH directory for rf_worker under ${_RF_DATA_DIR}/.ssh/
+# iq-transfer-watcher.service sets HOME=${_RF_DATA_DIR} so that SSH
 # and rsync store keys and known_hosts in this path, which is already
 # writable under ReadWritePaths (ProtectHome=yes blocks the real home dir).
 #
@@ -137,7 +142,7 @@ run sudo chmod g+w /var/lib/rf-adapt-intel
 # compromised rf_worker could plant a symlink here.  Following it with a
 # privileged chown/chmod could affect an unintended path.  Fail hard and ask
 # the operator to remove the symlink manually before re-running deploy.
-_SSH_DIR=/var/lib/rf-adapt-intel/.ssh
+_SSH_DIR="${_RF_DATA_DIR}/.ssh"
 if ! $DRY_RUN && [[ -L "${_SSH_DIR}" ]]; then
   echo "[ERROR] ${_SSH_DIR} is a symlink — refusing to operate on it." >&2
   echo "        Remove the symlink manually and re-run deploy.sh:" >&2
@@ -173,7 +178,7 @@ if ! $DRY_RUN; then
   elif ! sudo test -e "${priv_key}"; then
     echo "Generating SSH key pair for rf_worker..."
     sudo -u rf_worker \
-      HOME=/var/lib/rf-adapt-intel \
+      HOME="${_RF_DATA_DIR}" \
       ssh-keygen -t ed25519 -N "" \
         -f "${priv_key}" \
         -C "rf_worker@$(hostname -s 2>/dev/null || echo localhost)"
@@ -212,11 +217,11 @@ fi
 
 # Verify the directory is accessible by rf_worker before starting the service
 if ! $DRY_RUN; then
-  if ! sudo -u rf_worker test -w /var/lib/rf-adapt-intel; then
-    echo "[WARN] /var/lib/rf-adapt-intel is not writable by rf_worker — check ownership"
-    ls -la /var/lib/ | grep rf-adapt-intel || true
+  if ! sudo -u rf_worker test -w "${_RF_DATA_DIR}"; then
+    echo "[WARN] ${_RF_DATA_DIR} is not writable by rf_worker — check ownership"
+    ls -la "$(dirname "${_RF_DATA_DIR}")" | grep "$(basename "${_RF_DATA_DIR}")" || true
   else
-    echo "    [OK] /var/lib/rf-adapt-intel is writable by rf_worker"
+    echo "    [OK] ${_RF_DATA_DIR} is writable by rf_worker"
   fi
 fi
 
