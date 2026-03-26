@@ -68,6 +68,7 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
 #endif  // HAVE_SYSTEMD
 #include <fcntl.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <unistd.h>
 
