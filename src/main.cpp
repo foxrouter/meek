@@ -770,7 +770,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
 #ifdef HAVE_LIQUID
     switch (cr.demod_status) {
       case DemodStatus::OK:
-        ++metrics.demod_ok;
+        ++metrics.demod_crc_ok;
         break;
       case DemodStatus::CRC_FAIL:
         ++metrics.demod_crc_fail;
