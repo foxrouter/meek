@@ -909,6 +909,7 @@ int main(int argc, char** argv) {
 
   // Snapshot worker — SpscRingBuffer<SnapTask, 64>: one producer (proc_loop),
   // one consumer (snap_thread).  Lock-free; no mutex in the hot path.
+  // Note: SpscRingBuffer uses one sentinel slot, so usable capacity is 63.
   SpscRingBuffer<SnapTask, 64> snap_queue;
   std::atomic<std::uint64_t> snap_errors{0};
   std::atomic<std::uint64_t> snap_dropped{0};
