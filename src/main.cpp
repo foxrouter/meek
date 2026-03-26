@@ -822,9 +822,16 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
         j["demod_status"] = demod_status_name(cr.demod_status);
 #ifdef HAVE_LIQUID
         if (cr.demod_status != DemodStatus::UNKNOWN && cr.demod_status != DemodStatus::SKIPPED) {
-          j["demod_cfo_hz"] = cr.demod_cfo_hz;
-          j["demod_phase_error"] = cr.demod_phase_error;
-          j["demod_lock_ms"] = cr.demod_lock_ms;
+          if (cr.mod_class == ModClass::OOK_AM_LIKE) {
+            // OOK envelope demod has no carrier lock/CFO — emit nulls to avoid misleading zeros.
+            j["demod_cfo_hz"]      = nullptr;
+            j["demod_phase_error"] = nullptr;
+            j["demod_lock_ms"]     = nullptr;
+          } else {
+            j["demod_cfo_hz"]      = cr.demod_cfo_hz;
+            j["demod_phase_error"] = cr.demod_phase_error;
+            j["demod_lock_ms"]     = cr.demod_lock_ms;
+          }
         }
 #endif
         jlog.write(j);
