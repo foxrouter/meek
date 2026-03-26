@@ -128,8 +128,9 @@ struct ClassificationResult {
   int demod_lock_ms{0};           // time to carrier lock (ms); 0 = not locked
   // Soft information emitted by the demodulator. Semantics are demod-chain
   // dependent and may be per-bit or per-symbol. Values are in the range
-  // [0,255], where 0/255 typically indicate strong evidence toward opposite
-  // decisions and mid-range values indicate low confidence.
+  // [0,255]. For some chains (e.g. OOK), 0/255 encode strong evidence toward
+  // opposite decisions; for others the value may represent only confidence or
+  // error magnitude without indicating which decision is favored.
   std::vector<uint8_t> demod_soft_bits;
 };
 

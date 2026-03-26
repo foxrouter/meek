@@ -372,6 +372,13 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
                 return;
               }
               scheme = LIQUID_MODEM_BPSK;
+              // Restart demod/bit collection for the final scheme to avoid
+              // interpreting QPSK symbols as BPSK and misaligning the bitstream.
+              syms.clear();
+              phase_errs.clear();
+              watch_rms = 0.f;
+              watch_cnt = 0;
+              lock_sym = -1;
             }
           }
           watch_rms = 0.f;
