@@ -614,6 +614,11 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
           break;
       }
     }
+#else
+    else {
+      // Liquid-dsp not available: mark demodulation as intentionally skipped.
+      cr.demod_status = DemodStatus::SKIPPED;
+    }
 #endif
 
     // Enqueue CF32 snapshot when confidence exceeds the snapshot threshold.
