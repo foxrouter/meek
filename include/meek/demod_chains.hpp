@@ -367,9 +367,11 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
             if (widen_count == 3) {
               modemcf_destroy(demod);
               demod = modemcf_create(LIQUID_MODEM_BPSK);
+              if (!demod) {
+                cr.demod_status = DemodStatus::LOCK_FAIL;
+                return;
+              }
               scheme = LIQUID_MODEM_BPSK;
-              if (!demod)
-                break;  // fallback creation failed; exit loop
             }
           }
           watch_rms = 0.f;
@@ -506,7 +508,7 @@ inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& c
     }
 
     cr.demod_soft_bits = std::move(soft_bits);
-    cr.demod_lock_ms = 0;  // envelope detection — no carrier lock required
+    cr.demod_lock_ms = -1;  // envelope detection — no carrier lock required / not applicable
 
     // 6. CRC-32
     const auto msg_bytes = detail::pack_bits(bits);
