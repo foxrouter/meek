@@ -447,9 +447,6 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
     bool pushed = false;
     for (int retry = 0; retry < 100; ++retry) {
       if (out_buf.push(std::move(blk))) {
-        // blk.samples was moved into the ring buffer; restore capacity so the
-        // next iteration's assign() does not reallocate.
-        blk.samples.reserve(cfg.block_len);
         pushed = true;
         break;
       }
