@@ -67,6 +67,7 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
 }
 #endif  // HAVE_SYSTEMD
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
 
@@ -90,7 +91,6 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
 #include <stop_token>
 #include <string>
 #include <system_error>
-#include <pthread.h>
 #include <thread>
 #include <vector>
 
@@ -604,14 +604,12 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
         snap_dropped.fetch_add(1, std::memory_order_relaxed);
       } else {
         SnapTask task;
-        const auto snap_begin =
-            blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
-        const auto snap_end =
-            snap_begin + static_cast<std::ptrdiff_t>(best_len);
+        const auto snap_begin = blk.samples.begin() + static_cast<std::ptrdiff_t>(best_offset);
+        const auto snap_end = snap_begin + static_cast<std::ptrdiff_t>(best_len);
         task.samples.assign(snap_begin, snap_end);
-        task.dir       = cfg.snapshot_dir;
-        task.conf      = cr.confidence;
-        task.ts_ns     = cr.timestamp_ns;
+        task.dir = cfg.snapshot_dir;
+        task.conf = cr.confidence;
+        task.ts_ns = cr.timestamp_ns;
         task.band_name = cr.band_name;
         if (!snap_queue.push(std::move(task)))
           snap_dropped.fetch_add(1, std::memory_order_relaxed);
@@ -944,8 +942,8 @@ int main(int argc, char** argv) {
       SnapTask task;
       if (snap_queue.pop(task)) {
         backoff_delay = std::chrono::microseconds(500);
-        write_snapshot(task.dir, std::span{task.samples},
-                       task.conf, task.ts_ns, task.band_name, snap_errors);
+        write_snapshot(task.dir, std::span{task.samples}, task.conf, task.ts_ns, task.band_name,
+                       snap_errors);
       } else {
         std::this_thread::sleep_for(backoff_delay);
         backoff_delay = std::min(backoff_delay * 2, kMaxBackoff);
@@ -953,8 +951,8 @@ int main(int argc, char** argv) {
     }
     SnapTask task;
     while (snap_queue.pop(task))
-      write_snapshot(task.dir, std::span{task.samples},
-                     task.conf, task.ts_ns, task.band_name, snap_errors);
+      write_snapshot(task.dir, std::span{task.samples}, task.conf, task.ts_ns, task.band_name,
+                     snap_errors);
   });
 
   // Only create the shared MetricsSnapshot when the Prometheus HTTP server will
@@ -971,7 +969,7 @@ int main(int argc, char** argv) {
   });
 
   {
-    struct sched_param sp{};
+    struct sched_param sp {};
     sp.sched_priority = 10;
     const int rc = pthread_setschedparam(cap_thread.native_handle(), SCHED_FIFO, &sp);
     if (rc != 0) {
@@ -984,8 +982,8 @@ int main(int argc, char** argv) {
   }
 
   std::jthread proc_thread([&](std::stop_token st) {
-    proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_queue, snap_dropped,
-              proc_dropped, proc_progress, cap_exiting, proc_exiting);
+    proc_loop(st, cap_to_proc, proc_to_out, cfg, snap_queue, snap_dropped, proc_dropped,
+              proc_progress, cap_exiting, proc_exiting);
   });
 
   std::jthread out_thread([&](std::stop_token st) {
