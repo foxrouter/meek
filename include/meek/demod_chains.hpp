@@ -256,14 +256,13 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
 ///
 /// Steps:
 ///   1. IIR DC block.
-///   2. Mueller-Müller coarse timing (structural; symsync handles fine timing).
-///   3. symsync_crcf RRC, k sps, m=6, β=0.3, Npfb=32, loop BW 0.02.
-///   4. modemcf QPSK + modemcf_get_demodulator_phase_error.
-///   5. nco_crcf Costas + nco_crcf_pll_step.
-///   6. Watchdog: RMS err > π/4 per 32 symbols → widen PLL BW (×3, max 0.05,
+///   2. symsync_crcf RRC, k sps, m=6, β=0.3, Npfb=32, loop BW 0.02.
+///   3. modemcf QPSK + modemcf_get_demodulator_phase_error.
+///   4. nco_crcf Costas + nco_crcf_pll_step.
+///   5. Watchdog: RMS err > π/4 per 32 symbols → widen PLL BW (×3, max 0.05,
 ///      up to 3 times) → fallback BPSK.
-///   7. Soft bits: clamp((π/2 - |phase_err|) / (π/2) * 255, 0, 255).
-///   8. CRC-32.  cr.demod_phase_error = overall RMS.
+///   6. Soft bits: clamp((π/2 - |phase_err|) / (π/2) * 255, 0, 255).
+///   7. CRC-32.  cr.demod_phase_error = overall RMS.
 inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& cfg,
                           ClassificationResult& cr) noexcept {
   try {
@@ -280,20 +279,7 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
     std::vector<std::complex<float>> buf;
     detail::dc_block(s, buf);
 
-    // 2. Mueller-Müller coarse timing (structural; formula yields e=0 per spec)
-    {
-      std::complex<float> x_prev{0.f};
-      float tau_mm = 0.f;
-      for (std::size_t i = 0; i + 1 < n; i += static_cast<std::size_t>(k)) {
-        const std::complex<float> xn = buf[i];
-        const float e = (xn * std::conj(x_prev)).real() - (x_prev * std::conj(xn)).real();
-        tau_mm += 0.01f * e;
-        x_prev = xn;
-      }
-      (void)tau_mm;  // coarse correction applied implicitly by symsync
-    }
-
-    // 3. symsync_crcf RRC
+    // 2. symsync_crcf RRC
     symsync_crcf sync = symsync_crcf_create_rnyquist(LIQUID_FIRFILT_RRC, uk, 6u, 0.3f, 32u);
     if (!sync) {
       cr.demod_status = DemodStatus::LOCK_FAIL;
@@ -315,7 +301,7 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
         return;
       }
 
-      // 4–6. modemcf QPSK + Costas PLL + watchdog
+      // 3–5. modemcf QPSK + Costas PLL + watchdog
       modulation_scheme scheme = LIQUID_MODEM_QPSK;
       modemcf demod = modemcf_create(scheme);
       if (!demod) {
@@ -396,7 +382,7 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
         return;
       }
 
-      // 8. RMS phase error
+      // 7. RMS phase error
       float total_sq = 0.f;
       for (float e : phase_errs) total_sq += e * e;
       cr.demod_phase_error = std::sqrt(total_sq / static_cast<float>(phase_errs.size()));
@@ -405,7 +391,7 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
       const int sym_ms = static_cast<int>(std::ceil(1000.0 / cfg.rsym));
       cr.demod_lock_ms = (lock_sym >= 0) ? (lock_sym + 1) * sym_ms : sym_ms;
 
-      // 7. Soft bits
+      // 6. Soft bits
       constexpr float kPiOver2 = static_cast<float>(std::numbers::pi) / 2.f;
       std::vector<uint8_t> soft_bits;
       soft_bits.reserve(phase_errs.size());
