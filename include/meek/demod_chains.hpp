@@ -92,7 +92,8 @@ inline unsigned int extract_crc32(const std::vector<unsigned char>& bytes) noexc
          (static_cast<unsigned int>(bytes[n - 2]) << 8) | static_cast<unsigned int>(bytes[n - 1]);
 }
 
-/// Run CRC-32 check on packed bytes.  Returns OK or CRC_FAIL.
+/// Run CRC-32 check on packed bytes.  Returns OK, CRC_FAIL, or LOCK_FAIL
+/// (when the message is too short to contain a 4-byte CRC trailer).
 inline DemodStatus check_crc(const std::vector<unsigned char>& msg_bytes) noexcept {
   if (msg_bytes.size() < 5)
     return DemodStatus::LOCK_FAIL;
@@ -242,8 +243,8 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
     cr.demod_soft_bits = std::move(soft_bits);
 
     // Lock time: symbols until Gardner error settled, converted to ms
-    const int sym_ms = static_cast<int>(std::ceil(1000.0 / cfg.rsym));
-    cr.demod_lock_ms = (lock_sym >= 0) ? (lock_sym + 1) * sym_ms : sym_ms;
+    const float lock_syms = (lock_sym >= 0) ? static_cast<float>(lock_sym + 1) : 1.0f;
+    cr.demod_lock_ms = static_cast<int>(std::lround(lock_syms * (1000.0f / cfg.rsym)));
 
     // 7. CRC-32
     const auto msg_bytes = detail::pack_bits(syms);
@@ -304,7 +305,9 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
       auto sync_guard = detail::on_scope_exit([&] { symsync_crcf_destroy(sync); });
       symsync_crcf_set_lf_bw(sync, 0.02f);
 
-      // Output buffer: conservatively sized (at most n symbols out of n*k input)
+      // Output buffer: generously over-sized. With n input samples at k samples/symbol,
+      // symsync_crcf produces O(n / k) output symbols plus filter transients, which
+      // easily fits into this buffer.
       std::vector<std::complex<float>> sync_out(n + static_cast<std::size_t>(k) * 12u);
       unsigned int num_written = 0;
       symsync_crcf_execute(sync, buf.data(), static_cast<unsigned int>(n), sync_out.data(),
@@ -412,8 +415,8 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
       cr.demod_phase_error = std::sqrt(total_sq / static_cast<float>(phase_errs.size()));
 
       // Lock time
-      const int sym_ms = static_cast<int>(std::ceil(1000.0 / cfg.rsym));
-      cr.demod_lock_ms = (lock_sym >= 0) ? (lock_sym + 1) * sym_ms : sym_ms;
+      const float lock_syms_psk = (lock_sym >= 0) ? static_cast<float>(lock_sym + 1) : 1.0f;
+      cr.demod_lock_ms = static_cast<int>(std::lround(lock_syms_psk * (1000.0f / cfg.rsym)));
 
       // 6. Soft bits
       constexpr float kPiOver2 = static_cast<float>(std::numbers::pi) / 2.f;
@@ -478,11 +481,16 @@ inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& c
     std::vector<float> env(n);
     for (std::size_t i = 0; i < n; ++i) env[i] = std::abs(s[i]);
 
-    // 2. Percentile threshold
-    std::vector<float> sorted_env(env);
-    std::sort(sorted_env.begin(), sorted_env.end());
-    const float p10 = sorted_env[n / 10];
-    const float p90 = sorted_env[9 * n / 10];
+    // 2. Percentile threshold (nth_element avoids a full sort)
+    std::vector<float> tmp(env);
+    const std::size_t p10_idx = n / 10;
+    const std::size_t p90_idx = 9 * n / 10;
+    auto p10_it = tmp.begin() + static_cast<std::ptrdiff_t>(p10_idx);
+    std::nth_element(tmp.begin(), p10_it, tmp.end());
+    const float p10 = *p10_it;
+    auto p90_it = tmp.begin() + static_cast<std::ptrdiff_t>(p90_idx);
+    std::nth_element(tmp.begin(), p90_it, tmp.end());
+    const float p90 = *p90_it;
     const float range = p90 - p10;
 
     if (range < 1e-6f) {

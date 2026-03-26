@@ -125,7 +125,7 @@ struct ClassificationResult {
   DemodStatus demod_status{DemodStatus::UNKNOWN};
   float demod_cfo_hz{0.0f};       // carrier frequency offset (Hz)
   float demod_phase_error{0.0f};  // RMS phase error (radians)
-  int demod_lock_ms{0};           // time to carrier lock (ms); 0 = not locked
+  int demod_lock_ms{0};           // time to carrier lock (ms); 0 = not locked; -1 = not applicable
   // Soft information emitted by the demodulator. Semantics are demod-chain
   // dependent and may be per-bit or per-symbol. Values are in the range
   // [0,255]. For some chains (e.g. OOK), 0/255 encode strong evidence toward
