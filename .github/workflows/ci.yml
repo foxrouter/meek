@@ -278,7 +278,11 @@ jobs:
 
           echo "Verified: HAVE_LIQUID compile definition is present in the build flags."
 
-      - name: test_demod_ber (BER + CRC-32 validation)
+      # test_demod_ber.py is a Python algorithm mirror test: it validates BER
+      # and CRC-32 logic in pure Python.  The C++ demod_chains.hpp code is
+      # compile-tested by the "Build rf_adapt_intel" step above; there is no
+      # C++ runtime test here because the binary requires SDR hardware.
+      - name: test_demod_ber (Python algorithm mirror tests)
         run: python3 tests/test_demod_ber.py -v
 
   # ─────────────────────────────────────────────────────────────────────────
