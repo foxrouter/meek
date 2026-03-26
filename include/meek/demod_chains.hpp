@@ -71,10 +71,11 @@ inline void dc_block(std::span<const std::complex<float>> src,
 }
 
 /// Pack a vector of bit values (0/1) into bytes MSB-first.
-/// Returns empty vector if fewer than 8 bits supplied.
+/// Returns empty vector if fewer than 8 bits supplied or if the bit count is
+/// not a multiple of 8 (non-byte-aligned input would misplace the CRC bytes).
 inline std::vector<unsigned char> pack_bits(const std::vector<unsigned int>& bits) noexcept {
   const std::size_t n_bytes = bits.size() / 8;
-  if (n_bytes == 0)
+  if (n_bytes == 0 || (bits.size() % 8) != 0)
     return {};
   std::vector<unsigned char> bytes(n_bytes, 0);
   for (std::size_t i = 0; i < n_bytes; ++i)
@@ -282,8 +283,7 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
     }
 
     const std::size_t n = s.size();
-    const int k = static_cast<int>(
-        std::clamp(std::round(cr.sample_rate_hz / cfg.rsym), 2.0, 64.0));
+    const int k = static_cast<int>(std::clamp(std::round(cr.sample_rate_hz / cfg.rsym), 2.0, 64.0));
     const auto uk = static_cast<unsigned int>(k);
 
     // 1. IIR DC block
