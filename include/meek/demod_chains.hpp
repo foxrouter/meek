@@ -92,11 +92,13 @@ inline unsigned int extract_crc32(const std::vector<unsigned char>& bytes) noexc
          (static_cast<unsigned int>(bytes[n - 2]) << 8) | static_cast<unsigned int>(bytes[n - 1]);
 }
 
-/// Run CRC-32 check on packed bytes.  Returns OK, CRC_FAIL, or LOCK_FAIL
-/// (when the message is too short to contain a 4-byte CRC trailer).
+/// Run CRC-32 check on packed bytes.  Returns OK or CRC_FAIL.
+/// Messages shorter than 5 bytes (cannot contain a 4-byte CRC trailer) are
+/// also reported as CRC_FAIL rather than LOCK_FAIL so that framing-length
+/// issues do not inflate the lock_fail Prometheus counter.
 inline DemodStatus check_crc(const std::vector<unsigned char>& msg_bytes) noexcept {
   if (msg_bytes.size() < 5)
-    return DemodStatus::LOCK_FAIL;
+    return DemodStatus::CRC_FAIL;
   const unsigned int key = extract_crc32(msg_bytes);
   const int ok = crc_check_key(LIQUID_CRC_32, key, const_cast<unsigned char*>(msg_bytes.data()),
                                static_cast<unsigned int>(msg_bytes.size() - 4));
