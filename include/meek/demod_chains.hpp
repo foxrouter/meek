@@ -271,8 +271,15 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
       return;
     }
 
+    // Validate symbol rate and sample rate before computing k.
+    if (cfg.rsym <= 0.0 || cr.sample_rate_hz <= 0.0) {
+      cr.demod_status = DemodStatus::LOCK_FAIL;
+      return;
+    }
+
     const std::size_t n = s.size();
-    const int k = static_cast<int>(std::clamp(std::round(cr.sample_rate_hz / cfg.rsym), 2.0, 64.0));
+    const int k = static_cast<int>(
+        std::clamp(std::round(cr.sample_rate_hz / cfg.rsym), 2.0, 64.0));
     const auto uk = static_cast<unsigned int>(k);
 
     // 1. IIR DC block
