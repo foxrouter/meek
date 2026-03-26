@@ -478,6 +478,10 @@ inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& c
     const float threshold = p10 + range * 0.5f;
 
     // 3. Sample at rsym intervals (mid-point of symbol window)
+    if (cfg.rsym <= 0.0 || cr.sample_rate_hz <= 0.0) {
+      cr.demod_status = DemodStatus::LOCK_FAIL;
+      return;
+    }
     const int k =
         static_cast<int>(std::clamp(std::round(cr.sample_rate_hz / cfg.rsym), 1.0, 1024.0));
     const std::size_t max_syms = n / static_cast<std::size_t>(k);
