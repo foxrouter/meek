@@ -24,6 +24,7 @@
 #include <numbers>
 #include <numeric>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "meek/config.hpp"
