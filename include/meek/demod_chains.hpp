@@ -149,6 +149,10 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
     // 3. Fine CFO correction via nco_crcf
     {
       nco_crcf nco = nco_crcf_create(LIQUID_VCO);
+      if (!nco) {
+        cr.demod_status = DemodStatus::LOCK_FAIL;
+        return;
+      }
       auto nco_guard = detail::on_scope_exit([&] { nco_crcf_destroy(nco); });
       nco_crcf_set_frequency(nco, -cfo_rad);
       for (std::size_t i = 0; i < n; ++i) {
