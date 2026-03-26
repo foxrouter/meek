@@ -126,6 +126,10 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
       return;
     }
 
+    if (cfg.rsym <= 0.0 || cr.sample_rate_hz <= 0.0) {
+      cr.demod_status = DemodStatus::LOCK_FAIL;
+      return;
+    }
     const std::size_t n = s.size();
     const int k = static_cast<int>(std::clamp(std::round(cr.sample_rate_hz / cfg.rsym), 2.0, 64.0));
 
