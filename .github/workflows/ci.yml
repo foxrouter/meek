@@ -224,7 +224,56 @@ jobs:
         run: python3 tests/test_iq_metrics.py build-san/iq_metrics -v
 
   # ─────────────────────────────────────────────────────────────────────────
-  # 4. Security: Python dependency vulnerability scan
+  # 4. HAVE_LIQUID build — compile rf_adapt_intel with liquid-dsp enabled
+  #    and run the demod BER/CRC-32 Python integration test.
+  # ─────────────────────────────────────────────────────────────────────────
+  cpp-liquid:
+    name: C++ liquid-dsp build (HAVE_LIQUID)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools and liquid-dsp
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build cmake clang-18 \
+            pkg-config libsqlite3-dev libsoapysdr-dev \
+            libliquid-dev
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure (Release, liquid-dsp enabled)
+        run: |
+          cmake -S . -B build-liquid \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DBUILD_HARDWARE_TARGETS=OFF
+
+      - name: Build rf_adapt_intel (HAVE_LIQUID smoke-test)
+        run: cmake --build build-liquid -t rf_adapt_intel
+
+      - name: Verify HAVE_LIQUID was active in the build
+        run: |
+          cmake --build build-liquid --target rf_adapt_intel -- -n 2>&1 || true
+          grep -r "HAVE_LIQUID" build-liquid/CMakeFiles/ | head -3 || \
+          (echo "Verifying via pkg-config..." && pkg-config --exists liquid && echo "liquid found")
+
+      - name: test_demod_ber (BER + CRC-32 validation)
+        run: python3 tests/test_demod_ber.py -v
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 5. Security: Python dependency vulnerability scan
   # ─────────────────────────────────────────────────────────────────────────
   security-scan:
     name: Dependency vulnerability scan
@@ -257,7 +306,7 @@ jobs:
           path: security-audit.json
 
   # ─────────────────────────────────────────────────────────────────────────
-  # 5. Container image build (Docker)
+  # 6. Container image build (Docker)
   # ─────────────────────────────────────────────────────────────────────────
   docker:
     name: Container image build

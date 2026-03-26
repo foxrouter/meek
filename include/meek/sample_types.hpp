@@ -126,8 +126,11 @@ struct ClassificationResult {
   float demod_cfo_hz{0.0f};       // carrier frequency offset (Hz)
   float demod_phase_error{0.0f};  // RMS phase error (radians)
   int demod_lock_ms{0};           // time to carrier lock (ms); 0 = not locked
-  std::vector<uint8_t>
-      demod_soft_bits;  // per-bit confidence: 0=strong-0, 128=uncertain, 255=strong-1
+  // Soft information emitted by the demodulator. Semantics are demod-chain
+  // dependent and may be per-bit or per-symbol. Values are in the range
+  // [0,255], where 0/255 typically indicate strong evidence toward opposite
+  // decisions and mid-range values indicate low confidence.
+  std::vector<uint8_t> demod_soft_bits;
 };
 
 // Minimum number of IQ samples required for a meaningful block classification.
