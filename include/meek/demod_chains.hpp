@@ -494,8 +494,9 @@ inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& c
     if (bit)
       ++on_count;
 
-    // 4. Soft bit
-    const float sb = std::clamp(std::abs(e - threshold) / range * 255.f, 0.f, 255.f);
+    // 4. Soft bit: encode both bit value and confidence.
+    const float norm = std::clamp((e - threshold) / range, -1.0f, 1.0f);
+    const float sb = std::clamp(128.0f + norm * 128.0f, 0.0f, 255.0f);
     soft_bits.push_back(static_cast<uint8_t>(sb));
   }
 
