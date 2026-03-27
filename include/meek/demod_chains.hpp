@@ -533,8 +533,7 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
           // BPSK: encode direction + confidence.
           // High confidence pushes away from midpoint 128: bit 0 → [1, 128], bit 1 → [128, 255].
           const unsigned int sym_bit = syms[si] & 1u;
-          const float sb = (sym_bit == 0u) ? 128.f - conf * 127.f
-                                           : 128.f + conf * 127.f;
+          const float sb = (sym_bit == 0u) ? 128.f - conf * 127.f : 128.f + conf * 127.f;
           soft_bits.push_back(static_cast<uint8_t>(std::clamp(sb, 0.f, 255.f)));
         } else {
           // QPSK: replicate symbol confidence for each of the 2 bits.
