@@ -833,15 +833,7 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
             j["demod_lock_ms"] = cr.demod_lock_ms;
           }
           if (!cr.demod_soft_bits.empty()) {
-            const std::size_t nbytes = cr.demod_soft_bits.size();
-            std::string hex(nbytes * 2, '\0');
-            static constexpr char kHex[] = "0123456789abcdef";
-            for (std::size_t i = 0; i < nbytes; ++i) {
-              const uint8_t b = cr.demod_soft_bits[i];
-              hex[i * 2] = kHex[b >> 4u];
-              hex[i * 2 + 1] = kHex[b & 0xfu];
-            }
-            j["demod_soft_bits_hex"] = hex;
+            j["demod_soft_bits_hex"] = detail::to_hex(cr.demod_soft_bits);
           }
         }
 #endif
