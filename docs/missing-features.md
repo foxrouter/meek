@@ -13,11 +13,11 @@ Items marked ⬜ are outstanding.
 
 ### 1a. FSK / GMSK demod chain ✅
 
-- ✅ DC removal before demod (IIR high-pass, `apply_dc_block`).
-- ✅ Coarse CFO estimate via mean phase increment (`estimate_cfo_hz`).
+- ✅ DC removal before demod (IIR high-pass via `detail::dc_block` helper).
+- ✅ Coarse CFO estimate via inline mean phase increment computation.
 - ✅ Fine PLL for CFO tracking (`nco_crcf`).
 - ✅ liquid-dsp `fskdem` object configured with explicit `k/sps/BT`.
-- ✅ Bit-stream output piped to CRC32 checker (`check_crc32_bits`).
+- ✅ Bit-stream output piped to CRC32 checker (`detail::check_crc`).
 - ✅ **Integration point:** after `classify_block()` returns `FSK_LIKE`.
 
 ### 1b. PSK / QAM demod chain ✅
@@ -31,7 +31,7 @@ Items marked ⬜ are outstanding.
 
 ### 1c. OOK / AM envelope demod ✅
 
-- ✅ Envelope detection (`|z|`) + Median Absolute Deviation threshold.
+- ✅ Envelope detection (`|z|`) + percentile-based (p10/p90 midrange) threshold.
 - ✅ Duty-cycle consistency check to avoid CW mis-classification.
 - ✅ OOK bit recovery at expected symbol rate (`RSYM`).
 - ✅ **Integration point:** after `classify_block()` returns `OOK_AM_LIKE`.
