@@ -490,7 +490,7 @@ inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& c
     std::nth_element(tmp.begin(), p10_it, tmp.end());
     const float p10 = *p10_it;
     auto p90_it = tmp.begin() + static_cast<std::ptrdiff_t>(p90_idx);
-    std::nth_element(p10_it, p90_it, tmp.end());
+    std::nth_element(tmp.begin(), p90_it, tmp.end());
     const float p90 = *p90_it;
     const float range = p90 - p10;
 
