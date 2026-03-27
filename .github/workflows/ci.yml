@@ -265,10 +265,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Configure (Release, liquid-dsp enabled)
+        env:
+          PKG_CONFIG_PATH: /usr/local/lib/pkgconfig
         run: |
-          # Ensure /usr/local/lib/pkgconfig is on the path so that
-          # pkg_check_modules(liquid) finds the liquid.pc we just installed.
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
           cmake -S . -B build-liquid \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
