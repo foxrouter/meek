@@ -144,7 +144,8 @@ static_assert(std::is_trivially_copyable_v<std::complex<float>>,
 ///   3. Fine correction via nco_crcf.
 ///   4. Gardner timing: e[n] = Re{(x[n]-x[n-2]) * conj(x[n-1])},
 ///      tau += 0.01*e[n].  Advances symbol boundaries by k+round(tau) each step.
-///   5. fskdem with k = clamp(round(sample_rate/rsym), 2, 64).
+///   5. fskdem with k = clamp(round(sample_rate/rsym), 2, 64);
+///      matched-filter bw_norm = 0.35 (typical 0.3–0.5 for binary FSK/GMSK).
 ///   6. Soft bits: direction+confidence per bit (BFSK: 1 bit per symbol):
 ///      bit0 → [1,128], bit1 → [128,255].
 ///   7. CRC-32 check.
@@ -202,12 +203,16 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
     }
 
     // 4. Gardner timing loop + 5. fskdem demodulation + 6. soft bits
-    const float bw_norm = static_cast<float>(cfg.fdev / cr.sample_rate_hz);
+    // bw_norm is the normalised matched-filter bandwidth passed to fskdem_create.
+    // liquid-dsp fskdem expects the matched-filter BW (normalised to sample rate),
+    // NOT the frequency-deviation ratio (fdev/fs).  Typical values for binary
+    // FSK/GMSK are 0.3–0.5; 0.35 gives a good noise/ISI trade-off.
+    constexpr float kFskBwNorm = 0.35f;
     const float max_freq_rad =
         static_cast<float>(2.0 * std::numbers::pi * cfg.fdev / cr.sample_rate_hz);
 
     fskdem fsk =
-        fskdem_create(1, static_cast<unsigned int>(k), bw_norm);  // binary FSK: 1 bit/symbol
+        fskdem_create(1, static_cast<unsigned int>(k), kFskBwNorm);  // binary FSK: 1 bit/symbol
     if (!fsk) {
       cr.demod_status = DemodStatus::LOCK_FAIL;
       return;
