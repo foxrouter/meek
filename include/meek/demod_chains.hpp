@@ -127,7 +127,8 @@ inline DemodStatus check_crc(const std::vector<unsigned char>& msg_bytes) noexce
 ///   4. Gardner timing: e[n] = Re{(x[n]-x[n-2]) * conj(x[n-1])},
 ///      tau += 0.01*e[n].  Advances symbol boundaries by k+round(tau) each step.
 ///   5. fskdem with k = clamp(round(sample_rate/rsym), 2, 64).
-///   6. Soft bits: direction+confidence per symbol: bit0 → [1,128], bit1 → [128,255].
+///   6. Soft bits: direction+confidence per bit (BFSK: 1 bit per symbol):
+///      bit0 → [1,128], bit1 → [128,255].
 ///   7. CRC-32 check.
 inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
                       ClassificationResult& cr) noexcept {
