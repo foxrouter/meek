@@ -338,7 +338,9 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
 ///   4. nco_crcf Costas + nco_crcf_pll_step.
 ///   5. Watchdog: RMS err > π/4 per 32 symbols → widen PLL BW (×3, max 0.05,
 ///      up to 3 times) → fallback BPSK.
-///   6. Soft bits: clamp((π/2 - |phase_err|) / (π/2) * 255, 0, 255) per bit.
+///   6. Soft bits (per decoded bit):
+///        BPSK: direction+confidence — sym=0 → [1,128], sym=1 → [128,255], 128=ambiguous.
+///        QPSK: replicated confidence — clamp((π/2-|pe|)/π/2*255) for each of 2 bits.
 ///   7. CRC-32.  cr.demod_phase_error = overall RMS.
 inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& cfg,
                           ClassificationResult& cr) noexcept {
@@ -391,10 +393,6 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
                            &num_written);
       lfc_out.resize(num_written);
 
-      // Copy results back into std::complex<float> for the rest of the function.
-      std::vector<std::complex<float>> sync_out(num_written);
-      std::memcpy(sync_out.data(), lfc_out.data(), num_written * sizeof(std::complex<float>));
-
       if (num_written < 8) {
         cr.demod_status = DemodStatus::LOCK_FAIL;
         return;
@@ -432,12 +430,9 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
       int lock_sym = -1;
 
       for (std::size_t i = 0; i < num_written; ++i) {
-        // Mix down via Costas PLL.
-        // Use memcpy to avoid strict-aliasing UB between std::complex<float> and
-        // liquid_float_complex.
-        liquid_float_complex in_lfc, out_lfc;
-        std::memcpy(&in_lfc, &sync_out[i], sizeof(liquid_float_complex));
-        nco_crcf_mix_down(pll, in_lfc, &out_lfc);
+        // Mix down via Costas PLL — lfc_out is already liquid_float_complex, no copy needed.
+        liquid_float_complex out_lfc;
+        nco_crcf_mix_down(pll, lfc_out[i], &out_lfc);
 
         // Demodulate — reuse out_lfc directly to avoid a redundant round-trip.
         unsigned int sym = 0;
