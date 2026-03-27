@@ -9,7 +9,7 @@ Items marked ⬜ are outstanding.
 
 ---
 
-## 1. Demod pipelines (`src/main.cpp` — requires liquid-dsp / `HAVE_LIQUID`)
+## 1. Demod pipelines (`src/main.cpp`, `include/meek/demod_chains.hpp` — requires liquid-dsp / `HAVE_LIQUID`)
 
 ### 1a. FSK / GMSK demod chain ✅
 

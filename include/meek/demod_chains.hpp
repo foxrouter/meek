@@ -28,6 +28,7 @@
 #include <numeric>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -115,6 +116,21 @@ inline DemodStatus check_crc(const std::vector<unsigned char>& msg_bytes) noexce
 }
 
 }  // namespace detail
+
+// Verify that std::complex<float> and liquid_float_complex have identical size
+// and trivial-copy semantics before any memcpy is used to transfer values
+// between the two types.  If this assertion fires, replace the memcpy calls
+// with explicit real/imag conversion.
+static_assert(sizeof(liquid_float_complex) == sizeof(std::complex<float>),
+              "liquid_float_complex and std::complex<float> must be the same size for "
+              "memcpy-based conversion");
+static_assert(alignof(liquid_float_complex) == alignof(std::complex<float>),
+              "liquid_float_complex and std::complex<float> must have the same alignment for "
+              "memcpy-based conversion");
+static_assert(std::is_trivially_copyable_v<liquid_float_complex>,
+              "liquid_float_complex must be trivially copyable for memcpy-based conversion");
+static_assert(std::is_trivially_copyable_v<std::complex<float>>,
+              "std::complex<float> must be trivially copyable for memcpy-based conversion");
 
 // ---------------------------------------------------------------------------
 // demod_fsk
