@@ -101,7 +101,7 @@ inline DemodStatus check_crc(const std::vector<unsigned char>& msg_bytes) noexce
 }
 
 /// Encode a byte span as a lowercase hex string (2 hex chars per byte).
-[[nodiscard]] inline std::string to_hex(std::span<const uint8_t> data) noexcept {
+[[nodiscard]] inline std::string to_hex(std::span<const uint8_t> data) {
   const std::size_t n = data.size();
   std::string hex(n * 2, '\0');
   static constexpr char kHex[] = "0123456789abcdef";
