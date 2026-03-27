@@ -501,17 +501,18 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
 ///   1. Envelope: env[i] = |s[i]|.
 ///   2. Percentile threshold: p10 + (p90 - p10) * 0.5.
 ///   3. Sample at rsym intervals (mid-point of each symbol window).
-///   4. Soft bits: derive a confidence from |env - threshold| / (p90 - p10),
-///      clamp it into [0, 127], and encode as a signed byte centered at 128
-///      (128 + confidence for symbols above the threshold, 128 - confidence
-///      for symbols below it).
+///   4. Soft bits: derive a normalized confidence
+///      norm = (env - threshold) / (p90 - p10), clamp norm into [-1, 1], and
+///      encode as an unsigned byte centered at 128 via 128 + norm * 128
+///      (values > 128 for symbols above the threshold, < 128 for symbols below).
 ///   5. Duty-cycle guard: duty < 5% or > 95% → LOCK_FAIL.
 ///   6. CRC-32.
 inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& cfg,
                          ClassificationResult& cr) noexcept {
   try {
     // Reset all demod fields to consistent defaults before any early returns.
-    // demod_lock_ms is set to -1 (not applicable) later once demod succeeds.
+    // For envelope (OOK/AM) demod, demod_lock_ms uses -1 to mean "N/A" whenever
+    // this demod path runs, regardless of CRC outcome.
     cr.demod_soft_bits.clear();
     cr.demod_lock_ms = 0;
     cr.demod_cfo_hz = 0.0f;
