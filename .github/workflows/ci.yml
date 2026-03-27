@@ -265,15 +265,15 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Configure (Release, liquid-dsp enabled)
-        env:
-          PKG_CONFIG_PATH: /usr/local/lib/pkgconfig
         run: |
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
           cmake -S . -B build-liquid \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DBUILD_HARDWARE_TARGETS=ON
 
       - name: Build rf_adapt_intel (HAVE_LIQUID smoke-test)
         run: cmake --build build-liquid -t rf_adapt_intel
