@@ -133,6 +133,7 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
     cr.demod_soft_bits.clear();
     cr.demod_lock_ms = 0;
     cr.demod_cfo_hz = 0.0f;
+    cr.demod_phase_error = 0.0f;
     cr.demod_status = DemodStatus::LOCK_FAIL;
 
     if (s.empty()) {
@@ -275,6 +276,7 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
     cr.demod_lock_ms = 0;
     cr.demod_soft_bits.clear();
     cr.demod_cfo_hz = 0.0f;
+    cr.demod_phase_error = 0.0f;
   }
 }
 
@@ -299,6 +301,7 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
     // Reset all demod fields to consistent defaults before any early returns.
     cr.demod_soft_bits.clear();
     cr.demod_lock_ms = 0;
+    cr.demod_cfo_hz = 0.0f;
     cr.demod_phase_error = 0.0f;
     cr.demod_status = DemodStatus::LOCK_FAIL;
 
@@ -483,6 +486,7 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
     cr.demod_status = DemodStatus::LOCK_FAIL;
     cr.demod_soft_bits.clear();
     cr.demod_lock_ms = 0;
+    cr.demod_cfo_hz = 0.0f;
     cr.demod_phase_error = 0.0f;
   }
 }
@@ -510,6 +514,8 @@ inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& c
     // demod_lock_ms is set to -1 (not applicable) later once demod succeeds.
     cr.demod_soft_bits.clear();
     cr.demod_lock_ms = 0;
+    cr.demod_cfo_hz = 0.0f;
+    cr.demod_phase_error = 0.0f;
     cr.demod_status = DemodStatus::LOCK_FAIL;
 
     if (s.empty()) {
@@ -598,6 +604,8 @@ inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& c
     cr.demod_status = DemodStatus::LOCK_FAIL;
     cr.demod_lock_ms = 0;
     cr.demod_soft_bits.clear();
+    cr.demod_cfo_hz = 0.0f;
+    cr.demod_phase_error = 0.0f;
   }
 }
 
