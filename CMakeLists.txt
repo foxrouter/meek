@@ -35,20 +35,16 @@ set(JSON_Install OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(nlohmann_json)
 
 # ── Optional: liquid-dsp (FSK/PSK/OOK demodulation) ──────────────────────────
-# Detect liquid via CMake config first, then fall back to pkg-config.
-# HAVE_LIQUID_FOUND is stored here and applied via target_compile_definitions
-# inside the rf_adapt_intel target block below, so that -DHAVE_LIQUID appears
-# in compile_commands.json entries for that target (required by the CI check).
 find_package(liquid QUIET CONFIG)
 if(liquid_FOUND)
   message(STATUS "Found liquid via CMake config: ${liquid_VERSION}")
   set(LIQUID_USE_CMAKE TRUE)
-  set(HAVE_LIQUID_FOUND TRUE)
+  add_compile_definitions(HAVE_LIQUID)
 else()
   pkg_check_modules(LIQUID_PKG QUIET liquid)
   if(LIQUID_PKG_FOUND)
     message(STATUS "Found liquid via pkg-config: ${LIQUID_PKG_VERSION}")
-    set(HAVE_LIQUID_FOUND TRUE)
+    add_compile_definitions(HAVE_LIQUID)
   else()
     message(STATUS "liquid not found — advanced demod disabled")
   endif()
@@ -70,7 +66,8 @@ if(BUILD_HARDWARE_TARGETS)
   find_package(Threads REQUIRED)
   cmake_push_check_state(RESET)
   set(CMAKE_REQUIRED_LIBRARIES Threads::Threads)
-  check_cxx_source_compiles([=[[#include <stop_token>
+  check_cxx_source_compiles([=[
+#include <stop_token>
 #include <thread>
 #include <span>
 int main() {
@@ -87,25 +84,31 @@ int main() {
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
        AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "12.0")
       message(FATAL_ERROR
-        "C++${CMAKE_CXX_STANDARD} feature check failed: \
-        "GCC ${CMAKE_CXX_COMPILER_VERSION} does not fully support the required \
-        "standard library (std::jthread, std::stop_token, std::span in C++${CMAKE_CXX_STANDARD} mode).
-        "GCC >= 12 is required.
-        "On Bookworm the default GCC (gcc-12) satisfies this requirement.
-        "If you only need the analysis tools (rf_audit, iq_metrics), you can skip the\n        "hardware targets entirely:\n        "  cmake -S . -B build -DBUILD_HARDWARE_TARGETS=OFF")
+        "C++${CMAKE_CXX_STANDARD} feature check failed: "
+        "GCC ${CMAKE_CXX_COMPILER_VERSION} does not fully support the required "
+        "standard library (std::jthread, std::stop_token, std::span in C++${CMAKE_CXX_STANDARD} mode).\n"
+        "GCC ≥ 12 is required.\n"
+        "On Bookworm the default GCC (gcc-12) satisfies this requirement.\n"
+        "If you only need the analysis tools (rf_audit, iq_metrics), you can skip the\n"
+        "hardware targets entirely:\n"
+        "  cmake -S . -B build -DBUILD_HARDWARE_TARGETS=OFF")
     else()
       message(FATAL_ERROR
-        "C++${CMAKE_CXX_STANDARD} feature check failed \
-        "(compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}).\n        "The probe tests std::jthread, std::stop_token, and std::span — \
-        "all required by the hardware targets.\n        "Ensure your compiler and standard library support C++${CMAKE_CXX_STANDARD} \
-        "(GCC >= 12 with libstdc++ >= 12, or Clang >= 14 with a compatible libc++).\n        "If you only need the analysis tools (rf_audit, iq_metrics), configure with:\n        "  -DBUILD_HARDWARE_TARGETS=OFF")
+        "C++${CMAKE_CXX_STANDARD} feature check failed "
+        "(compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}).\n"
+        "The probe tests std::jthread, std::stop_token, and std::span — "
+        "all required by the hardware targets.\n"
+        "Ensure your compiler and standard library support C++${CMAKE_CXX_STANDARD} "
+        "(GCC ≥ 12 with libstdc++ ≥ 12, or Clang ≥ 14 with a compatible libc++).\n"
+        "If you only need the analysis tools (rf_audit, iq_metrics), configure with:\n"
+        "  -DBUILD_HARDWARE_TARGETS=OFF")
     endif()
   endif()
 
   pkg_check_modules(SOAPY_PKG QUIET SoapySDR)
   if(NOT SOAPY_PKG_FOUND)
     message(FATAL_ERROR
-      "SoapySDR not found.  Install libsoapysdr-dev or set \
+      "SoapySDR not found.  Install libsoapysdr-dev or set "
       "BUILD_HARDWARE_TARGETS=OFF to skip hardware targets.")
   endif()
 
@@ -141,12 +144,9 @@ int main() {
     target_compile_definitions(rf_adapt_intel PRIVATE HAVE_HTTPLIB)
   endif()
 
-  # Apply HAVE_LIQUID per-target so the flag appears in compile_commands.json.
   if(LIQUID_USE_CMAKE)
-    target_compile_definitions(rf_adapt_intel PRIVATE HAVE_LIQUID)
     target_link_libraries(rf_adapt_intel PRIVATE liquid::liquid)
   elseif(LIQUID_PKG_FOUND)
-    target_compile_definitions(rf_adapt_intel PRIVATE HAVE_LIQUID)
     target_include_directories(rf_adapt_intel PRIVATE ${LIQUID_PKG_INCLUDE_DIRS})
     target_link_libraries(rf_adapt_intel PRIVATE ${LIQUID_PKG_LIBRARIES})
   endif()
@@ -154,13 +154,13 @@ int main() {
   # Optional: libsystemd for sd_notify watchdog integration
   pkg_check_modules(LIBSYSTEMD QUIET libsystemd)
   if(LIBSYSTEMD_FOUND)
-    message(STATUS "libsystemd found — READY/WATCHDOG/STOPPING all use native sd_notify \
+    message(STATUS "libsystemd found — READY/WATCHDOG/STOPPING all use native sd_notify "
                    "via <systemd/sd-daemon.h>")
     target_compile_definitions(rf_adapt_intel PRIVATE HAVE_SYSTEMD)
     target_link_libraries(rf_adapt_intel PRIVATE ${LIBSYSTEMD_LIBRARIES})
     target_include_directories(rf_adapt_intel PRIVATE ${LIBSYSTEMD_INCLUDE_DIRS})
   else()
-    message(STATUS "libsystemd not found — READY/WATCHDOG/STOPPING all use socket-based \
+    message(STATUS "libsystemd not found — READY/WATCHDOG/STOPPING all use socket-based "
                    "sd_notify fallback (NOTIFY_SOCKET datagram)")
   endif()
 
