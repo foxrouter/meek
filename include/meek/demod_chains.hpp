@@ -23,10 +23,12 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <numbers>
 #include <numeric>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -115,6 +117,21 @@ inline DemodStatus check_crc(const std::vector<unsigned char>& msg_bytes) noexce
 
 }  // namespace detail
 
+// Verify that std::complex<float> and liquid_float_complex have identical size
+// and trivial-copy semantics before any memcpy is used to transfer values
+// between the two types.  If this assertion fires, replace the memcpy calls
+// with explicit real/imag conversion.
+static_assert(sizeof(liquid_float_complex) == sizeof(std::complex<float>),
+              "liquid_float_complex and std::complex<float> must be the same size for "
+              "memcpy-based conversion");
+static_assert(alignof(liquid_float_complex) == alignof(std::complex<float>),
+              "liquid_float_complex and std::complex<float> must have the same alignment for "
+              "memcpy-based conversion");
+static_assert(std::is_trivially_copyable_v<liquid_float_complex>,
+              "liquid_float_complex must be trivially copyable for memcpy-based conversion");
+static_assert(std::is_trivially_copyable_v<std::complex<float>>,
+              "std::complex<float> must be trivially copyable for memcpy-based conversion");
+
 // ---------------------------------------------------------------------------
 // demod_fsk
 // ---------------------------------------------------------------------------
@@ -173,9 +190,13 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
       auto nco_guard = detail::on_scope_exit([&] { nco_crcf_destroy(nco); });
       nco_crcf_set_frequency(nco, -cfo_rad);
       for (std::size_t i = 0; i < n; ++i) {
-        std::complex<float> out;
-        nco_crcf_mix_down(nco, buf[i], &out);
-        buf[i] = out;
+        // Use std::memcpy to transfer the object representation between
+        // std::complex<float> and liquid_float_complex without strict-aliasing UB.
+        liquid_float_complex in_lfc;
+        std::memcpy(&in_lfc, &buf[i], sizeof(liquid_float_complex));
+        liquid_float_complex out_lfc;
+        nco_crcf_mix_down(nco, in_lfc, &out_lfc);
+        std::memcpy(&buf[i], &out_lfc, sizeof(std::complex<float>));
         nco_crcf_step(nco);
       }
     }
@@ -201,6 +222,11 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
     float tau = 0.f;
     std::complex<float> x_sym{0.f};  // x[n-2]: previous symbol boundary
     std::complex<float> x_mid{0.f};  // x[n-1]: midpoint sample
+
+    // Staging buffer for passing k samples to fskdem_demodulate without
+    // strict-aliasing UB: std::complex<float>* → liquid_float_complex* is UB,
+    // so we memcpy each symbol window into a liquid-typed buffer instead.
+    std::vector<liquid_float_complex> lfc_sym(static_cast<std::size_t>(k));
 
     // Track Gardner convergence for demod_lock_ms
     float err_ema = 1.f;  // exponential moving average of |e|
@@ -237,8 +263,12 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
         inst_freq /= static_cast<float>(k - 1);
       }
 
-      // Hard decision via fskdem (liquid-dsp >= 1.6 returns symbol as uint)
-      const unsigned int sym = fskdem_demodulate(fsk, buf.data() + pos);
+      // Hard decision via fskdem (liquid-dsp >= 1.6 returns symbol as uint).
+      // Copy the k-sample window into a liquid_float_complex staging buffer via
+      // memcpy to avoid strict-aliasing UB when passing to fskdem_demodulate.
+      std::memcpy(lfc_sym.data(), buf.data() + pos,
+                  static_cast<std::size_t>(k) * sizeof(liquid_float_complex));
+      const unsigned int sym = fskdem_demodulate(fsk, lfc_sym.data());
       syms.push_back(sym & 1u);
 
       // Soft bit — encode direction (which bit) and confidence (how far from threshold).
