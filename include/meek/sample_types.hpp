@@ -127,11 +127,16 @@ struct ClassificationResult {
   float demod_phase_error{0.0f};  // RMS phase error (radians)
   int demod_lock_ms{0};           // time to carrier lock (ms); 0 = not locked; -1 = not applicable
   // Soft information emitted by the demodulator. One entry per decoded bit.
-  // Values are in the range [0,255]. For FSK and OOK chains: [1,128] encodes
-  // a bit-0 decision and [128,255] encodes a bit-1 decision (128 is the shared
-  // ambiguous midpoint; lower/higher values indicate greater confidence).
-  // For PSK/QAM: the value represents demodulator confidence only (255 = fully
-  // confident, 0 = fully ambiguous); bit direction is carried in the bitstream.
+  // Values are in the range [0,255].
+  //   - FSK chains: [1,128] encodes a bit-0 decision and [128,255] encodes a
+  //     bit-1 decision (128 is the shared ambiguous midpoint; lower/higher
+  //     values indicate greater confidence).
+  //   - OOK chains: [0,128] encodes a bit-0 decision and [128,255] encodes a
+  //     bit-1 decision (0 represents a very strong bit-0; 128 is again the
+  //     ambiguous midpoint).
+  //   - PSK/QAM: the value represents demodulator confidence only (255 = fully
+  //     confident, 0 = fully ambiguous); bit direction is carried in the
+  //     bitstream.
   std::vector<uint8_t> demod_soft_bits;
 };
 

@@ -26,6 +26,7 @@
 #include <numbers>
 #include <numeric>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
