@@ -100,8 +100,12 @@ inline DemodStatus check_crc(const std::vector<unsigned char>& msg_bytes) noexce
   if (msg_bytes.size() < 5)
     return DemodStatus::CRC_FAIL;
   const unsigned int key = extract_crc32(msg_bytes);
-  const int ok = crc_check_key(LIQUID_CRC_32, key, const_cast<unsigned char*>(msg_bytes.data()),
-                               static_cast<unsigned int>(msg_bytes.size() - 4));
+  // Copy payload bytes (excluding 4-byte CRC trailer) into a mutable buffer;
+  // crc_check_key takes a non-const pointer and may mutate its input.
+  std::vector<unsigned char> payload(
+      msg_bytes.begin(), msg_bytes.begin() + static_cast<std::ptrdiff_t>(msg_bytes.size() - 4));
+  const int ok =
+      crc_check_key(LIQUID_CRC_32, key, payload.data(), static_cast<unsigned int>(payload.size()));
   return (ok == 1) ? DemodStatus::OK : DemodStatus::CRC_FAIL;
 }
 
@@ -125,13 +129,17 @@ inline DemodStatus check_crc(const std::vector<unsigned char>& msg_bytes) noexce
 inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
                       ClassificationResult& cr) noexcept {
   try {
+    // Reset all demod fields to consistent defaults before any early returns.
+    cr.demod_soft_bits.clear();
+    cr.demod_lock_ms = 0;
+    cr.demod_cfo_hz = 0.0f;
+    cr.demod_status = DemodStatus::LOCK_FAIL;
+
     if (s.empty()) {
-      cr.demod_status = DemodStatus::LOCK_FAIL;
       return;
     }
 
     if (cfg.rsym <= 0.0 || cr.sample_rate_hz <= 0.0) {
-      cr.demod_status = DemodStatus::LOCK_FAIL;
       return;
     }
     const std::size_t n = s.size();
@@ -244,9 +252,14 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
 
     cr.demod_soft_bits = std::move(soft_bits);
 
-    // Lock time: symbols until Gardner error settled, converted to ms
-    const float lock_syms = (lock_sym >= 0) ? static_cast<float>(lock_sym + 1) : 1.0f;
-    cr.demod_lock_ms = static_cast<int>(std::lround(lock_syms * (1000.0f / cfg.rsym)));
+    // Lock time: symbols until Gardner error settled, converted to ms.
+    // Report 0 when lock was never detected (lock_sym < 0).
+    if (lock_sym >= 0) {
+      cr.demod_lock_ms =
+          static_cast<int>(std::lround(static_cast<float>(lock_sym + 1) * (1000.0f / cfg.rsym)));
+    } else {
+      cr.demod_lock_ms = 0;
+    }
 
     // 7. CRC-32
     const auto msg_bytes = detail::pack_bits(syms);
@@ -278,14 +291,18 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
 inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& cfg,
                           ClassificationResult& cr) noexcept {
   try {
+    // Reset all demod fields to consistent defaults before any early returns.
+    cr.demod_soft_bits.clear();
+    cr.demod_lock_ms = 0;
+    cr.demod_phase_error = 0.0f;
+    cr.demod_status = DemodStatus::LOCK_FAIL;
+
     if (s.empty()) {
-      cr.demod_status = DemodStatus::LOCK_FAIL;
       return;
     }
 
     // Validate symbol rate and sample rate before computing k.
     if (cfg.rsym <= 0.0 || cr.sample_rate_hz <= 0.0) {
-      cr.demod_status = DemodStatus::LOCK_FAIL;
       return;
     }
 
@@ -416,9 +433,13 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
       for (float e : phase_errs) total_sq += e * e;
       cr.demod_phase_error = std::sqrt(total_sq / static_cast<float>(phase_errs.size()));
 
-      // Lock time
-      const float lock_syms_psk = (lock_sym >= 0) ? static_cast<float>(lock_sym + 1) : 1.0f;
-      cr.demod_lock_ms = static_cast<int>(std::lround(lock_syms_psk * (1000.0f / cfg.rsym)));
+      // Lock time: report 0 when lock was never detected (lock_sym < 0).
+      if (lock_sym >= 0) {
+        cr.demod_lock_ms =
+            static_cast<int>(std::lround(static_cast<float>(lock_sym + 1) * (1000.0f / cfg.rsym)));
+      } else {
+        cr.demod_lock_ms = 0;
+      }
 
       // 6. Soft bits
       constexpr float kPiOver2 = static_cast<float>(std::numbers::pi) / 2.f;
@@ -472,8 +493,13 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
 inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& cfg,
                          ClassificationResult& cr) noexcept {
   try {
+    // Reset all demod fields to consistent defaults before any early returns.
+    // demod_lock_ms is set to -1 (not applicable) later once demod succeeds.
+    cr.demod_soft_bits.clear();
+    cr.demod_lock_ms = 0;
+    cr.demod_status = DemodStatus::LOCK_FAIL;
+
     if (s.empty()) {
-      cr.demod_status = DemodStatus::LOCK_FAIL;
       return;
     }
 
