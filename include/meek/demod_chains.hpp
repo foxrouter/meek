@@ -173,9 +173,11 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
       auto nco_guard = detail::on_scope_exit([&] { nco_crcf_destroy(nco); });
       nco_crcf_set_frequency(nco, -cfo_rad);
       for (std::size_t i = 0; i < n; ++i) {
-        std::complex<float> out;
-        nco_crcf_mix_down(nco, buf[i], &out);
-        buf[i] = out;
+        // std::complex<float> and liquid_float_complex are ABI-compatible, but
+        // use explicit casts to make the intent clear and avoid potential UB.
+        liquid_float_complex out;
+        nco_crcf_mix_down(nco, *reinterpret_cast<const liquid_float_complex*>(&buf[i]), &out);
+        buf[i] = *reinterpret_cast<std::complex<float>*>(&out);
         nco_crcf_step(nco);
       }
     }
@@ -238,7 +240,10 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
       }
 
       // Hard decision via fskdem (liquid-dsp >= 1.6 returns symbol as uint)
-      const unsigned int sym = fskdem_demodulate(fsk, buf.data() + pos);
+      // std::complex<float> and liquid_float_complex are ABI-compatible, but
+      // use an explicit cast to make the intent clear and avoid potential UB.
+      const unsigned int sym = fskdem_demodulate(
+          fsk, reinterpret_cast<liquid_float_complex*>(buf.data() + pos));
       syms.push_back(sym & 1u);
 
       // Soft bit — encode direction (which bit) and confidence (how far from threshold).
