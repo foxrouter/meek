@@ -9,6 +9,10 @@ on:
 permissions:
   actions: write
 
+concurrency:
+  group: cache-cleanup
+  cancel-in-progress: false
+
 jobs:
   cleanup:
     name: Delete caches unused for 3+ days
@@ -41,10 +45,11 @@ jobs:
             page=$((page + 1))
           done
 
-          # Pass 2: delete all collected stale caches
-          for id in "${stale_ids[@]+"${stale_ids[@]}"}"; do
+          # Pass 2: delete all collected stale caches; ignore 404/422 in case a
+          # cache was already evicted between the two passes or by a parallel run
+          for id in "${stale_ids[@]}"; do
             gh api --method DELETE \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
-              "/repos/${REPO}/actions/caches/${id}"
+              "/repos/${REPO}/actions/caches/${id}" || true
           done
