@@ -377,14 +377,23 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
       auto sync_guard = detail::on_scope_exit([&] { symsync_crcf_destroy(sync); });
       symsync_crcf_set_lf_bw(sync, 0.02f);
 
+      // Use liquid_float_complex staging buffers for both input and output to avoid
+      // strict-aliasing UB when passing std::complex<float>* to liquid_float_complex* params.
+      std::vector<liquid_float_complex> lfc_in(n);
+      std::memcpy(lfc_in.data(), buf.data(), n * sizeof(liquid_float_complex));
+
       // Output buffer: generously over-sized. With n input samples at k samples/symbol,
       // symsync_crcf produces O(n / k) output symbols plus filter transients, which
       // easily fits into this buffer.
-      std::vector<std::complex<float>> sync_out(n + static_cast<std::size_t>(k) * 12u);
+      std::vector<liquid_float_complex> lfc_out(n + static_cast<std::size_t>(k) * 12u);
       unsigned int num_written = 0;
-      symsync_crcf_execute(sync, buf.data(), static_cast<unsigned int>(n), sync_out.data(),
+      symsync_crcf_execute(sync, lfc_in.data(), static_cast<unsigned int>(n), lfc_out.data(),
                            &num_written);
-      sync_out.resize(num_written);
+      lfc_out.resize(num_written);
+
+      // Copy results back into std::complex<float> for the rest of the function.
+      std::vector<std::complex<float>> sync_out(num_written);
+      std::memcpy(sync_out.data(), lfc_out.data(), num_written * sizeof(std::complex<float>));
 
       if (num_written < 8) {
         cr.demod_status = DemodStatus::LOCK_FAIL;
@@ -423,13 +432,16 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
       int lock_sym = -1;
 
       for (std::size_t i = 0; i < num_written; ++i) {
-        // Mix down via Costas PLL
-        std::complex<float> corrected;
-        nco_crcf_mix_down(pll, sync_out[i], &corrected);
+        // Mix down via Costas PLL.
+        // Use memcpy to avoid strict-aliasing UB between std::complex<float> and
+        // liquid_float_complex.
+        liquid_float_complex in_lfc, out_lfc;
+        std::memcpy(&in_lfc, &sync_out[i], sizeof(liquid_float_complex));
+        nco_crcf_mix_down(pll, in_lfc, &out_lfc);
 
-        // Demodulate
+        // Demodulate — reuse out_lfc directly to avoid a redundant round-trip.
         unsigned int sym = 0;
-        modemcf_demodulate(demod, corrected, &sym);
+        modemcf_demodulate(demod, out_lfc, &sym);
         const float pe = modemcf_get_demodulator_phase_error(demod);
 
         // PLL step
@@ -508,14 +520,29 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
       }
 
       // 6. Soft bits — one entry per decoded bit, expanded from per-symbol phase errors.
-      // Replicate each symbol's soft value for every bit it contributes (1 for BPSK, 2 for QPSK).
+      // For BPSK: encode direction + confidence (aligned with FSK encoding).
+      // For QPSK: replicate symbol confidence for each of the 2 bits.
       constexpr float kPiOver2 = static_cast<float>(std::numbers::pi) / 2.f;
       std::vector<uint8_t> soft_bits;
-      soft_bits.reserve(phase_errs.size() * bits_per_sym);
-      for (float pe : phase_errs) {
-        const auto sb = static_cast<uint8_t>(
-            std::clamp((kPiOver2 - std::abs(pe)) / kPiOver2 * 255.f, 0.f, 255.f));
-        for (unsigned int b = 0; b < bits_per_sym; ++b) {
+      soft_bits.reserve(syms.size() * bits_per_sym);
+      for (std::size_t si = 0; si < syms.size(); ++si) {
+        const float pe = phase_errs[si];
+        // Confidence: 1.0 = no phase error (certain), 0.0 = full π/2 error (ambiguous).
+        const float conf = std::clamp((kPiOver2 - std::abs(pe)) / kPiOver2, 0.f, 1.f);
+        if (bits_per_sym == 1u) {
+          // BPSK: encode direction + confidence.
+          // High confidence pushes away from midpoint 128: bit 0 → [1, 128], bit 1 → [128, 255].
+          const unsigned int sym_bit = syms[si] & 1u;
+          const float sb = (sym_bit == 0u) ? 128.f - conf * 127.f
+                                           : 128.f + conf * 127.f;
+          soft_bits.push_back(static_cast<uint8_t>(std::clamp(sb, 0.f, 255.f)));
+        } else {
+          // QPSK: replicate symbol confidence for each of the 2 bits.
+          // Full direction encoding for QPSK requires per-bit phase projection
+          // (deferred); replicated confidence is consistent with prior behaviour
+          // and correct for QPSK where the symbol decision encodes both bits.
+          const auto sb = static_cast<uint8_t>(std::clamp(conf * 255.f, 0.f, 255.f));
+          soft_bits.push_back(sb);
           soft_bits.push_back(sb);
         }
       }
