@@ -273,6 +273,7 @@ jobs:
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_PREFIX_PATH=/usr/local \
             -DBUILD_HARDWARE_TARGETS=ON
 
       - name: Build rf_adapt_intel (HAVE_LIQUID smoke-test)
