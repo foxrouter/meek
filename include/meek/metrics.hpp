@@ -109,8 +109,7 @@ struct ProcMetrics {
       << "rf_sdr_overflow_total " << m.sdr_overflow << "\n";
 #ifdef HAVE_LIQUID
   out << "# HELP rf_demod_total Demodulation attempts by result; "
-      << "labels are mutually exclusive per attempt: "
-      << "crc_ok=CRC passed, "
+      << "labels are mutually exclusive per attempt: " << "crc_ok=CRC passed, "
       << "crc_fail=CRC failed, lock_fail=lock failed\n"
       << "# TYPE rf_demod_total counter\n"
       << "rf_demod_total{result=\"crc_ok\"}    " << m.demod_crc_ok << "\n"
