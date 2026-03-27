@@ -266,15 +266,15 @@ jobs:
 
       - name: Configure (Release, liquid-dsp enabled)
         run: |
-          # Ensure /usr/local/lib/pkgconfig is on the path so that
-          # pkg_check_modules(liquid) finds the liquid.pc we just installed.
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
           cmake -S . -B build-liquid \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_PREFIX_PATH=/usr/local \
+            -DBUILD_HARDWARE_TARGETS=ON
 
       - name: Build rf_adapt_intel (HAVE_LIQUID smoke-test)
         run: cmake --build build-liquid -t rf_adapt_intel
