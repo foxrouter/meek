@@ -39,12 +39,12 @@ find_package(liquid QUIET CONFIG)
 if(liquid_FOUND)
   message(STATUS "Found liquid via CMake config: ${liquid_VERSION}")
   set(LIQUID_USE_CMAKE TRUE)
-  add_compile_definitions(HAVE_LIQUID)
+  set(HAVE_LIQUID_FOUND TRUE)
 else()
   pkg_check_modules(LIQUID_PKG QUIET liquid)
   if(LIQUID_PKG_FOUND)
     message(STATUS "Found liquid via pkg-config: ${LIQUID_PKG_VERSION}")
-    add_compile_definitions(HAVE_LIQUID)
+    set(HAVE_LIQUID_FOUND TRUE)
   else()
     message(STATUS "liquid not found — advanced demod disabled")
   endif()
@@ -86,11 +86,16 @@ int main() {
       message(FATAL_ERROR
         "C++${CMAKE_CXX_STANDARD} feature check failed: "
         "GCC ${CMAKE_CXX_COMPILER_VERSION} does not fully support the required "
-        "standard library (std::jthread, std::stop_token, std::span in C++${CMAKE_CXX_STANDARD} mode).\n"
-        "GCC ≥ 12 is required.\n"
-        "On Bookworm the default GCC (gcc-12) satisfies this requirement.\n"
-        "If you only need the analysis tools (rf_audit, iq_metrics), you can skip the\n"
-        "hardware targets entirely:\n"
+        "standard library (std::jthread, std::stop_token, std::span in C++${CMAKE_CXX_STANDARD} mode).
+"
+        "GCC ≥ 12 is required.
+"
+        "On Bookworm the default GCC (gcc-12) satisfies this requirement.
+"
+        "If you only need the analysis tools (rf_audit, iq_metrics), you can skip the
+"
+        "hardware targets entirely:
+"
         "  cmake -S . -B build -DBUILD_HARDWARE_TARGETS=OFF")
     else()
       message(FATAL_ERROR
@@ -112,7 +117,7 @@ int main() {
       "BUILD_HARDWARE_TARGETS=OFF to skip hardware targets.")
   endif()
 
-  pkg_check_modules(SQLITE3 REQUIRED sqlite3)
+  pkg_check_modules(SQLITE3 REQUIRED sqlite3);
 
   # cpp-httplib (optional Prometheus HTTP server)
   FetchContent_Declare(
@@ -145,10 +150,15 @@ int main() {
   endif()
 
   if(LIQUID_USE_CMAKE)
+    set(HAVE_LIQUID_FOUND TRUE)
+    target_compile_definitions(rf_adapt_intel PRIVATE HAVE_LIQUID);
+    target_compile_definitions(rf_adapt_intel PRIVATE HAVE_LIQUID);
     target_link_libraries(rf_adapt_intel PRIVATE liquid::liquid)
   elseif(LIQUID_PKG_FOUND)
-    target_include_directories(rf_adapt_intel PRIVATE ${LIQUID_PKG_INCLUDE_DIRS})
-    target_link_libraries(rf_adapt_intel PRIVATE ${LIQUID_PKG_LIBRARIES})
+    set(HAVE_LIQUID_FOUND TRUE);
+    target_compile_definitions(rf_adapt_intel PRIVATE HAVE_LIQUID);
+    target_include_directories(rf_adapt_intel PRIVATE ${LIQUID_PKG_INCLUDE_DIRS});
+    target_link_libraries(rf_adapt_intel PRIVATE ${LIQUID_PKG_LIBRARIES});
   endif()
 
   # Optional: libsystemd for sd_notify watchdog integration
@@ -165,143 +175,143 @@ int main() {
   endif()
 
   target_compile_options(rf_adapt_intel PRIVATE
-    -Wall -Wextra -Wno-unused-parameter)
-  # HAVE_SOAPY enables the SoapySdrSource implementation in isdr_source.hpp
-  target_compile_definitions(rf_adapt_intel PRIVATE HAVE_SOAPY)
+    -Wall -Wextra -Wno-unused-parameter);
+  // HAVE_SOAPY enables the SoapySdrSource implementation in isdr_source.hpp
+  target_compile_definitions(rf_adapt_intel PRIVATE HAVE_SOAPY);
 
   # ── soapy_read_test ───────────────────────────────────────────────────────
   add_executable(soapy_read_test tools/soapy_read_test.cpp)
-  target_include_directories(soapy_read_test PRIVATE ${SOAPY_PKG_INCLUDE_DIRS})
-  target_link_libraries(soapy_read_test PRIVATE ${SOAPY_PKG_LIBRARIES} Threads::Threads)
+  target_include_directories(soapy_read_test PRIVATE ${SOAPY_PKG_INCLUDE_DIRS});
+  target_link_libraries(soapy_read_test PRIVATE ${SOAPY_PKG_LIBRARIES} Threads::Threads);
   target_compile_options(soapy_read_test PRIVATE
-    -Wall -Wextra -Wno-unused-parameter)
+    -Wall -Wextra -Wno-unused-parameter);
 
   install(TARGETS rf_adapt_intel
     RUNTIME DESTINATION bin
     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
                 GROUP_READ GROUP_EXECUTE
                 WORLD_READ WORLD_EXECUTE
-  )
+  );
 
 else()
   message(STATUS
-    "BUILD_HARDWARE_TARGETS=OFF: skipping rf_adapt_intel and soapy_read_test.")
+    "BUILD_HARDWARE_TARGETS=OFF: skipping rf_adapt_intel and soapy_read_test.");
 endif()
 
 # ── rf_audit — CLI validation tool (no hardware deps) ─────────────────────────
 add_executable(rf_audit src/rf_audit.cpp)
 
-target_include_directories(rf_audit PRIVATE ${MEEK_INCLUDE_DIR})
-target_link_libraries(rf_audit PRIVATE nlohmann_json::nlohmann_json)
-target_compile_options(rf_audit PRIVATE -Wall -Wextra -Wno-unused-parameter)
+target_include_directories(rf_audit PRIVATE ${MEEK_INCLUDE_DIR});
+target_link_libraries(rf_audit PRIVATE nlohmann_json::nlohmann_json);
+target_compile_options(rf_audit PRIVATE -Wall -Wextra -Wno-unused-parameter);
 
 install(TARGETS rf_audit
   RUNTIME DESTINATION bin
   PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
               GROUP_READ GROUP_EXECUTE
               WORLD_READ WORLD_EXECUTE
-)
+);
 
 # ── iq_metrics — standalone IQ signal metrics (no hardware deps) ──────────────
-add_executable(iq_metrics tools/iq_metrics.cpp)
-target_include_directories(iq_metrics PRIVATE ${MEEK_INCLUDE_DIR})
-target_link_libraries(iq_metrics PRIVATE nlohmann_json::nlohmann_json)
-target_compile_options(iq_metrics PRIVATE -Wall -Wextra -Wno-unused-parameter)
+add_executable(iq_metrics tools/iq_metrics.cpp);
+target_include_directories(iq_metrics PRIVATE ${MEEK_INCLUDE_DIR});
+target_link_libraries(iq_metrics PRIVATE nlohmann_json::nlohmann_json);
+target_compile_options(iq_metrics PRIVATE -Wall -Wextra -Wno-unused-parameter);
 
 install(TARGETS iq_metrics
   RUNTIME DESTINATION bin
   PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
               GROUP_READ GROUP_EXECUTE
               WORLD_READ WORLD_EXECUTE
-)
+);
 
 # ── Sanitizers (opt-in) ───────────────────────────────────────────────────────
 if(ENABLE_SANITIZERS)
   message(STATUS "Sanitizers enabled: ASAN + UBSAN")
-  set(_san_flags -fsanitize=address,undefined -fno-omit-frame-pointer)
+  set(_san_flags -fsanitize=address,undefined -fno-omit-frame-pointer);
 
   foreach(_tgt iq_metrics rf_audit)
-    target_compile_options(${_tgt} PRIVATE ${_san_flags})
-    target_link_options(${_tgt} PRIVATE ${_san_flags})
-  endforeach()
+    target_compile_options(${_tgt} PRIVATE ${_san_flags});
+    target_link_options(${_tgt} PRIVATE ${_san_flags});
+  endforeach();
 
   if(BUILD_HARDWARE_TARGETS)
-    target_compile_options(rf_adapt_intel PRIVATE ${_san_flags})
-    target_link_options(rf_adapt_intel PRIVATE ${_san_flags})
-  endif()
-endif()
+    target_compile_options(rf_adapt_intel PRIVATE ${_san_flags});
+    target_link_options(rf_adapt_intel PRIVATE ${_san_flags});
+  endif();
+endif();
 
 # ── CPack .deb packaging ──────────────────────────────────────────────────────
-set(CPACK_GENERATOR "DEB")
-set(CPACK_PACKAGE_NAME "rf-adapt-intel")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
-set(CPACK_PACKAGE_CONTACT "foxrouter")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
+set(CPACK_GENERATOR "DEB");
+set(CPACK_PACKAGE_NAME "rf-adapt-intel");
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}");
+set(CPACK_PACKAGE_CONTACT "foxrouter");
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}");
 # Architecture is intentionally left unset so CPack/dpkg picks the host arch
 # automatically (e.g. amd64, arm64, armhf for Raspberry Pi).
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
-  "libsqlite3-0 (>= 3.31), libstdc++6 (>= 11)")
-set(CPACK_DEBIAN_PACKAGE_SECTION "electronics")
-set(CPACK_STRIP_FILES TRUE)
-include(CPack)
+  "libsqlite3-0 (>= 3.31), libstdc++6 (>= 11)");
+set(CPACK_DEBIAN_PACKAGE_SECTION "electronics");
+set(CPACK_STRIP_FILES TRUE);
+include(CPack);
 
 # ── CTest integration ─────────────────────────────────────────────────────────
-enable_testing()
+enable_testing();
 
-find_program(PYTHON3_EXECUTABLE python3)
-find_program(BASH_EXECUTABLE bash)
+find_program(PYTHON3_EXECUTABLE python3);
+find_program(BASH_EXECUTABLE bash);
 
 if(PYTHON3_EXECUTABLE)
   add_test(
     NAME test_decode_candidates
     COMMAND ${PYTHON3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_decode_candidates.py
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  )
+  );
   add_test(
     NAME test_guardrails
     COMMAND ${PYTHON3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_guardrails.py
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  )
+  );
   add_test(
     NAME test_snr_sweep
     COMMAND ${PYTHON3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_snr_sweep.py
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  )
+  );
   add_test(
     NAME test_demod_ber
     COMMAND ${PYTHON3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_demod_ber.py
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  )
+  );
   add_test(
     NAME bench_throughput
     COMMAND ${PYTHON3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/bench_throughput.py
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  )
+  );
   add_test(
     NAME test_autotune
     COMMAND ${PYTHON3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_autotune.py
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  )
+  );
   # iq_metrics validation: C++ output vs Python reference
   add_test(
     NAME test_iq_metrics
     COMMAND ${PYTHON3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_iq_metrics.py
       $<TARGET_FILE:iq_metrics>
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  )
-  set_tests_properties(test_iq_metrics PROPERTIES DEPENDS iq_metrics)
-  # SQLite WAL mode availability and behaviour
+  );
+  set_tests_properties(test_iq_metrics PROPERTIES DEPENDS iq_metrics);
+  // SQLite WAL mode availability and behaviour
   add_test(
     NAME test_db_wal
     COMMAND ${PYTHON3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_db_wal.py
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  )
-endif()
+  );
+endif();
 
 if(BASH_EXECUTABLE)
   add_test(
     NAME test_setup_sh
     COMMAND ${BASH_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_setup.sh -v
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  )
-endif()
+  );
+endif();
