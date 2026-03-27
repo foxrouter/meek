@@ -170,7 +170,7 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
     const float max_freq_rad =
         static_cast<float>(2.0 * std::numbers::pi * cfg.fdev / cr.sample_rate_hz);
 
-    fskdem fsk = fskdem_create(2, static_cast<unsigned int>(k), bw_norm);
+    fskdem fsk = fskdem_create(1, static_cast<unsigned int>(k), bw_norm);  // binary FSK: 1 bit/symbol
     if (!fsk) {
       cr.demod_status = DemodStatus::LOCK_FAIL;
       return;
