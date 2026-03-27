@@ -203,7 +203,7 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
     }
 
     // 4. Gardner timing loop + 5. fskdem demodulation + 6. soft bits
-    // bw_norm is the normalised matched-filter bandwidth passed to fskdem_create.
+    // kFskBwNorm is the normalised matched-filter bandwidth passed to fskdem_create.
     // liquid-dsp fskdem expects the matched-filter BW (normalised to sample rate),
     // NOT the frequency-deviation ratio (fdev/fs).  Typical values for binary
     // FSK/GMSK are 0.3–0.5; 0.35 gives a good noise/ISI trade-off.
