@@ -6,9 +6,8 @@
 //   demod_ook_am    — OOK / AM envelope demodulation
 //
 // All three populate cr.demod_status, cr.demod_lock_ms, and cr.demod_soft_bits.
-// demod_fsk also sets cr.demod_cfo_hz; demod_psk_qam also sets
-// cr.demod_phase_error and cr.demod_lock_ms; demod_ook_am leaves
-// cr.demod_cfo_hz and cr.demod_phase_error at their default values.
+// demod_fsk also sets cr.demod_cfo_hz; demod_psk_qam also sets cr.demod_phase_error;
+// demod_ook_am leaves cr.demod_cfo_hz and cr.demod_phase_error at their default values.
 // All liquid objects are destroyed on every return path via scope guards.
 //
 // Compiled only when HAVE_LIQUID is defined.
@@ -251,7 +250,7 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
     // 7. CRC-32
     const auto msg_bytes = detail::pack_bits(syms);
     if (msg_bytes.size() < 5) {
-      cr.demod_status = DemodStatus::LOCK_FAIL;
+      cr.demod_status = DemodStatus::CRC_FAIL;
       return;
     }
     cr.demod_status = detail::check_crc(msg_bytes);
@@ -446,7 +445,7 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
       // CRC-32
       const auto msg_bytes = detail::pack_bits(all_bits);
       if (msg_bytes.size() < 5) {
-        cr.demod_status = DemodStatus::LOCK_FAIL;
+        cr.demod_status = DemodStatus::CRC_FAIL;
         return;
       }
       cr.demod_status = detail::check_crc(msg_bytes);
@@ -549,7 +548,7 @@ inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& c
     // 6. CRC-32
     const auto msg_bytes = detail::pack_bits(bits);
     if (msg_bytes.size() < 5) {
-      cr.demod_status = DemodStatus::LOCK_FAIL;
+      cr.demod_status = DemodStatus::CRC_FAIL;
       return;
     }
     cr.demod_status = detail::check_crc(msg_bytes);
