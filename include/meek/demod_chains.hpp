@@ -95,8 +95,7 @@ inline DemodStatus check_crc(const std::vector<unsigned char>& msg_bytes) noexce
   // (payload + 4-byte CRC trailer appended) and verifies internally.
   // crc_check_key takes a non-const pointer, so a mutable copy is required.
   std::vector<unsigned char> full(msg_bytes.begin(), msg_bytes.end());
-  const int ok =
-      crc_check_key(LIQUID_CRC_32, full.data(), static_cast<unsigned int>(full.size()));
+  const int ok = crc_check_key(LIQUID_CRC_32, full.data(), static_cast<unsigned int>(full.size()));
   return (ok == 1) ? DemodStatus::OK : DemodStatus::CRC_FAIL;
 }
 
