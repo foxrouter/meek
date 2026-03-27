@@ -144,8 +144,7 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
       return;
     }
     const std::size_t n = s.size();
-    const int k = static_cast<int>(
-        std::clamp(std::round(cr.sample_rate_hz / cfg.rsym), 2.0, 64.0));
+    const int k = static_cast<int>(std::clamp(std::round(cr.sample_rate_hz / cfg.rsym), 2.0, 64.0));
 
     // 1. IIR DC block
     std::vector<std::complex<float>> buf;
@@ -315,8 +314,7 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
     }
 
     const std::size_t n = s.size();
-    const int k = static_cast<int>(
-        std::clamp(std::round(cr.sample_rate_hz / cfg.rsym), 2.0, 64.0));
+    const int k = static_cast<int>(std::clamp(std::round(cr.sample_rate_hz / cfg.rsym), 2.0, 64.0));
     const auto uk = static_cast<unsigned int>(k);
 
     // 1. IIR DC block
@@ -569,8 +567,7 @@ inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& c
 
     std::size_t on_count = 0;
     for (std::size_t sym_i = 0; sym_i < max_syms; ++sym_i) {
-      const std::size_t mid =
-          sym_i * static_cast<std::size_t>(k) + static_cast<std::size_t>(k / 2);
+      const std::size_t mid = sym_i * static_cast<std::size_t>(k) + static_cast<std::size_t>(k / 2);
       const float e = env[mid];
       const unsigned int bit = (e >= threshold) ? 1u : 0u;
       bits.push_back(bit);

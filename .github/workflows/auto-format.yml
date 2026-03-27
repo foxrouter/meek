@@ -69,7 +69,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if ! git diff --quiet; then
-            xargs -0 -a /tmp/changed_cpp_files.txt git add --
+            xargs -0 -a /tmp/changed_cpp_files.txt git add -f --
             git commit -m "style: apply clang-format to PR changes"
             # Push to the named head branch with an explicit refspec so that
             # the detached-HEAD checkout (by SHA) still updates the right ref.
