@@ -114,7 +114,7 @@ inline DemodStatus check_crc(const std::vector<unsigned char>& msg_bytes) noexce
 ///   4. Gardner timing: e[n] = Re{(x[n]-x[n-2]) * conj(x[n-1])},
 ///      tau += 0.01*e[n].  Advances symbol boundaries by k+round(tau) each step.
 ///   5. fskdem with k = clamp(round(sample_rate/rsym), 2, 64).
-///   6. Soft bits: clamp(|freq_dev|/max_dev * 255, 0, 255) per symbol.
+///   6. Soft bits: direction+confidence per symbol: bit0 → [1,128], bit1 → [128,255].
 ///   7. CRC-32 check.
 inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
                       ClassificationResult& cr) noexcept {
@@ -226,10 +226,15 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
       const unsigned int sym = fskdem_demodulate(fsk, buf.data() + pos);
       syms.push_back(sym & 1u);
 
-      // Soft bit
+      // Soft bit — encode direction (which bit) and confidence (how far from threshold).
+      // When conf=0 both bits map to 128 (ambiguous midpoint); conf=1 maps bit-0
+      // to 1 and bit-1 to 255.  Ranges: bit 0 → [1, 128], bit 1 → [128, 255].
       const float max_dev = (max_freq_rad > 1e-9f) ? max_freq_rad : 1e-9f;
-      const float sb = std::clamp(std::abs(inst_freq) / max_dev * 255.f, 0.f, 255.f);
-      soft_bits.push_back(static_cast<uint8_t>(sb));
+      const float conf = std::clamp(std::abs(inst_freq) / max_dev, 0.0f, 1.0f);
+      const unsigned int bit = sym & 1u;
+      const float sb = (bit == 0u) ? 128.0f - conf * 127.0f   // bit 0 → [1, 128]
+                                   : 128.0f + conf * 127.0f;  // bit 1 → [128, 255]
+      soft_bits.push_back(static_cast<uint8_t>(std::clamp(sb, 0.0f, 255.0f)));
 
       // Advance symbol position using tau
       const int advance = k + static_cast<int>(std::round(tau));
@@ -282,7 +287,7 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
 ///   4. nco_crcf Costas + nco_crcf_pll_step.
 ///   5. Watchdog: RMS err > π/4 per 32 symbols → widen PLL BW (×3, max 0.05,
 ///      up to 3 times) → fallback BPSK.
-///   6. Soft bits: clamp((π/2 - |phase_err|) / (π/2) * 255, 0, 255).
+///   6. Soft bits: clamp((π/2 - |phase_err|) / (π/2) * 255, 0, 255) per bit.
 ///   7. CRC-32.  cr.demod_phase_error = overall RMS.
 inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& cfg,
                           ClassificationResult& cr) noexcept {
@@ -438,16 +443,6 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
         cr.demod_lock_ms = 0;
       }
 
-      // 6. Soft bits
-      constexpr float kPiOver2 = static_cast<float>(std::numbers::pi) / 2.f;
-      std::vector<uint8_t> soft_bits;
-      soft_bits.reserve(phase_errs.size());
-      for (float pe : phase_errs) {
-        const float sb = std::clamp((kPiOver2 - std::abs(pe)) / kPiOver2 * 255.f, 0.f, 255.f);
-        soft_bits.push_back(static_cast<uint8_t>(sb));
-      }
-      cr.demod_soft_bits = std::move(soft_bits);
-
       // Expand symbol bits
       const unsigned int bits_per_sym = (scheme == LIQUID_MODEM_QPSK) ? 2u : 1u;
       std::vector<unsigned int> all_bits;
@@ -460,6 +455,20 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
           all_bits.push_back(sym & 1u);
         }
       }
+
+      // 6. Soft bits — one entry per decoded bit, expanded from per-symbol phase errors.
+      // Replicate each symbol's soft value for every bit it contributes (1 for BPSK, 2 for QPSK).
+      constexpr float kPiOver2 = static_cast<float>(std::numbers::pi) / 2.f;
+      std::vector<uint8_t> soft_bits;
+      soft_bits.reserve(phase_errs.size() * bits_per_sym);
+      for (float pe : phase_errs) {
+        const auto sb = static_cast<uint8_t>(
+            std::clamp((kPiOver2 - std::abs(pe)) / kPiOver2 * 255.f, 0.f, 255.f));
+        for (unsigned int b = 0; b < bits_per_sym; ++b) {
+          soft_bits.push_back(sb);
+        }
+      }
+      cr.demod_soft_bits = std::move(soft_bits);
 
       // CRC-32
       const auto msg_bytes = detail::pack_bits(all_bits);
