@@ -240,13 +240,26 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install build tools and liquid-dsp
+      - name: Install build tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             ninja-build cmake clang-18 \
             pkg-config libsqlite3-dev libsoapysdr-dev \
-            libliquid-dev jq
+            git autoconf automake libtool jq
+
+      - name: Build and install liquid-dsp from source
+        run: |
+          # Build from source so that a pkg-config module (liquid.pc) is
+          # always available on ubuntu-24.04 regardless of apt package state.
+          # Pin to a specific release tag for reproducibility and supply-chain safety.
+          git clone --depth 1 --branch v1.6.0 https://github.com/jgaeddert/liquid-dsp.git
+          cd liquid-dsp
+          ./bootstrap.sh
+          ./configure --enable-optimizations
+          make -j"$(nproc)"
+          sudo make install
+          sudo ldconfig
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
