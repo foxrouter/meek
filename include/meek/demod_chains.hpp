@@ -84,14 +84,6 @@ inline std::vector<unsigned char> pack_bits(const std::vector<unsigned int>& bit
   return bytes;
 }
 
-/// Extract last 4 bytes as a big-endian uint32 CRC key.
-inline unsigned int extract_crc32(const std::vector<unsigned char>& bytes) noexcept {
-  const std::size_t n = bytes.size();
-  return (static_cast<unsigned int>(bytes[n - 4]) << 24) |
-         (static_cast<unsigned int>(bytes[n - 3]) << 16) |
-         (static_cast<unsigned int>(bytes[n - 2]) << 8) | static_cast<unsigned int>(bytes[n - 1]);
-}
-
 /// Run CRC-32 check on packed bytes.  Returns OK or CRC_FAIL.
 /// Messages shorter than 5 bytes (cannot contain a 4-byte CRC trailer) are
 /// also reported as CRC_FAIL rather than LOCK_FAIL so that framing-length
@@ -99,13 +91,12 @@ inline unsigned int extract_crc32(const std::vector<unsigned char>& bytes) noexc
 inline DemodStatus check_crc(const std::vector<unsigned char>& msg_bytes) noexcept {
   if (msg_bytes.size() < 5)
     return DemodStatus::CRC_FAIL;
-  const unsigned int key = extract_crc32(msg_bytes);
-  // Copy payload bytes (excluding 4-byte CRC trailer) into a mutable buffer;
-  // crc_check_key takes a non-const pointer and may mutate its input.
-  std::vector<unsigned char> payload(
-      msg_bytes.begin(), msg_bytes.begin() + static_cast<std::ptrdiff_t>(msg_bytes.size() - 4));
+  // liquid-dsp >= 1.6: crc_check_key(scheme, msg, n) takes the full buffer
+  // (payload + 4-byte CRC trailer appended) and verifies internally.
+  // crc_check_key takes a non-const pointer, so a mutable copy is required.
+  std::vector<unsigned char> full(msg_bytes.begin(), msg_bytes.end());
   const int ok =
-      crc_check_key(LIQUID_CRC_32, key, payload.data(), static_cast<unsigned int>(payload.size()));
+      crc_check_key(LIQUID_CRC_32, full.data(), static_cast<unsigned int>(full.size()));
   return (ok == 1) ? DemodStatus::OK : DemodStatus::CRC_FAIL;
 }
 
@@ -231,9 +222,8 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
         inst_freq /= static_cast<float>(k - 1);
       }
 
-      // Hard decision via fskdem
-      unsigned int sym = 0;
-      fskdem_demodulate(fsk, buf.data() + pos, &sym);
+      // Hard decision via fskdem (liquid-dsp >= 1.6 returns symbol as uint)
+      const unsigned int sym = fskdem_demodulate(fsk, buf.data() + pos);
       syms.push_back(sym & 1u);
 
       // Soft bit
