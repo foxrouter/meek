@@ -495,11 +495,10 @@ inline void demod_psk_qam(std::span<const std::complex<float>> s, const Config& 
 ///   1. Envelope: env[i] = |s[i]|.
 ///   2. Percentile threshold: p10 + (p90 - p10) * 0.5.
 ///   3. Sample at rsym intervals (mid-point of each symbol window).
-///   4. Soft bits: derive a confidence from (env - threshold) / (p90 - p10),
-///      clamp it into [-1, 1], and encode as a signed byte centered at 128
-///      (128 + confidence*128), yielding values in [0, 255] where 255 = fully
-///      on, 0 = fully off, and 128 = exactly at threshold; values above 128
-///      indicate symbols decoded as ON, values below 128 indicate OFF.
+///   4. Soft bits: derive a confidence from |env - threshold| / (p90 - p10),
+///      clamp it into [0, 127], and encode as a signed byte centered at 128
+///      (128 + confidence for symbols above the threshold, 128 - confidence
+///      for symbols below it).
 ///   5. Duty-cycle guard: duty < 5% or > 95% → LOCK_FAIL.
 ///   6. CRC-32.
 inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& cfg,
