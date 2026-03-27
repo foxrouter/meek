@@ -283,7 +283,7 @@ jobs:
             exit 1
           fi
 
-          echo "Verified: DHAVE_LIQUID compile definition is present in the build flags."
+          echo "Verified: HAVE_LIQUID compile definition is present in the build flags."
 
       # test_demod_ber.py is a Python algorithm mirror test: it validates BER
       # and CRC-32 logic in pure Python.  The C++ demod_chains.hpp code is
