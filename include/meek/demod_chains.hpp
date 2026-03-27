@@ -242,8 +242,8 @@ inline void demod_fsk(std::span<const std::complex<float>> s, const Config& cfg,
       // Hard decision via fskdem (liquid-dsp >= 1.6 returns symbol as uint)
       // std::complex<float> and liquid_float_complex are ABI-compatible, but
       // use an explicit cast to make the intent clear and avoid potential UB.
-      const unsigned int sym = fskdem_demodulate(
-          fsk, reinterpret_cast<liquid_float_complex*>(buf.data() + pos));
+      const unsigned int sym =
+          fskdem_demodulate(fsk, reinterpret_cast<liquid_float_complex*>(buf.data() + pos));
       syms.push_back(sym & 1u);
 
       // Soft bit — encode direction (which bit) and confidence (how far from threshold).
