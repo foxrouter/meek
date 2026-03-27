@@ -832,6 +832,19 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
             j["demod_phase_error"] = cr.demod_phase_error;
             j["demod_lock_ms"] = cr.demod_lock_ms;
           }
+          if (!cr.demod_soft_bits.empty()) {
+            const std::size_t total_bytes = cr.demod_soft_bits.size();
+            // Bound emitted soft bits to avoid excessive JSON payload size.
+            static constexpr std::size_t kMaxSoftBitsBytes = 1024;
+            const std::size_t emit_bytes =
+                (total_bytes > kMaxSoftBitsBytes) ? kMaxSoftBitsBytes : total_bytes;
+            j["demod_soft_bits_hex"] =
+                detail::to_hex(std::span<const uint8_t>(cr.demod_soft_bits).first(emit_bytes));
+            j["demod_soft_bits_len"] = total_bytes;
+            if (total_bytes > kMaxSoftBitsBytes) {
+              j["demod_soft_bits_truncated"] = true;
+            }
+          }
         }
 #endif
         jlog.write(j);
