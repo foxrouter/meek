@@ -224,7 +224,95 @@ jobs:
         run: python3 tests/test_iq_metrics.py build-san/iq_metrics -v
 
   # ─────────────────────────────────────────────────────────────────────────
-  # 4. Security: Python dependency vulnerability scan
+  # 4. HAVE_LIQUID build — compile rf_adapt_intel with liquid-dsp enabled
+  #    and run the demod BER/CRC-32 Python integration test.
+  # ─────────────────────────────────────────────────────────────────────────
+  cpp-liquid:
+    name: C++ liquid-dsp build (HAVE_LIQUID)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build cmake clang-18 \
+            pkg-config libsqlite3-dev libsoapysdr-dev \
+            git autoconf automake libtool jq
+
+      - name: Build and install liquid-dsp from source
+        run: |
+          # Build from source so that a pkg-config module (liquid.pc) is
+          # always available on ubuntu-24.04 regardless of apt package state.
+          # Pin to a specific release tag for reproducibility and supply-chain safety.
+          git clone --depth 1 --branch v1.6.0 https://github.com/jgaeddert/liquid-dsp.git
+          cd liquid-dsp
+          ./bootstrap.sh
+          ./configure --enable-optimizations
+          make -j"$(nproc)"
+          sudo make install
+          sudo ldconfig
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure (Release, liquid-dsp enabled)
+        env:
+          # Ensure pkg_check_modules finds liquid.pc installed by the source
+          # build step regardless of any runner-provided PKG_CONFIG_PATH.
+          PKG_CONFIG_PATH: /usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig
+        run: |
+          cmake -S . -B build-liquid \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_PREFIX_PATH=/usr/local \
+            -DBUILD_HARDWARE_TARGETS=ON
+
+      - name: Build rf_adapt_intel (HAVE_LIQUID smoke-test)
+        run: cmake --build build-liquid -t rf_adapt_intel
+
+      - name: Verify HAVE_LIQUID was active in the build
+        run: |
+          if [ ! -f build-liquid/compile_commands.json ]; then
+            echo "compile_commands.json not found; ensure CMAKE_EXPORT_COMPILE_COMMANDS is ON."
+            exit 1
+          fi
+
+          # compile_commands.json entries may use either a "command" string or an
+          # "arguments" array; search both forms so the check is generator-agnostic.
+          if ! jq -e '
+            any(.[];
+              (.command? // "" | contains("-DHAVE_LIQUID")) or
+              (.arguments? // [] | any(. == "-DHAVE_LIQUID"))
+            )
+          ' build-liquid/compile_commands.json > /dev/null; then
+            echo "HAVE_LIQUID compile definition (-DHAVE_LIQUID) not present in compile_commands.json."
+            echo "rf_adapt_intel was not built with liquid-dsp support enabled."
+            exit 1
+          fi
+
+          echo "Verified: HAVE_LIQUID compile definition is present in the build flags."
+
+      # test_demod_ber.py is a Python algorithm mirror test: it validates BER
+      # and CRC-32 logic in pure Python.  The C++ demod_chains.hpp code is
+      # compile-tested by the "Build rf_adapt_intel" step above; there is no
+      # C++ runtime test here because the binary requires SDR hardware.
+      - name: test_demod_ber (Python algorithm mirror tests)
+        run: python3 tests/test_demod_ber.py -v
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 5. Security: Python dependency vulnerability scan
   # ─────────────────────────────────────────────────────────────────────────
   security-scan:
     name: Dependency vulnerability scan
@@ -257,7 +345,7 @@ jobs:
           path: security-audit.json
 
   # ─────────────────────────────────────────────────────────────────────────
-  # 5. Container image build (Docker)
+  # 6. Container image build (Docker)
   # ─────────────────────────────────────────────────────────────────────────
   docker:
     name: Container image build

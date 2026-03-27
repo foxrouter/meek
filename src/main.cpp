@@ -103,6 +103,9 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
 #include "meek/metrics.hpp"
 #include "meek/ring_buffer.hpp"
 #include "meek/sample_types.hpp"
+#ifdef HAVE_LIQUID
+#include "meek/demod_chains.hpp"
+#endif
 
 using namespace meek;
 using json = nlohmann::json;
@@ -593,6 +596,30 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     cr.sample_rate_hz = blk.sample_rate_hz;
     if (!cr.snr_gate_pass || !cr.bw_gate_pass || cr.mod_class == ModClass::UNKNOWN)
       cr.demod_status = DemodStatus::SKIPPED;
+#ifdef HAVE_LIQUID
+    else {
+      const std::span<const std::complex<float>> win{blk.samples.data() + best_offset, best_len};
+      switch (cr.mod_class) {
+        case ModClass::FSK_LIKE:
+          demod_fsk(win, cfg, cr);
+          break;
+        case ModClass::PSK_QAM_LIKE:
+          demod_psk_qam(win, cfg, cr);
+          break;
+        case ModClass::OOK_AM_LIKE:
+          demod_ook_am(win, cfg, cr);
+          break;
+        default:
+          cr.demod_status = DemodStatus::SKIPPED;
+          break;
+      }
+    }
+#else
+    else {
+      // Liquid-dsp not available: mark demodulation as intentionally skipped.
+      cr.demod_status = DemodStatus::SKIPPED;
+    }
+#endif
 
     // Enqueue CF32 snapshot when confidence exceeds the snapshot threshold.
     // Cap at 64 pending tasks (~2 MB) so stalled snapshot I/O cannot cause
@@ -740,6 +767,21 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
       default:
         break;
     }
+#ifdef HAVE_LIQUID
+    switch (cr.demod_status) {
+      case DemodStatus::OK:
+        ++metrics.demod_crc_ok;
+        break;
+      case DemodStatus::CRC_FAIL:
+        ++metrics.demod_crc_fail;
+        break;
+      case DemodStatus::LOCK_FAIL:
+        ++metrics.demod_lock_fail;
+        break;
+      default:
+        break;
+    }
+#endif
 
     if (cr.confidence >= cfg.conf_threshold && cr.snr_gate_pass) {
       ++metrics.frames_candidate;
@@ -778,6 +820,20 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
         j["band"] = cr.band_name;
         j["decision_trace"] = cr.decision_trace;
         j["demod_status"] = demod_status_name(cr.demod_status);
+#ifdef HAVE_LIQUID
+        if (cr.demod_status != DemodStatus::UNKNOWN && cr.demod_status != DemodStatus::SKIPPED) {
+          if (cr.mod_class == ModClass::OOK_AM_LIKE) {
+            // OOK envelope demod has no carrier lock/CFO — emit nulls to avoid misleading zeros.
+            j["demod_cfo_hz"] = nullptr;
+            j["demod_phase_error"] = nullptr;
+            j["demod_lock_ms"] = nullptr;
+          } else {
+            j["demod_cfo_hz"] = cr.demod_cfo_hz;
+            j["demod_phase_error"] = cr.demod_phase_error;
+            j["demod_lock_ms"] = cr.demod_lock_ms;
+          }
+        }
+#endif
         jlog.write(j);
       }
 
