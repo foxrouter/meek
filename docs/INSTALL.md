@@ -317,7 +317,7 @@ Key settings to review:
 | `RF_SNAPSHOT_RETENTION_DAYS` | `0` | Days to keep IQ snapshots; `0` = keep forever |
 | `RF_WORKER_LOG` | `/var/lib/rf-adapt-intel/worker.log` | JSON log file |
 | `RF_PROMETHEUS_PORT` | `0` | Port for the optional Prometheus HTTP `/metrics` endpoint. `0` = disabled (textfile only). Requires build with `HAVE_HTTPLIB`. |
-| `PAPR_MAX` | `0` | Maximum PAPR gate in dB. `0` = disabled. Set per-band via `process_incoming.sh`. |
+| `PAPR_MAX` | `0` | Maximum PAPR gate in dB. `0` = disabled. Set via `Environment=PAPR_MAX=<value>` in the systemd drop-in (`process-worker.service.d/override.conf`) or export the variable before starting the worker manually. |
 | `RSYM` | `128000` | Symbol rate (sps). Used by the liquid-dsp demodulation chains. Only active when built with `HAVE_LIQUID`. |
 | `FDEV` | `50000` | FSK frequency deviation (Hz). Used by the FSK demod chain. Only active when built with `HAVE_LIQUID`. |
 | `MOD_HINT` | *(unset)* | Classifier prior hint. Valid values: `fsk`, `gmsk`, `psk`, `qam`, `ook`, `am`, `cw`. Adds +0.10 to the named class score. |
@@ -330,8 +330,10 @@ sudo systemctl restart process-worker
 
 ### 7.3 Install logrotate configuration
 
-The worker log at `RF_WORKER_LOG` is rotated by logrotate using `copytruncate` so
-the running daemon does not need to be signalled. Install the provided config:
+The worker log is rotated by logrotate using `copytruncate` so the running daemon does
+not need to be signalled. The provided config assumes the default log path
+(`/var/lib/rf-adapt-intel/worker.log`). If you have changed `RF_WORKER_LOG`, edit
+`/etc/logrotate.d/rf-adapt-intel` after copying to match your custom path. Install:
 
 ```bash
 sudo cp config/logrotate.d/rf-adapt-intel /etc/logrotate.d/rf-adapt-intel
