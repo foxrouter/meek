@@ -158,9 +158,8 @@ cd meek
 Run these commands from the repository root (`meek/`):
 
 ```bash
-mkdir build && cd build
-cmake -S .. -B . -DCMAKE_BUILD_TYPE=Release
-cmake --build . -- -j$(nproc)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -- -j$(nproc)
 ```
 
 Expected output ends with something like:
@@ -173,7 +172,7 @@ Expected output ends with something like:
 Install the binary to `/usr/local/bin/`:
 
 ```bash
-sudo cmake --install .
+sudo cmake --install build
 ```
 
 Verify:
@@ -220,6 +219,12 @@ What `ops/deploy.sh` does:
 4. Creates the `rf_worker` system account if it does not exist.
 5. Installs and enables the canary monitor timer.
 6. Runs `systemctl daemon-reload` and starts the service.
+
+> **Watchdog:** The service uses `Type=notify` with a 30-second watchdog. All three
+> pipeline threads (capture, process, output) must be healthy for `WATCHDOG=1` to
+> be sent; a stalled thread stops heartbeats and systemd restarts the service after
+> `WatchdogSec`. No operator action is needed — this is informational for those
+> inspecting `systemctl status process-worker`.
 
 ### Create the `rf_worker` service account
 
@@ -268,7 +273,7 @@ sudo bash ops/setup.sh --non-interactive --install-liquid-dsp --dry-run
 |---|---|---|
 | **multimon-ng** | POCSAG / FLEX / OOK protocol decoding | ~15 MB disk |
 | **rtl_433** | 433 MHz sensor and remote-control packets | ~10 MB disk |
-| **liquid-dsp** | Advanced GMSK / PSK demodulation (build from source) | 4 GB RAM recommended |
+| **liquid-dsp** | FSK/GMSK, PSK/QAM, and OOK/AM demodulation chains with Gardner timing, Costas-loop carrier recovery, CRC-32 checking, and soft-bit output. Build from source. | 4 GB RAM recommended |
 
 > **Note on liquid-dsp build time:**
 > - Raspberry Pi 4 (4 GB): ~8 minutes
@@ -301,18 +306,41 @@ Key settings to review:
 | Variable | Default | Description |
 |---|---|---|
 | `RF_BLOCK_LEN` | `4096` | Samples per SDR read call |
-| `RF_CONF_THRESHOLD` | `0.6` | Min confidence to write to database |
+| `RF_CONF_THRESHOLD` | `0.35` | Min confidence to write to database. The deployed systemd drop-in (`process-worker.service.d/override.conf`) raises this to `0.6`; adjust there for production. |
+| `RF_ANALYSIS_LEN` | `4096` | Analysis sub-window size (samples). When smaller than `RF_BLOCK_LEN`, each captured block is split and the highest-confidence sub-window is used. Set equal to `RF_BLOCK_LEN` to disable sub-windowing. |
+| `RF_READ_TIMEOUT_US` | `500000` | SoapySDR read timeout (µs). Also sets the watchdog stale window: `max(3 × timeout, 10 s)`. |
+| `RF_MIN_POWER` | `5e-6` | Minimum average block power to attempt classification. Rejects silence / hardware noise floor. |
 | `RF_SNAPSHOT_CONF` | *(=`RF_CONF_THRESHOLD`)* | Min confidence to write IQ snapshot; inherits `RF_CONF_THRESHOLD` if unset so every DB write gets a snapshot |
+| `RF_CONSOLE_CONF` | `0.8` | Minimum confidence to print a `[DETECT]` line to stdout. Does not affect DB writes. |
 | `RF_SNR_MIN_DB` | `3.0` | Minimum SNR gate (dB); set to `0` for passive/canary mode (see `ops/canary.sh`) |
 | `RF_SNAPSHOT_DIR` | `/var/lib/rf-adapt-intel/snapshots` | IQ snapshot output directory |
 | `RF_SNAPSHOT_RETENTION_DAYS` | `0` | Days to keep IQ snapshots; `0` = keep forever |
 | `RF_WORKER_LOG` | `/var/lib/rf-adapt-intel/worker.log` | JSON log file |
+| `RF_PROMETHEUS_PORT` | `0` | Port for the optional Prometheus HTTP `/metrics` endpoint. `0` = disabled (textfile only). Requires build with `HAVE_HTTPLIB`. |
+| `PAPR_MAX` | `0` | Maximum PAPR gate in dB. `0` = disabled. Set per-band via `process_incoming.sh`. |
+| `RSYM` | `128000` | Symbol rate (sps). Used by the liquid-dsp demodulation chains. Only active when built with `HAVE_LIQUID`. |
+| `FDEV` | `50000` | FSK frequency deviation (Hz). Used by the FSK demod chain. Only active when built with `HAVE_LIQUID`. |
+| `MOD_HINT` | *(unset)* | Classifier prior hint. Valid values: `fsk`, `gmsk`, `psk`, `qam`, `ook`, `am`, `cw`. Adds +0.10 to the named class score. |
 
 ### 7.2 Restart after config changes
 
 ```bash
 sudo systemctl restart process-worker
 ```
+
+### 7.3 Install logrotate configuration
+
+The worker log at `RF_WORKER_LOG` is rotated by logrotate using `copytruncate` so
+the running daemon does not need to be signalled. Install the provided config:
+
+```bash
+sudo cp config/logrotate.d/rf-adapt-intel /etc/logrotate.d/rf-adapt-intel
+sudo chmod 644 /etc/logrotate.d/rf-adapt-intel
+# Test:
+sudo logrotate --debug /etc/logrotate.d/rf-adapt-intel
+```
+
+The config rotates at 50 MB, keeps 5 compressed backups.
 
 ---
 
@@ -336,13 +364,19 @@ This checks:
 python3 tests/test_guardrails.py -v
 python3 tests/test_snr_sweep.py -v
 python3 tests/test_demod_ber.py -v
+python3 tests/test_autotune.py -v
+python3 tests/test_decode_candidates.py -v
+python3 tests/test_db_wal.py -v
 
 # Validate C++ iq_metrics output against the Python reference
 cmake -S . -B build -DBUILD_HARDWARE_TARGETS=OFF && cmake --build build -t iq_metrics
 python3 tests/test_iq_metrics.py build/iq_metrics -v
 
-# Shell tests (ops/setup.sh behaviour)
+# Shell tests
 bash tests/test_setup.sh -v
+bash tests/test_deploy.sh -v
+bash tests/test_canary.sh -v
+bash tests/test_install.sh -v
 
 # All via CTest
 cmake --build build --target test
@@ -418,6 +452,18 @@ sudo systemctl status rf-incoming-processor.path
 # Logs from each file processed:
 sudo journalctl -u rf-incoming-processor -f
 ```
+
+### Generate an HTML signal report
+
+Once Brian is receiving and processing IQ files, generate a report with:
+
+```bash
+python3 tools/meek_report.py --db /var/lib/rf-adapt-intel/rf_adapt_intel.db \
+    --days 7 --out ~/meek_report.html
+xdg-open ~/meek_report.html   # or scp the file to your workstation
+```
+
+`meek_report.py` queries the database directly and requires no SDR hardware.
 
 ### 9.3 Configure SSH key trust (Ray → Brian)
 
@@ -545,6 +591,7 @@ Common causes:
 | `Permission denied` on `/var/lib/rf-adapt-intel` | `sudo chown -R rf_worker:rf_worker /var/lib/rf-adapt-intel` |
 | `SoapySDR: no devices found` | Check dongle is plugged in; verify with `SoapySDRUtil --probe` |
 | `EnvironmentFile not found` | Copy config: `sudo cp config/thresholds.env.example /etc/rf_worker/thresholds.env` |
+| `[WARN] SCHED_FIFO failed (Operation not permitted)` | Grant `CAP_SYS_NICE` to the binary: `sudo setcap cap_sys_nice+ep /usr/local/bin/rf_adapt_intel`, or add `AmbientCapabilities=CAP_SYS_NICE` to the systemd drop-in. The daemon runs correctly without it — only capture-thread scheduling priority is affected. |
 
 ---
 
@@ -621,7 +668,7 @@ bash install.sh          # automated installer — detects OS, builds, deploys
 
 # Manual steps
 sudo apt install -y build-essential cmake pkg-config libsoapysdr-dev libsqlite3-dev python3 python3-numpy
-mkdir build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -- -j$(nproc)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -- -j$(nproc)
 sudo cmake --install build
 sudo useradd -r -s /sbin/nologin rf_worker
 sudo bash ops/deploy.sh
