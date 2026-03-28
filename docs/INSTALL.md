@@ -222,12 +222,15 @@ What `ops/deploy.sh` does:
 
 > **Watchdog:** The service uses `Type=notify` with a 30-second watchdog. All three
 > pipeline threads (capture, process, output) must be healthy for `WATCHDOG=1` to
-> be sent; a stalled thread stops heartbeats and systemd restarts the service after
-> `WatchdogSec`. If the build does not link against libsystemd (`HAVE_SYSTEMD` unset),
-> the binary sends `READY=1`, `WATCHDOG=1`, and `STOPPING=1` via a built-in Unix
-> datagram socket implementation — `Type=notify` works correctly on minimal builds
-> without libsystemd installed. No operator action is needed — this is informational
-> for those inspecting `systemctl status process-worker`.
+> be sent. If a thread stalls, the worker keeps sending heartbeats until that
+> thread's last-progress timestamp becomes stale (stale window is
+> `max(3 × RF_READ_TIMEOUT_US, 10 s)`); once stale, heartbeats stop and systemd may
+> restart the service after `WatchdogSec`. If the build does not link against
+> libsystemd (`HAVE_SYSTEMD` unset), the binary sends `READY=1`, `WATCHDOG=1`, and
+> `STOPPING=1` via a built-in Unix datagram socket implementation — `Type=notify`
+> works correctly on minimal builds without libsystemd installed. No operator action
+> is needed — this is informational for those inspecting
+> `systemctl status process-worker`.
 
 ### Create the `rf_worker` service account
 
