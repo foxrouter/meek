@@ -342,7 +342,7 @@ sudo chmod 644 /etc/logrotate.d/rf-adapt-intel
 sudo logrotate --debug /etc/logrotate.d/rf-adapt-intel
 ```
 
-The config rotates at 50 MB, keeps 5 compressed backups.
+The config rotates at 50 MB and keeps 5 backups; older rotated logs are compressed.
 
 ---
 
