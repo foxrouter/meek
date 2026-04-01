@@ -294,7 +294,7 @@ jobs:
         env:
           # Ensure pkg_check_modules finds liquid.pc installed under the user
           # prefix ($HOME/.local) by both the source build and the cache restore.
-          PKG_CONFIG_PATH: $HOME/.local/lib/pkgconfig
+          PKG_CONFIG_PATH: ${{ env.HOME }}/.local/lib/pkgconfig
 
       - name: Build rf_adapt_intel (HAVE_LIQUID smoke-test)
         run: cmake --build build-liquid -t rf_adapt_intel
