@@ -57,6 +57,7 @@ jobs:
           pycodestyle --max-line-length=100 \
             tests/test_iq_metrics.py \
             tests/test_db_wal.py \
+            tests/test_classifier_correctness.py \
             benchmarks/bench_iq_metrics.py
 
       - name: test_autotune

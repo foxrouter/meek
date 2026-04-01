@@ -97,7 +97,7 @@ def _make_burst_signal(n: int = 4096, duty: float = 0.8,
 
 
 def _make_narrowband_ook(n: int = 4096, bw_frac: float = 0.01,
-                          fs: float = 2048000.0) -> np.ndarray:
+                         fs: float = 2048000.0) -> np.ndarray:
     """Narrowband OOK sensor: occupies bw_frac of the capture bandwidth."""
     symbols = np.random.randint(0, 2, n).astype(np.float32)
     # Apply ideal low-pass filter in the frequency domain to narrow the bandwidth
@@ -128,14 +128,14 @@ class TestSnrEstimatorHighOccupancy(unittest.TestCase):
         s = _make_cw_signal(n=4096, snr_db=10.0)
         snr = _snr_db_p10(s)
         self.assertGreater(snr, 0.0,
-            f"p10 SNR estimator returned {snr:.2f} dB for CW signal — expected > 0 dB")
+                           f"CW p10 SNR {snr:.2f} dB — expected > 0")
 
     def test_high_duty_burst_snr_positive_p10(self):
         """80% duty-cycle burst: p10 estimator must report SNR > 0 dB."""
         s = _make_burst_signal(n=4096, duty=0.8, snr_db=10.0)
         snr = _snr_db_p10(s)
         self.assertGreater(snr, 0.0,
-            f"p10 SNR estimator returned {snr:.2f} dB for 80% duty burst — expected > 0 dB")
+                           f"80% duty burst p10 SNR {snr:.2f} dB — expected > 0")
 
     def test_median_fails_cw(self):
         """Regression: median estimator must return near-zero or negative SNR for CW.
@@ -145,7 +145,7 @@ class TestSnrEstimatorHighOccupancy(unittest.TestCase):
         snr_p10 = _snr_db_p10(s)
         # p10 must be significantly better than median for high-occupancy
         self.assertGreater(snr_p10, snr_median + 2.0,
-            f"Expected p10 SNR ({snr_p10:.2f}) > median SNR ({snr_median:.2f}) + 2 dB for CW")
+                           f"p10 SNR ({snr_p10:.2f}) must be >median ({snr_median:.2f}) + 2 dB")
 
     def test_low_occupancy_both_estimators_agree(self):
         """For low-duty-cycle signals both estimators should give similar results."""
@@ -166,7 +166,7 @@ class TestSnrEstimatorHighOccupancy(unittest.TestCase):
                  1j * rng.standard_normal(4096)).astype(np.complex64) * 0.01
         snr_p10 = _snr_db_p10(noise)
         self.assertLessEqual(snr_p10, 20.0,
-            f"Pure noise gave SNR {snr_p10:.2f} dB — expected <= 20 dB")
+                             f"Pure noise gave SNR {snr_p10:.2f} dB — expected <= 20 dB")
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +183,7 @@ class TestBwGateDisabled(unittest.TestCase):
         flat = _spectral_flatness(s)
         # Tonal signal has flatness near 0 — bw_frac would be near 1.0 (wrong)
         self.assertLess(flat, 0.3,
-            f"Expected spectral flatness < 0.3 for narrowband signal, got {flat:.4f}")
+                        f"Expected spectral flatness < 0.3 for narrowband signal, got {flat:.4f}")
 
     def test_flatness_derived_bw_overestimates_narrowband(self):
         """Demonstrate that 1-flatness overestimates BW for a narrowband signal.
@@ -195,9 +195,12 @@ class TestBwGateDisabled(unittest.TestCase):
         bw_frac_estimated = max(1.0 - flat, 0.01)
         estimated_bw = bw_frac_estimated * fs
         ratio = estimated_bw / expected_bw
-        self.assertGreater(ratio, 2.0,
-            f"Expected flatness-derived BW to overestimate by >2× for narrowband signal; "
-            f"ratio={ratio:.2f}x (estimated={estimated_bw:.0f} Hz, expected={expected_bw:.0f} Hz)")
+        msg = (
+            f"Expected flatness-derived BW to overestimate by >2x for narrowband; "
+            f"ratio={ratio:.2f}x "
+            f"(estimated={estimated_bw:.0f} Hz, expected={expected_bw:.0f} Hz)"
+        )
+        self.assertGreater(ratio, 2.0, msg)
 
     def test_bw_gate_pass_unconditional(self):
         """After CLF-02: bw_gate_pass must be True for any signal regardless
@@ -208,7 +211,7 @@ class TestBwGateDisabled(unittest.TestCase):
             # The gate is disabled — always True
             bw_gate_pass = True  # mirrors the AFTER implementation
             self.assertTrue(bw_gate_pass,
-                f"bw_gate_pass must be True unconditionally (flatness={flatness})")
+                            f"bw_gate_pass must be True unconditionally (flatness={flatness})")
 
 
 # ---------------------------------------------------------------------------
@@ -276,11 +279,11 @@ class TestSinglePassPercentiles(unittest.TestCase):
         p50_ref, p90_ref = self._ref_percentiles(s)
         snr_m, p50_m, p90_m = self._merged_pass(s)
         self.assertAlmostEqual(snr_ref, snr_m, places=5,
-            msg=f"{label}: SNR mismatch ref={snr_ref:.6f} merged={snr_m:.6f}")
+                               msg=f"{label}: SNR mismatch ref={snr_ref:.6f} merged={snr_m:.6f}")
         self.assertAlmostEqual(p50_ref, p50_m, places=7,
-            msg=f"{label}: p50 mismatch ref={p50_ref:.8f} merged={p50_m:.8f}")
+                               msg=f"{label}: p50 mismatch ref={p50_ref:.8f} merged={p50_m:.8f}")
         self.assertAlmostEqual(p90_ref, p90_m, places=7,
-            msg=f"{label}: p90 mismatch ref={p90_ref:.8f} merged={p90_m:.8f}")
+                               msg=f"{label}: p90 mismatch ref={p90_ref:.8f} merged={p90_m:.8f}")
 
     def test_cw_signal(self):
         self._check_signal(_make_cw_signal(n=4096, snr_db=10.0), "CW")
@@ -313,14 +316,18 @@ class TestSinglePassPercentiles(unittest.TestCase):
             snr_sep = self._ref_snr_db(s)
             p50_sep, p90_sep = self._ref_percentiles(s)
             snr_m, p50_m, p90_m = self._merged_pass(s)
-            self.assertAlmostEqual(snr_sep, snr_m, places=5,
-                msg=f"{label}: separate SNR {snr_sep:.6f} != merged {snr_m:.6f} — "
-                    "compute_snr_db was modified inconsistently with the merged path")
-            self.assertAlmostEqual(p50_sep, p50_m, places=7,
-                msg=f"{label}: separate p50 {p50_sep:.8f} != merged {p50_m:.8f} — "
-                    "compute_power_percentiles was modified inconsistently")
-            self.assertAlmostEqual(p90_sep, p90_m, places=7,
-                msg=f"{label}: separate p90 {p90_sep:.8f} != merged {p90_m:.8f}")
+            snr_msg = (
+                f"{label}: SNR sep={snr_sep:.6f} != merged={snr_m:.6f} — "
+                "compute_snr_db modified inconsistently"
+            )
+            p50_msg = (
+                f"{label}: p50 sep={p50_sep:.8f} != merged={p50_m:.8f} — "
+                "compute_power_percentiles modified inconsistently"
+            )
+            p90_msg = f"{label}: p90 sep={p90_sep:.8f} != merged={p90_m:.8f}"
+            self.assertAlmostEqual(snr_sep, snr_m, places=5, msg=snr_msg)
+            self.assertAlmostEqual(p50_sep, p50_m, places=7, msg=p50_msg)
+            self.assertAlmostEqual(p90_sep, p90_m, places=7, msg=p90_msg)
 
 
 # ---------------------------------------------------------------------------
@@ -365,9 +372,9 @@ class TestRejectTraceFormat(unittest.TestCase):
         production output. If the refactor is reverted this test catches it."""
         old_format = "snr=1.234dB avg_pow=1.23e-05 papr=5.678dB [REJECT:snr_gate snr=1.234<2.4]"
         self.assertFalse(self._is_compact_trace(old_format),
-            "Old verbose format must not pass the compact-trace check")
+                         "Old verbose format must not pass the compact-trace check")
         self.assertTrue(self._is_verbose_trace(old_format),
-            "Old verbose format must be identified as verbose")
+                        "Old verbose format must be identified as verbose")
 
     def test_classification_trace_is_not_compact(self):
         """Traces for classified (non-rejected) blocks must contain 'snr=' and
