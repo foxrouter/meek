@@ -2,13 +2,20 @@
 """
 tests/test_classifier_correctness.py — Classifier algorithm correctness gates.
 
-Validates the Python mirrors of classify_block() for:
+Validates the Python mirrors of classify_block() helper logic for:
   CLF-01: SNR estimator is valid for high-duty-cycle signals (occupancy > 50%).
   CLF-02: BW gate is disabled (bw_gate_pass always True) — spectral flatness
           is not a bandwidth estimator.
   CLF-03: Power percentiles are consistent between the merged single-pass
           implementation and the reference implementations.
   CLF-04: Rejected blocks emit compact literal traces, not formatted floats.
+
+SCOPE: These tests validate the Python algorithm mirrors only.  They do not
+invoke build/rf_audit or exercise include/meek/classifier.hpp directly.
+C++ regression coverage for CLF-01 through CLF-04 is provided by the
+cpp-iq-metrics job, which builds src/main.cpp and related headers under
+clang-tidy and ASAN/UBSAN.  Binary integration testing of rf_audit is tracked
+separately and is not part of this test file.
 
 Run with:
     python3 tests/test_classifier_correctness.py [-v]
@@ -123,7 +130,11 @@ def _make_narrowband_ook(n: int = 4096, bw_frac: float = 0.01) -> np.ndarray:
 
 class TestSnrEstimatorHighOccupancy(unittest.TestCase):
     """CLF-01: p10 noise floor must report positive SNR for high-duty-cycle
-    signals where the median-based estimator fails."""
+    signals where the median-based estimator fails.
+
+    This test validates the Python mirror of the algorithm; C++ binary coverage
+    is provided by the cpp-iq-metrics job.
+    """
 
     def setUp(self):
         np.random.seed(42)
@@ -180,7 +191,11 @@ class TestSnrEstimatorHighOccupancy(unittest.TestCase):
 
 class TestBwGateDisabled(unittest.TestCase):
     """CLF-02: BW gate must pass unconditionally. spectral_flatness-derived
-    occupied_bw_hz is a diagnostic field only and must never gate signals."""
+    occupied_bw_hz is a diagnostic field only and must never gate signals.
+
+    This test validates the Python mirror of the algorithm; C++ binary coverage
+    is provided by the cpp-iq-metrics job.
+    """
 
     def setUp(self):
         np.random.seed(42)
@@ -255,6 +270,9 @@ class TestSinglePassPercentiles(unittest.TestCase):
         guarded by asserting that calling compute_snr_db + compute_power_percentiles
         sequentially on the same input gives the same result as the merged path,
         so any divergence between the two indicates a regression in one of them.
+
+    This test validates the Python mirror of the algorithm; C++ binary coverage
+    is provided by the cpp-iq-metrics job.
     """
 
     def setUp(self):
@@ -365,7 +383,11 @@ class TestSinglePassPercentiles(unittest.TestCase):
 
 class TestRejectTraceFormat(unittest.TestCase):
     """CLF-04: Rejection decision_trace values must be compact literals.
-    No floating-point formatted values should appear in reject-path traces."""
+    No floating-point formatted values should appear in reject-path traces.
+
+    This test validates the Python mirror of the algorithm; C++ binary coverage
+    is provided by the cpp-iq-metrics job.
+    """
 
     # Mirrors the compact literal strings from the AFTER implementation
     _VALID_REJECT_PREFIXES = (

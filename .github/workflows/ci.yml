@@ -69,6 +69,9 @@ jobs:
       - name: test_guardrails
         run: python3 tests/test_guardrails.py -v
 
+      - name: test_classifier_correctness
+        run: python3 tests/test_classifier_correctness.py -v
+
       - name: test_db_wal
         run: python3 tests/test_db_wal.py -v
 
@@ -173,9 +176,6 @@ jobs:
 
       - name: Validate C++ output vs Python reference
         run: python3 tests/test_iq_metrics.py build/iq_metrics -v
-
-      - name: test_classifier_correctness
-        run: python3 tests/test_classifier_correctness.py -v
 
       - name: Run benchmark (informational — not a hard gate)
         run: |
