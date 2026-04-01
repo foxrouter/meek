@@ -17,13 +17,8 @@ Requires: numpy
 """
 
 import math
-import sys
 import unittest
-from pathlib import Path
 import numpy as np
-
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_REPO_ROOT / "tests"))
 
 
 # ---------------------------------------------------------------------------
@@ -96,8 +91,7 @@ def _make_burst_signal(n: int = 4096, duty: float = 0.8,
     return tone * on_mask + noise
 
 
-def _make_narrowband_ook(n: int = 4096, bw_frac: float = 0.01,
-                         fs: float = 2048000.0) -> np.ndarray:
+def _make_narrowband_ook(n: int = 4096, bw_frac: float = 0.01) -> np.ndarray:
     """Narrowband OOK sensor: occupies bw_frac of the capture bandwidth."""
     symbols = np.random.randint(0, 2, n).astype(np.float32)
     # Apply ideal low-pass filter in the frequency domain to narrow the bandwidth
@@ -370,7 +364,10 @@ class TestRejectTraceFormat(unittest.TestCase):
     def test_verbose_trace_format_detected(self):
         """Regression: old-format verbose reject traces must NOT appear in
         production output. If the refactor is reverted this test catches it."""
-        old_format = "snr=1.234dB avg_pow=1.23e-05 papr=5.678dB [REJECT:snr_gate snr=1.234<2.4]"
+        old_format = (
+            "snr=1.234dB avg_pow=1.23e-05 papr=5.678dB "
+            "[REJECT:snr_gate snr=1.234<2.4]"
+        )
         self.assertFalse(self._is_compact_trace(old_format),
                          "Old verbose format must not pass the compact-trace check")
         self.assertTrue(self._is_verbose_trace(old_format),
