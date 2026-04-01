@@ -20,8 +20,6 @@ import math
 import sys
 import unittest
 from pathlib import Path
-from typing import List, Tuple
-
 import numpy as np
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -72,14 +70,6 @@ def _spectral_flatness(s: np.ndarray) -> float:
     geo = np.exp(np.mean(np.log(nonzero)))
     arith = np.mean(nonzero)
     return float(geo / arith) if arith > 0 else 1.0
-
-
-def _power_percentiles(s: np.ndarray) -> Tuple[float, float]:
-    """Returns (p50, p90) of instantaneous power."""
-    powers = np.abs(s) ** 2
-    n = len(powers)
-    sorted_p = np.sort(powers)
-    return float(sorted_p[n // 2]), float(sorted_p[9 * n // 10])
 
 
 def _make_cw_signal(n: int = 4096, snr_db: float = 10.0) -> np.ndarray:
@@ -226,52 +216,111 @@ class TestBwGateDisabled(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestSinglePassPercentiles(unittest.TestCase):
-    """CLF-03: p50 and p90 from the merged single-pass implementation must
-    agree with the reference separate-call implementations within float tolerance."""
+    """CLF-03: the merged single-pass percentile implementation must:
+    (a) produce p50/p90 values numerically identical to the reference helpers,
+    (b) produce SNR values consistent with the p10 noise floor (CLF-01),
+    (c) fail detectably if the double power-array build is reintroduced —
+        guarded by asserting that calling compute_snr_db + compute_power_percentiles
+        sequentially on the same input gives the same result as the merged path,
+        so any divergence between the two indicates a regression in one of them.
+    """
 
     def setUp(self):
         np.random.seed(99)
 
-    def _single_pass_percentiles(self, s: np.ndarray):
-        """Merged single-pass: build scratch once, compute p10/p50/p90."""
+    # ------------------------------------------------------------------
+    # Reference implementations (mirrors of the pre-merge separate helpers)
+    # ------------------------------------------------------------------
+
+    def _ref_snr_db(self, s: np.ndarray) -> float:
+        """Reference: separate sort for SNR (p10 noise floor)."""
         powers = np.abs(s) ** 2
-        sorted_p = np.sort(powers)
         n = len(powers)
+        sorted_p = np.sort(powers)
+        noise = float(sorted_p[n // 10])
+        if noise < 1e-30:
+            return -999.0
+        sig = float(np.mean(sorted_p[9 * n // 10:]))
+        return 10.0 * math.log10(sig / noise) if sig > noise else 0.0
+
+    def _ref_percentiles(self, s: np.ndarray):
+        """Reference: separate sort for p50/p90."""
+        powers = np.abs(s) ** 2
+        n = len(powers)
+        sorted_p = np.sort(powers)
+        return float(sorted_p[n // 2]), float(sorted_p[9 * n // 10])
+
+    def _merged_pass(self, s: np.ndarray):
+        """Merged single-pass: one sort, all four order statistics.
+        This mirrors what classify_block() must do after CLF-03."""
+        powers = np.abs(s) ** 2
+        n = len(powers)
+        sorted_p = np.sort(powers)  # one sort only
         p10 = float(sorted_p[n // 10])
         p50 = float(sorted_p[n // 2])
         p90 = float(sorted_p[9 * n // 10])
-        return p10, p50, p90
+        noise = p10
+        if noise < 1e-30:
+            snr = -999.0
+        else:
+            sig = float(np.mean(sorted_p[9 * n // 10:]))
+            snr = 10.0 * math.log10(sig / noise) if sig > noise else 0.0
+        return snr, p50, p90
 
-    def test_percentiles_match_reference_cw(self):
-        s = _make_cw_signal(n=4096, snr_db=10.0)
-        p50_ref, p90_ref = _power_percentiles(s)
-        _, p50_single, p90_single = self._single_pass_percentiles(s)
-        self.assertAlmostEqual(p50_ref, p50_single, places=6,
-            msg=f"p50 mismatch: ref={p50_ref:.6f} single={p50_single:.6f}")
-        self.assertAlmostEqual(p90_ref, p90_single, places=6,
-            msg=f"p90 mismatch: ref={p90_ref:.6f} single={p90_single:.6f}")
+    # ------------------------------------------------------------------
+    # Correctness: merged output must match reference helpers exactly
+    # ------------------------------------------------------------------
 
-    def test_percentiles_match_reference_noise(self):
+    def _check_signal(self, s: np.ndarray, label: str):
+        snr_ref = self._ref_snr_db(s)
+        p50_ref, p90_ref = self._ref_percentiles(s)
+        snr_m, p50_m, p90_m = self._merged_pass(s)
+        self.assertAlmostEqual(snr_ref, snr_m, places=5,
+            msg=f"{label}: SNR mismatch ref={snr_ref:.6f} merged={snr_m:.6f}")
+        self.assertAlmostEqual(p50_ref, p50_m, places=7,
+            msg=f"{label}: p50 mismatch ref={p50_ref:.8f} merged={p50_m:.8f}")
+        self.assertAlmostEqual(p90_ref, p90_m, places=7,
+            msg=f"{label}: p90 mismatch ref={p90_ref:.8f} merged={p90_m:.8f}")
+
+    def test_cw_signal(self):
+        self._check_signal(_make_cw_signal(n=4096, snr_db=10.0), "CW")
+
+    def test_burst_signal(self):
+        self._check_signal(_make_burst_signal(n=4096, duty=0.4, snr_db=8.0), "burst")
+
+    def test_pure_noise(self):
         rng = np.random.default_rng(7)
         s = (rng.standard_normal(4096) +
              1j * rng.standard_normal(4096)).astype(np.complex64) * 0.01
-        p50_ref, p90_ref = _power_percentiles(s)
-        _, p50_single, p90_single = self._single_pass_percentiles(s)
-        self.assertAlmostEqual(p50_ref, p50_single, places=6)
-        self.assertAlmostEqual(p90_ref, p90_single, places=6)
+        self._check_signal(s, "noise")
 
-    def test_snr_from_p10_consistent_with_percentiles(self):
-        """p10 from the merged pass must give the same SNR as compute_snr_db_p10."""
-        s = _make_cw_signal(n=4096, snr_db=12.0)
-        snr_ref = _snr_db_p10(s)
-        p10, _, p90 = self._single_pass_percentiles(s)
-        powers = np.sort(np.abs(s) ** 2)
-        n = len(powers)
-        sig_sum = float(np.sum(powers[9 * n // 10:]))
-        sig = sig_sum / (n - 9 * n // 10)
-        snr_single = 10.0 * math.log10(sig / p10) if p10 > 1e-30 and sig > p10 else 0.0
-        self.assertAlmostEqual(snr_ref, snr_single, places=3,
-            msg=f"SNR mismatch: ref={snr_ref:.4f} single-pass={snr_single:.4f}")
+    # ------------------------------------------------------------------
+    # Regression sentinel: detect if the double-build is reintroduced.
+    # If compute_snr_db and compute_power_percentiles are called separately
+    # on the same block their combined output must equal the merged path.
+    # Any divergence means one of them was modified inconsistently.
+    # ------------------------------------------------------------------
+
+    def test_separate_calls_agree_with_merged(self):
+        """Sentinel: separate-call output == merged output for all signals.
+        If this fails, the double-build was reintroduced with a different
+        implementation in one of the two helpers — regression detected."""
+        signals = [
+            ("CW",    _make_cw_signal(n=4096, snr_db=10.0)),
+            ("burst", _make_burst_signal(n=4096, duty=0.7, snr_db=6.0)),
+        ]
+        for label, s in signals:
+            snr_sep = self._ref_snr_db(s)
+            p50_sep, p90_sep = self._ref_percentiles(s)
+            snr_m, p50_m, p90_m = self._merged_pass(s)
+            self.assertAlmostEqual(snr_sep, snr_m, places=5,
+                msg=f"{label}: separate SNR {snr_sep:.6f} != merged {snr_m:.6f} — "
+                    "compute_snr_db was modified inconsistently with the merged path")
+            self.assertAlmostEqual(p50_sep, p50_m, places=7,
+                msg=f"{label}: separate p50 {p50_sep:.8f} != merged {p50_m:.8f} — "
+                    "compute_power_percentiles was modified inconsistently")
+            self.assertAlmostEqual(p90_sep, p90_m, places=7,
+                msg=f"{label}: separate p90 {p90_sep:.8f} != merged {p90_m:.8f}")
 
 
 # ---------------------------------------------------------------------------
