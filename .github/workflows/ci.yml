@@ -3,8 +3,18 @@ name: CI
 on:
   push:
     branches: ["main", "master", "copilot/**"]
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".github/CODEOWNERS"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
   pull_request:
     branches: ["main", "master"]
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".github/CODEOWNERS"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
 
 # Default to read-only permissions for all jobs; individual jobs may widen
 # specific permissions as needed (e.g. docker job needs packages: write).
@@ -170,12 +180,6 @@ jobs:
             --block-sizes 4096,65536 \
             --out benchmarks/results/bench_iq_metrics_ci.json
 
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v7
-        with:
-          name: benchmark-results
-          path: benchmarks/results/bench_iq_metrics_ci.json
-
   # ─────────────────────────────────────────────────────────────────────────
   # 3. Sanitizer build (ASAN + UBSAN on iq_metrics)
   # ─────────────────────────────────────────────────────────────────────────
@@ -229,6 +233,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   cpp-liquid:
     name: C++ liquid-dsp build (HAVE_LIQUID)
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -248,27 +253,35 @@ jobs:
             pkg-config libsqlite3-dev libsoapysdr-dev \
             git autoconf automake libtool jq
 
+      - name: Cache liquid-dsp build
+        id: cache-liquid
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/lib/libliquid*
+            ~/.local/include/liquid
+            ~/.local/lib/pkgconfig/liquid.pc
+          key: liquid-dsp-v1.6.0-${{ runner.os }}-clang18
+
       - name: Build and install liquid-dsp from source
+        if: steps.cache-liquid.outputs.cache-hit != 'true'
         run: |
           # Build from source so that a pkg-config module (liquid.pc) is
           # always available on ubuntu-24.04 regardless of apt package state.
           # Pin to a specific release tag for reproducibility and supply-chain safety.
+          # Install to $HOME/.local (user-writable) so the cache action can
+          # restore this directory without requiring sudo.
           git clone --depth 1 --branch v1.6.0 https://github.com/jgaeddert/liquid-dsp.git
           cd liquid-dsp
           ./bootstrap.sh
-          ./configure --enable-optimizations
+          ./configure --prefix="$HOME/.local" --enable-optimizations
           make -j"$(nproc)"
-          sudo make install
-          sudo ldconfig
+          make install
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
       - name: Configure (Release, liquid-dsp enabled)
-        env:
-          # Ensure pkg_check_modules finds liquid.pc installed by the source
-          # build step regardless of any runner-provided PKG_CONFIG_PATH.
-          PKG_CONFIG_PATH: /usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig
         run: |
           cmake -S . -B build-liquid \
             -G Ninja \
@@ -276,8 +289,12 @@ jobs:
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DCMAKE_PREFIX_PATH=/usr/local \
+            -DCMAKE_PREFIX_PATH="$HOME/.local" \
             -DBUILD_HARDWARE_TARGETS=ON
+        env:
+          # Ensure pkg_check_modules finds liquid.pc installed under the user
+          # prefix ($HOME/.local) by both the source build and the cache restore.
+          PKG_CONFIG_PATH: ${{ env.HOME }}/.local/lib/pkgconfig
 
       - name: Build rf_adapt_intel (HAVE_LIQUID smoke-test)
         run: cmake --build build-liquid -t rf_adapt_intel
@@ -349,6 +366,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   docker:
     name: Container image build
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
