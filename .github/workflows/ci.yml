@@ -3,8 +3,24 @@ name: CI
 on:
   push:
     branches: ["main", "master", "copilot/**"]
+    paths:
+      - "src/**"
+      - "include/**"
+      - "tools/**"
+      - "tests/**"
+      - "CMakeLists.txt"
+      - "requirements.txt"
+      - ".github/workflows/**"
   pull_request:
     branches: ["main", "master"]
+    paths:
+      - "src/**"
+      - "include/**"
+      - "tools/**"
+      - "tests/**"
+      - "CMakeLists.txt"
+      - "requirements.txt"
+      - ".github/workflows/**"
 
 # Default to read-only permissions for all jobs; individual jobs may widen
 # specific permissions as needed (e.g. docker job needs packages: write).
@@ -170,12 +186,6 @@ jobs:
             --block-sizes 4096,65536 \
             --out benchmarks/results/bench_iq_metrics_ci.json
 
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v7
-        with:
-          name: benchmark-results
-          path: benchmarks/results/bench_iq_metrics_ci.json
-
   # ─────────────────────────────────────────────────────────────────────────
   # 3. Sanitizer build (ASAN + UBSAN on iq_metrics)
   # ─────────────────────────────────────────────────────────────────────────
@@ -229,6 +239,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   cpp-liquid:
     name: C++ liquid-dsp build (HAVE_LIQUID)
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -248,7 +259,18 @@ jobs:
             pkg-config libsqlite3-dev libsoapysdr-dev \
             git autoconf automake libtool jq
 
+      - name: Cache liquid-dsp build
+        id: cache-liquid
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/lib/libliquid*
+            /usr/local/include/liquid
+            /usr/local/lib/pkgconfig/liquid.pc
+          key: liquid-dsp-v1.6.0-${{ runner.os }}-clang18
+
       - name: Build and install liquid-dsp from source
+        if: steps.cache-liquid.outputs.cache-hit != 'true'
         run: |
           # Build from source so that a pkg-config module (liquid.pc) is
           # always available on ubuntu-24.04 regardless of apt package state.
@@ -349,6 +371,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   docker:
     name: Container image build
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
