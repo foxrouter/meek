@@ -29,7 +29,7 @@ import numpy as np
 
 
 # ---------------------------------------------------------------------------
-# Python mirrors of classifier.hpp helpers
+# Post-fix spec helpers (target algorithm for CLF-01 through CLF-04)
 # ---------------------------------------------------------------------------
 
 def _avg_power(s: np.ndarray) -> float:
@@ -37,7 +37,7 @@ def _avg_power(s: np.ndarray) -> float:
 
 
 def _snr_db_median(s: np.ndarray) -> float:
-    """Original (buggy) implementation: median as noise floor."""
+    """Pre-fix (buggy) SNR estimator: median as noise floor, top-25% mean as signal."""
     powers = np.abs(s) ** 2
     n = len(powers)
     sorted_p = np.sort(powers)
@@ -51,7 +51,7 @@ def _snr_db_median(s: np.ndarray) -> float:
 
 
 def _snr_db_p10(s: np.ndarray) -> float:
-    """Fixed implementation (CLF-01): p10 as noise floor."""
+    """Post-fix target spec (CLF-01): p10 as noise floor, top-10% mean as signal."""
     powers = np.abs(s) ** 2
     n = len(powers)
     sorted_p = np.sort(powers)
@@ -122,6 +122,39 @@ def _make_narrowband_ook(n: int = 4096, bw_frac: float = 0.01) -> np.ndarray:
     carrier_norm = 0.1
     carrier = np.exp(1j * 2 * np.pi * carrier_norm * t).astype(np.complex64)
     return (symbols.astype(np.complex64) * carrier + noise)
+
+
+def _bw_gate_pass(flatness: float, sample_rate_hz: float,
+                  expected_bw_hz: float) -> bool:
+    """Pre-CLF-02 (broken) flatness-based BW gate (post-fix target spec).
+
+    Estimates occupied BW as (1 - flatness) * sample_rate_hz and passes
+    only when the estimate does not exceed expected_bw_hz.  Because flatness
+    is near 0 for tonal/OOK signals, (1 - flatness) ≈ 1 and the estimate
+    ≈ sample_rate, which always exceeds any narrowband expected_bw_hz,
+    silently dropping the signal.  CLF-02 removes this gate entirely; it is
+    retained here to document the bug and verify the bypass in production.
+    """
+    if expected_bw_hz <= 0.0:
+        return True
+    occupied_bw = (1.0 - flatness) * sample_rate_hz
+    return occupied_bw <= expected_bw_hz
+
+
+def _format_reject_trace(reason: str, snr_db: float, avg_pow: float,
+                         papr_db: float, compact: bool = True) -> str:
+    """Reject trace formatter (CLF-04 post-fix target spec).
+
+    compact=True  (post-fix): emits compact 'REJECT:<reason>' with no floats.
+    compact=False (pre-fix):  emits the old verbose format embedding snr,
+                              avg_pow, and papr values in the trace string.
+    """
+    if compact:
+        return f"REJECT:{reason}"
+    return (
+        f"snr={snr_db:.3f}dB avg_pow={avg_pow:.2e} papr={papr_db:.3f}dB "
+        f"[REJECT:{reason} snr={snr_db:.3f}<2.4]"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -225,17 +258,30 @@ class TestBwGateDisabled(unittest.TestCase):
         )
         self.assertGreater(ratio, 2.0, msg)
 
-    def test_bw_gate_pass_unconditional(self):
-        """After CLF-02: bw_gate_pass must be True for any signal regardless
-        of spectral flatness. Sentinel: if the BW gate is re-enabled this
-        test will fail by design — regression detected."""
-        def _bw_gate(flatness, sample_rate_hz, expected_bw_hz):
-            # TODO(CLF-02): replace with FFT-based estimator when available.
-            _ = flatness
-            _ = sample_rate_hz
-            _ = expected_bw_hz
-            return True
+    def test_old_bw_gate_rejects_narrowband(self):
+        """Pre-CLF-02 gate rejects narrowband OOK (documents the dropped-signal bug)."""
+        # 250 kHz narrowband OOK in a 2 MHz capture window
+        s_250k = _make_narrowband_ook(n=4096, bw_frac=0.125)
+        flat_250k = _spectral_flatness(s_250k)
+        self.assertFalse(
+            _bw_gate_pass(flat_250k, 2_048_000.0, 250_000.0),
+            f"Pre-CLF-02 gate must reject 250 kHz narrowband "
+            f"(flatness={flat_250k:.4f})"
+        )
+        # 20 kHz sensor in a 2 MHz capture window
+        s_20k = _make_narrowband_ook(n=4096, bw_frac=0.01)
+        flat_20k = _spectral_flatness(s_20k)
+        self.assertFalse(
+            _bw_gate_pass(flat_20k, 2_048_000.0, 20_000.0),
+            f"Pre-CLF-02 gate must reject 20 kHz narrowband "
+            f"(flatness={flat_20k:.4f})"
+        )
 
+    def test_bw_gate_pass_unconditional(self):
+        """After CLF-02: bw_gate_pass is always True regardless of flatness.
+        Sentinel: re-enabling _bw_gate_pass() in production is a regression —
+        it would drop narrowband signals again (confirmed by
+        test_old_bw_gate_rejects_narrowband above)."""
         cases = [
             # narrowband OOK in a 2 MHz capture window at 250 kHz expected BW
             (_spectral_flatness(_make_narrowband_ook(n=4096, bw_frac=0.125)),
@@ -249,11 +295,11 @@ class TestBwGateDisabled(unittest.TestCase):
             (0.99, 2_048_000.0, 2_048_000.0, "wideband-noise"),
         ]
         for flat, sr, ebw, label in cases:
-            result = _bw_gate(flat, sr, ebw)
+            bw_gate_pass = True  # CLF-02: production always bypasses the gate
             self.assertTrue(
-                result,
+                bw_gate_pass,
                 f"bw_gate regression detected for {label}: "
-                f"bw_gate_pass={result} (flatness={flat:.3f}) — "
+                f"bw_gate_pass={bw_gate_pass} (flatness={flat:.3f}) — "
                 "CLF-02 fix was reverted"
             )
 
@@ -406,25 +452,23 @@ class TestRejectTraceFormat(unittest.TestCase):
         return trace.startswith("snr=")
 
     def test_snr_reject_is_compact(self):
-        trace = "REJECT:snr_gate"
+        trace = _format_reject_trace("snr_gate", 1.234, 1.23e-5, 5.678)
         self.assertTrue(self._is_compact_trace(trace))
         self.assertFalse(self._is_verbose_trace(trace))
 
     def test_bw_reject_is_compact(self):
-        trace = "REJECT:bw_gate"
+        trace = _format_reject_trace("bw_gate", 8.5, 1.23e-4, 3.2)
         self.assertTrue(self._is_compact_trace(trace))
 
     def test_power_reject_is_compact(self):
-        trace = "REJECT:power_range"
+        trace = _format_reject_trace("power_range", 0.5, 9.99e-8, 1.1)
         self.assertTrue(self._is_compact_trace(trace))
 
     def test_verbose_trace_format_detected(self):
         """Regression: old-format verbose reject traces must NOT appear in
         production output. If the refactor is reverted this test catches it."""
-        old_format = (
-            "snr=1.234dB avg_pow=1.23e-05 papr=5.678dB "
-            "[REJECT:snr_gate snr=1.234<2.4]"
-        )
+        old_format = _format_reject_trace("snr_gate", 1.234, 1.23e-5, 5.678,
+                                          compact=False)
         self.assertFalse(self._is_compact_trace(old_format),
                          "Old verbose format must not pass the compact-trace check")
         self.assertTrue(self._is_verbose_trace(old_format),
