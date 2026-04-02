@@ -146,14 +146,16 @@ def _bw_gate_pass(flatness: float, sample_rate_hz: float,
 
 def _format_reject_trace(reason: str, snr_db: float, avg_pow: float,
                          papr_db: float, compact: bool = True,
-                         snr_gate: float = 2.4) -> str:
+                         snr_gate: float = 3.0) -> str:
     """Reject trace formatter (CLF-04 post-fix target spec).
 
     compact=True  (post-fix): emits compact 'REJECT:<reason>' with no floats.
     compact=False (pre-fix):  emits the old verbose format embedding snr,
                               avg_pow, and papr values in the trace string.
 
-    snr_gate mirrors the SNR gate threshold used by the C++ classifier.
+    snr_gate defaults to the global RF_SNR_MIN_DB production default (3.0).
+    Callers that need to mirror a per-band or overridden classifier threshold
+    should pass an explicit snr_gate value.
     """
     if compact:
         return f"REJECT:{reason}"
