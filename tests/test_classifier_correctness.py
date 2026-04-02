@@ -305,7 +305,10 @@ class TestBwGateDisabled(unittest.TestCase):
         # This test is an intentional placeholder to preserve the named CLF-02
         # audit slot in CI output so that any future reintroduction of a BW
         # gate must be a deliberate, reviewed change.
-        pass
+        self.skipTest(
+            "CLF-02 audit slot only: BW gate is intentionally disabled and "
+            "not asserted by the Python mirror tests in this file."
+        )
 
 
 # ---------------------------------------------------------------------------
