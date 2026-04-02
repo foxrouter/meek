@@ -210,6 +210,16 @@ class TestSnrEstimatorHighOccupancy(unittest.TestCase):
         # Both should be positive for a clean low-duty signal
         self.assertGreater(snr_median, 0.0)
         self.assertGreater(snr_p10, 0.0)
+        # And they should agree within a reasonable tolerance for low-duty signals.
+        # For a 10 % duty signal the p10 noise floor is ~10 dB below the median,
+        # so a wider tolerance (15 dB) is appropriate here.
+        diff = abs(snr_p10 - snr_median)
+        self.assertLessEqual(
+            diff,
+            15.0,
+            f"Low-duty signal SNR estimators disagree by {diff:.2f} dB "
+            f"(median={snr_median:.2f} dB, p10={snr_p10:.2f} dB)",
+        )
 
     def test_pure_noise_both_return_near_zero(self):
         """Pure noise block: both estimators should return well below the SNR
