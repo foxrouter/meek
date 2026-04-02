@@ -32,10 +32,6 @@ import numpy as np
 # Post-fix spec helpers (target algorithm for CLF-01 through CLF-04)
 # ---------------------------------------------------------------------------
 
-def _avg_power(s: np.ndarray) -> float:
-    return float(np.mean(np.abs(s) ** 2))
-
-
 def _snr_db_median(s: np.ndarray) -> float:
     """Pre-fix (buggy) SNR estimator: median as noise floor, top-25% mean as signal."""
     powers = np.abs(s) ** 2
@@ -126,14 +122,15 @@ def _make_narrowband_ook(n: int = 4096, bw_frac: float = 0.01) -> np.ndarray:
 
 def _bw_gate_pass(flatness: float, sample_rate_hz: float,
                   expected_bw_hz: float) -> bool:
-    """Pre-CLF-02 (broken) flatness-based BW gate (post-fix target spec).
+    """Pre-CLF-02 (broken) flatness-based BW gate (legacy behavior mirror).
 
     Estimates occupied BW as (1 - flatness) * sample_rate_hz and passes
     only when the estimate does not exceed expected_bw_hz.  Because flatness
     is near 0 for tonal/OOK signals, (1 - flatness) ≈ 1 and the estimate
     ≈ sample_rate, which always exceeds any narrowband expected_bw_hz,
-    silently dropping the signal.  CLF-02 removes this gate entirely; it is
-    retained here to document the bug and verify the bypass in production.
+    silently dropping the signal.  CLF-02 removes this gate entirely; this
+    helper is retained only to mirror the pre-fix bug and verify the bypass
+    in production.
     """
     if expected_bw_hz <= 0.0:
         return True
