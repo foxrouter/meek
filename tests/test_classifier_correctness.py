@@ -139,18 +139,21 @@ def _bw_gate_pass(flatness: float, sample_rate_hz: float,
 
 
 def _format_reject_trace(reason: str, snr_db: float, avg_pow: float,
-                         papr_db: float, compact: bool = True) -> str:
+                         papr_db: float, compact: bool = True,
+                         snr_gate: float = 2.4) -> str:
     """Reject trace formatter (CLF-04 post-fix target spec).
 
     compact=True  (post-fix): emits compact 'REJECT:<reason>' with no floats.
     compact=False (pre-fix):  emits the old verbose format embedding snr,
                               avg_pow, and papr values in the trace string.
+
+    snr_gate mirrors the SNR gate threshold used by the C++ classifier.
     """
     if compact:
         return f"REJECT:{reason}"
     return (
         f"snr={snr_db:.3f}dB avg_pow={avg_pow:.2e} papr={papr_db:.3f}dB "
-        f"[REJECT:{reason} snr={snr_db:.3f}<2.4]"
+        f"[REJECT:{reason} snr={snr_db:.3f}<{snr_gate:.1f}]"
     )
 
 
@@ -275,13 +278,12 @@ class TestBwGateDisabled(unittest.TestCase):
         )
 
     def test_bw_gate_is_disabled_contract(self):
-        # CLF-02 disables the BW gate unconditionally. There is no gate logic
-        # to test here. The regression surface is the line
-        # r.bw_gate_pass = true in classify_block() — if that line is removed
-        # or conditioned, the SNR-gate and power-range tests above will catch
-        # misbehaviour via reject rate changes. This placeholder preserves the
-        # named test slot so the CLF-02 audit item remains traceable in CI
-        # output.
+        # CLF-02 disables the BW gate unconditionally. There is no remaining
+        # BW gate decision logic exercised by the Python mirrors in this file;
+        # classification must not depend on spectral_flatness-derived bandwidth.
+        # This test is an intentional placeholder to preserve the named CLF-02
+        # audit slot in CI output so that any future reintroduction of a BW
+        # gate must be a deliberate, reviewed change.
         pass
 
 
