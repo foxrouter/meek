@@ -135,8 +135,8 @@ def _bw_gate_pass(flatness: float, sample_rate_hz: float,
     is near 0 for tonal/OOK signals, (1 - flatness) ≈ 1 and the estimate
     ≈ sample_rate, which always exceeds any narrowband expected_bw_hz,
     silently dropping the signal.  CLF-02 removes this gate entirely; this
-    helper is retained only to mirror the pre-fix bug and verify the bypass
-    in production.
+    helper is retained only to mirror the pre-fix bug and document the
+    expected post-fix bypass behavior in the Python spec helpers.
     """
     if expected_bw_hz <= 0.0:
         return True
