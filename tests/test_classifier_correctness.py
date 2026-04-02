@@ -18,10 +18,11 @@ exercise include/meek/classifier.hpp directly. As of this test's writing,
 meek::classify_block() still enforces a BW guardrail when expected_bw_hz > 0
 and formats reject traces with floating-point values; those production code
 paths are covered separately and are not exercised by this file.
-C++ regression coverage for CLF-01 through CLF-04 is provided by the
-cpp-iq-metrics job, which builds src/main.cpp and related headers under
-clang-tidy and ASAN/UBSAN. Binary integration testing of rf_audit is tracked
-separately.
+C++ regression coverage for CLF-01 through CLF-04 is split in CI:
+the cpp-iq-metrics job provides a Release build plus clang-tidy coverage for
+src/main.cpp and related headers, while the separate sanitizer job provides
+ASAN/UBSAN coverage for iq_metrics only. Binary integration testing of
+rf_audit is tracked separately.
 
 Run with:
     python3 tests/test_classifier_correctness.py [-v]
@@ -479,8 +480,8 @@ class TestRejectTraceFormat(unittest.TestCase):
         self.assertTrue(self._is_compact_trace(trace))
 
     def test_verbose_trace_format_detected(self):
-        """Regression: old-format verbose reject traces must NOT appear in
-        production output. If the refactor is reverted this test catches it."""
+        """Regression: verify the helper's verbose reject-trace format remains
+        distinguishable from the compact reject-trace format when compact=False."""
         old_format = _format_reject_trace("snr_gate", 1.234, 1.23e-5, 5.678,
                                           compact=False)
         self.assertFalse(self._is_compact_trace(old_format),
