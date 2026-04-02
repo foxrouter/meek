@@ -106,12 +106,15 @@ def _make_burst_signal(n: int = 4096, duty: float = 0.8,
 
 
 def _make_narrowband_ook(n: int = 4096, bw_frac: float = 0.01) -> np.ndarray:
-    """Narrowband OOK: slow on/off keying at bw_frac * sample_rate symbol rate.
+    """Narrowband-ish OOK with slow envelope transitions.
 
-    Uses long symbols (duration 1/bw_frac samples) rather than LP filtering so
-    the time-domain power distribution is bimodal (carrier on vs. noise floor).
-    The occupied bandwidth equals approximately bw_frac of the capture bandwidth.
-    A small noise floor models SDR thermal noise (avoids exact zero-power samples).
+    Uses long rectangular symbols (duration about 1 / bw_frac samples) rather
+    than LP filtering so the time-domain power distribution is bimodal
+    (carrier on vs. noise floor). Here, bw_frac controls the burst symbol rate
+    / envelope transition rate and is used as a proxy for relative
+    "narrowbandness" in these tests; it is not an exact occupied-bandwidth
+    fraction. A small noise floor models SDR thermal noise (avoids exact
+    zero-power samples).
     """
     sym_len = max(1, int(round(1.0 / bw_frac)))
     symbols = np.zeros(n, dtype=np.float32)
@@ -316,16 +319,16 @@ class TestBwGateDisabled(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestSinglePassPercentiles(unittest.TestCase):
-    """CLF-03: the merged single-pass percentile implementation must:
+    """CLF-03: the merged percentile implementation must:
     (a) produce p50/p90 values numerically identical to the reference helpers,
     (b) produce SNR values consistent with the p10 noise floor (CLF-01),
-    (c) fail detectably if the double power-array build is reintroduced —
-        guarded by asserting that calling compute_snr_db + compute_power_percentiles
-        sequentially on the same input gives the same result as the merged path,
-        so any divergence between the two indicates a regression in one of them.
+    (c) remain numerically consistent with the separate reference helpers when
+        the same input is evaluated through both paths.
 
-    This test validates the Python mirror of the algorithm; C++ binary coverage
-    is provided by the cpp-iq-metrics job.
+    This test validates numerical equivalence in the Python mirror of the
+    algorithm only; it does not assert internal single-pass behavior or detect
+    a reintroduced double power-array build unless that regression changes the
+    computed results. C++ binary coverage is provided by the cpp-iq-metrics job.
     """
 
     def setUp(self):
