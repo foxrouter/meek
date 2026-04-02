@@ -12,10 +12,12 @@ Validates the Python mirrors of classify_block() helper logic for:
 
 SCOPE: These tests validate the Python algorithm mirrors only.  They do not
 invoke build/rf_audit or exercise include/meek/classifier.hpp directly.
-C++ regression coverage for CLF-01 through CLF-04 is provided by the
-cpp-iq-metrics job, which builds src/main.cpp and related headers under
-clang-tidy and ASAN/UBSAN.  Binary integration testing of rf_audit is tracked
-separately and is not part of this test file.
+In CI, the cpp-iq-metrics job builds src/main.cpp and related headers under
+clang-tidy and ASAN/UBSAN and sanity-checks iq_metrics outputs
+(avg_power, snr_db, flatness, est_bw_hz).  It does not exercise
+classify_block() decision_trace formatting or BW-gate behavior; those C++
+behavioral regressions are covered by separate tests/integration jobs and
+are not part of this test file.
 
 Run with:
     python3 tests/test_classifier_correctness.py [-v]
