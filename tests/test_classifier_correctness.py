@@ -229,9 +229,12 @@ class TestSnrEstimatorHighOccupancy(unittest.TestCase):
         rng = np.random.default_rng(1)
         noise = (rng.standard_normal(4096) +
                  1j * rng.standard_normal(4096)).astype(np.complex64) * 0.01
+        snr_median = _snr_db_median(noise)
         snr_p10 = _snr_db_p10(noise)
+        self.assertLessEqual(snr_median, 20.0,
+                             f"Pure noise gave median-SNR {snr_median:.2f} dB — expected <= 20 dB")
         self.assertLessEqual(snr_p10, 20.0,
-                             f"Pure noise gave SNR {snr_p10:.2f} dB — expected <= 20 dB")
+                             f"Pure noise gave p10-SNR {snr_p10:.2f} dB — expected <= 20 dB")
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +484,7 @@ class TestRejectTraceFormat(unittest.TestCase):
                       "occ=0.720 phase=0.850 trans=0.310 band=ISM-433 "
                       "scores(cw=0.210,fsk=0.780,psk=0.120,ook=0.340) -> fsk_like@0.650")
         self.assertFalse(self._is_compact_trace(full_trace))
+        self.assertIn("snr=", full_trace)
         self.assertIn("scores(", full_trace)
 
 
