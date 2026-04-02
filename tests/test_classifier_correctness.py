@@ -274,31 +274,15 @@ class TestBwGateDisabled(unittest.TestCase):
             f"(flatness={flat_20k:.4f})"
         )
 
-    def test_bw_gate_pass_unconditional(self):
-        """After CLF-02: bw_gate_pass is always True regardless of flatness.
-        Sentinel: re-enabling _bw_gate_pass() in production is a regression —
-        it would drop narrowband signals again (confirmed by
-        test_old_bw_gate_rejects_narrowband above)."""
-        cases = [
-            # narrowband OOK in a 2 MHz capture window at 250 kHz expected BW
-            (_spectral_flatness(_make_narrowband_ook(n=4096, bw_frac=0.125)),
-             2_048_000.0, 250_000.0, "narrowband-OOK-250kHz"),
-            # 20 kHz sensor in a 2 MHz window
-            (_spectral_flatness(_make_narrowband_ook(n=4096, bw_frac=0.01)),
-             2_048_000.0, 20_000.0, "narrowband-OOK-20kHz"),
-            # mid-flatness case
-            (0.5, 2_048_000.0, 1_000_000.0, "mid-flatness"),
-            # wideband noise-like case
-            (0.99, 2_048_000.0, 2_048_000.0, "wideband-noise"),
-        ]
-        for flat, sr, ebw, label in cases:
-            bw_gate_pass = True  # CLF-02: production always bypasses the gate
-            self.assertTrue(
-                bw_gate_pass,
-                f"bw_gate regression detected for {label}: "
-                f"bw_gate_pass={bw_gate_pass} (flatness={flat:.3f}) — "
-                "CLF-02 fix was reverted"
-            )
+    def test_bw_gate_is_disabled_contract(self):
+        # CLF-02 disables the BW gate unconditionally. There is no gate logic
+        # to test here. The regression surface is the line
+        # r.bw_gate_pass = true in classify_block() — if that line is removed
+        # or conditioned, the SNR-gate and power-range tests above will catch
+        # misbehaviour via reject rate changes. This placeholder preserves the
+        # named test slot so the CLF-02 audit item remains traceable in CI
+        # output.
+        pass
 
 
 # ---------------------------------------------------------------------------
