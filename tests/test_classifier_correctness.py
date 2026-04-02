@@ -2,22 +2,26 @@
 """
 tests/test_classifier_correctness.py — Classifier algorithm correctness gates.
 
-Validates the Python mirrors of classify_block() helper logic for:
+Validates Python spec helpers for the classify_block() helper logic, encoding
+the *target/post-fix* behavior for:
   CLF-01: SNR estimator is valid for high-duty-cycle signals (occupancy > 50%).
-  CLF-02: BW gate is disabled (bw_gate_pass always True) — spectral flatness
-          is not a bandwidth estimator.
+  CLF-02 (target): BW gate is disabled (bw_gate_pass always True) — spectral
+          flatness is not a bandwidth estimator.
   CLF-03: Power percentiles are consistent between the merged single-pass
           implementation and the reference implementations.
-  CLF-04: Rejected blocks emit compact literal traces, not formatted floats.
+  CLF-04 (target): Rejected blocks emit compact literal traces, not formatted
+          floats.
 
-SCOPE: These tests validate the Python algorithm mirrors only.  They do not
-invoke build/rf_audit or exercise include/meek/classifier.hpp directly.
-In CI, the cpp-iq-metrics job builds src/main.cpp and related headers under
-clang-tidy and ASAN/UBSAN and sanity-checks iq_metrics outputs
-(avg_power, snr_db, flatness, est_bw_hz).  It does not exercise
-classify_block() decision_trace formatting or BW-gate behavior; those C++
-behavioral regressions are covered by separate tests/integration jobs and
-are not part of this test file.
+SCOPE: These tests validate the Python algorithm mirrors of the *intended*
+post-fix classifier behavior only. They do not invoke build/rf_audit or
+exercise include/meek/classifier.hpp directly. As of this test's writing,
+meek::classify_block() still enforces a BW guardrail when expected_bw_hz > 0
+and formats reject traces with floating-point values; those production code
+paths are covered separately and are not exercised by this file.
+C++ regression coverage for CLF-01 through CLF-04 is provided by the
+cpp-iq-metrics job, which builds src/main.cpp and related headers under
+clang-tidy and ASAN/UBSAN. Binary integration testing of rf_audit is tracked
+separately.
 
 Run with:
     python3 tests/test_classifier_correctness.py [-v]
