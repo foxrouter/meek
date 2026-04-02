@@ -322,8 +322,12 @@ class TestSinglePassPercentiles(unittest.TestCase):
     """CLF-03: the merged percentile implementation must:
     (a) produce p50/p90 values numerically identical to the reference helpers,
     (b) produce SNR values consistent with the p10 noise floor (CLF-01),
-    (c) remain numerically consistent with the separate reference helpers when
-        the same input is evaluated through both paths.
+    (c) numerical equivalence between compute_snr_db + compute_power_percentiles
+        called sequentially and the merged single-pass path — a divergence flags
+        a regression in one of the implementations. Note: this test does not
+        guard against performance regressions (e.g. a reintroduced double
+        power-array build); that requires a separate benchmark or instrumented
+        mock.
 
     This test validates numerical equivalence in the Python mirror of the
     algorithm only; it does not assert internal single-pass behavior or detect
