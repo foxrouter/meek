@@ -613,12 +613,11 @@ class TestDemodLockMsSentinel(unittest.TestCase):
             # Verify the constant is documented somewhere in the comment block
             # near the field; if not, assert loudly so the test is not silently
             # vacuous.
-            cls.assertIn(
-                "-1",
-                content,
-                "sample_types.hpp: OOK not-applicable sentinel (-1) not found "
-                "near demod_lock_ms; update the comment or this test",
-            )
+            if "-1" not in content:
+                raise AssertionError(
+                    "sample_types.hpp: OOK not-applicable sentinel (-1) not found "
+                    "near demod_lock_ms; update the comment or this test"
+                )
 
     def test_default_sentinel_is_zero(self):
         """Default demod_lock_ms must be 0 (not locked / not recorded)."""
