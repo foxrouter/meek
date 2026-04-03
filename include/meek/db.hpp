@@ -53,7 +53,7 @@ class Database {
 
   /// Insert a classification example row.  Returns 0 on success, -1 on error.
   int insert_example(std::int64_t signal_id, std::int64_t method_id, float confidence,
-                     const std::string& notes);
+                     const std::string& notes, const std::string& result);
 
  private:
   explicit Database(sqlite3* db) : db_(db) {}
@@ -321,8 +321,8 @@ inline bool Database::prepare_statements() {
   insert_method_stmt_.reset(s);
 
   static constexpr const char* kInsertExample =
-      "INSERT INTO examples(signal_id, method_id, confidence, notes) "
-      "VALUES(?, ?, ?, ?)";
+      "INSERT INTO examples(signal_id, method_id, confidence, notes, result) "
+      "VALUES(?, ?, ?, ?, ?)";
   if (sqlite3_prepare_v2(db_, kInsertExample, -1, &s, nullptr) != SQLITE_OK) {
     std::cerr << "[DB] prepare insert_example: " << sqlite3_errmsg(db_) << "\n";
     return false;
@@ -378,13 +378,15 @@ inline std::int64_t Database::upsert_method(const std::string& name,
 }
 
 inline int Database::insert_example(std::int64_t signal_id, std::int64_t method_id,
-                                    float confidence, const std::string& notes) {
+                                    float confidence, const std::string& notes,
+                                    const std::string& result) {
   sqlite3_stmt* stmt = insert_example_stmt_.get();
   sqlite3_reset(stmt);
   sqlite3_bind_int64(stmt, 1, signal_id);
   sqlite3_bind_int64(stmt, 2, method_id);
   sqlite3_bind_double(stmt, 3, static_cast<double>(confidence));
   sqlite3_bind_text(stmt, 4, notes.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(stmt, 5, result.c_str(), -1, SQLITE_TRANSIENT);
   return (sqlite3_step(stmt) == SQLITE_DONE) ? 0 : -1;
 }
 

@@ -23,8 +23,26 @@ from typing import List, Optional
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _HEADER_PATH = _REPO_ROOT / "include" / "meek" / "band_profiles.hpp"
 
-# kBandSnrUseDefault sentinel from the C++ header.
-_BAND_SNR_USE_DEFAULT = -999.0
+# kBandSnrUseDefault sentinel – extracted from the C++ header at import time.
+_TOK_BAND_SNR_DEFAULT_DEF = re.compile(
+    r'kBandSnrUseDefault\s*=\s*([+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)'
+)
+
+
+def _extract_band_snr_default() -> float:
+    """Read kBandSnrUseDefault from band_profiles.hpp.
+
+    Raises FileNotFoundError if the header is absent so CI fails clearly."""
+    if not _HEADER_PATH.exists():
+        raise FileNotFoundError(f"band_profiles.hpp not found: {_HEADER_PATH}")
+    text = _HEADER_PATH.read_text()
+    m = _TOK_BAND_SNR_DEFAULT_DEF.search(text)
+    if m is None:
+        raise ValueError("kBandSnrUseDefault definition not found in band_profiles.hpp")
+    return float(m.group(1))
+
+
+_BAND_SNR_USE_DEFAULT: float = _extract_band_snr_default()
 
 # Regex helpers for parsing C++ entries.
 _TOK_STR = re.compile(r'"((?:[^"\\]|\\.)*)"')
