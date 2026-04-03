@@ -78,8 +78,9 @@ enum class DemodStatus : std::uint8_t {
 
 struct SampleBlock {
   std::vector<std::complex<float>> samples;
-  /// Nanoseconds since Unix epoch (system_clock); always positive;
-  /// INT64_MAX corresponds to year 2262.
+  /// Nanoseconds since Unix epoch (system_clock).
+  /// Clamped to >= 0 at capture point in main.cpp; a value of 0 indicates
+  /// an unset or pre-epoch system clock. INT64_MAX corresponds to year 2262.
   std::int64_t timestamp_ns{0};
   double center_freq_hz{0.0};
   double sample_rate_hz{0.0};
@@ -91,8 +92,9 @@ struct SampleBlock {
 
 struct ClassificationResult {
   // Input metadata
-  /// Nanoseconds since Unix epoch (system_clock); always positive;
-  /// INT64_MAX corresponds to year 2262.
+  /// Nanoseconds since Unix epoch (system_clock).
+  /// Clamped to >= 0 at capture point in main.cpp; a value of 0 indicates
+  /// an unset or pre-epoch system clock. INT64_MAX corresponds to year 2262.
   std::int64_t timestamp_ns{0};
   double center_freq_hz{0.0};
   double sample_rate_hz{0.0};

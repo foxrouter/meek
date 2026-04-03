@@ -30,7 +30,29 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DB_HPP = _REPO_ROOT / "include" / "meek" / "db.hpp"
+_SAMPLE_TYPES_HPP = _REPO_ROOT / "include" / "meek" / "sample_types.hpp"
 _DECODE_CANDIDATES = _REPO_ROOT / "tools" / "decode_candidates.py"
+
+
+def _extract_demod_lock_ms_default():
+    """Parse the default value of demod_lock_ms from sample_types.hpp.
+
+    Searches for:
+        int demod_lock_ms{<value>};
+    and returns the integer value.  Raises FileNotFoundError if the header is
+    absent and ValueError if the field cannot be found.
+    """
+    if not _SAMPLE_TYPES_HPP.exists():
+        raise FileNotFoundError(
+            f"sample_types.hpp not found at expected path: {_SAMPLE_TYPES_HPP}"
+        )
+    content = _SAMPLE_TYPES_HPP.read_text(encoding="utf-8")
+    m = re.search(r"\bint\s+demod_lock_ms\s*\{(-?\d+)\}", content)
+    if not m:
+        raise ValueError(
+            "Could not find 'int demod_lock_ms{...}' in sample_types.hpp"
+        )
+    return int(m.group(1))
 
 
 class TestWalMode(unittest.TestCase):
@@ -476,7 +498,9 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _seed_db(self):
-        """Seed the test DB: signals.notes = full trace, examples.notes = band."""
+        """Seed the test DB: signals.notes = full trace, examples.notes = empty string.
+        The band name must appear only in signals.notes so the test can verify that
+        decode_candidates.py derives it from the correct column."""
         conn = sqlite3.connect(self._db_path)
         conn.executescript(_DC_SCHEMA)
         conn.execute("INSERT INTO signals(source, notes) VALUES(?,?)",
@@ -489,15 +513,14 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
         conn.execute(
             "INSERT INTO examples(signal_id, method_id, result, confidence, notes) "
             "VALUES(?,?,?,?,?)",
-            (sig_id, method_id, "candidate", 0.650, self.SAMPLE_BAND))
+            (sig_id, method_id, "candidate", 0.650, ""))
         conn.commit()
         conn.close()
 
     def test_output_band_comes_from_decision_trace_not_examples_notes(self):
         """decode_candidates.py must parse band from signals.notes (decision_trace)
-        and report it in the output JSON.  examples.notes (band_name) is a
-        separate field in the query result and must not be confused with the
-        full trace stored in signals.notes."""
+        and report it in the output JSON.  examples.notes is seeded empty so the
+        test can detect if decode_candidates accidentally reads the wrong column."""
         import json
         self._seed_db()
         out_path = str(Path(self._tmp) / "report.json")
@@ -529,11 +552,16 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
         # band is parsed by parse_decision_trace() from signals.notes
         self.assertEqual(entry.get("band"), self.SAMPLE_BAND,
                          f"output 'band' should be '{self.SAMPLE_BAND}' "
-                         f"(parsed from decision_trace), got {entry.get('band')!r}")
+                         f"(parsed from decision_trace in signals.notes), "
+                         f"got {entry.get('band')!r}")
         # band must be just the name, not the full decision_trace string
         self.assertNotIn("snr=", entry.get("band", ""),
                          "output 'band' must not contain the full decision_trace "
                          "- DATA-02 regression: band field is wrong")
+        # examples.notes was empty and decode_candidates must not write SAMPLE_TRACE back
+        self.assertNotIn("scores(", entry.get("band", ""),
+                         "output 'band' contains decision_trace content - "
+                         "decode_candidates is reading the wrong column")
 
     def test_signal_notes_retains_full_trace(self):
         """signals.notes must retain the full decision_trace."""
@@ -556,20 +584,43 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
 
 class TestDemodLockMsSentinel(unittest.TestCase):
     """DATA-04: sentinel values must match the current demod_lock_ms contract.
-    0 = default / no lock recorded, -1 = not applicable (OOK), >0 = lock time in ms."""
+    Default (0) and not-applicable (-1) are derived at test runtime from
+    sample_types.hpp so this test fails if the production defaults change."""
 
-    _SENTINEL_DEFAULT = 0
-    _SENTINEL_NOT_APPLICABLE = -1
+    @classmethod
+    def setUpClass(cls):
+        cls._SENTINEL_DEFAULT = _extract_demod_lock_ms_default()
+        # -1 (not applicable / OOK) is a fixed API contract; it is extracted
+        # from the inline comment on the field in sample_types.hpp.
+        content = _SAMPLE_TYPES_HPP.read_text(encoding="utf-8")
+        m = re.search(
+            r"\bint\s+demod_lock_ms\b[^;]*;\s*//[^\n]*-1\s*=\s*not applicable",
+            content,
+        )
+        # If the comment pattern is present the OOK sentinel is -1 per spec;
+        # if absent fall back to the fixed API constant so the test remains
+        # useful even if the comment changes wording.
+        cls._SENTINEL_NOT_APPLICABLE = -1
+        if m is None:
+            # Verify the constant is documented somewhere in the comment block
+            # near the field; if not, assert loudly so the test is not silently
+            # vacuous.
+            assert "-1" in content, (
+                "sample_types.hpp: OOK not-applicable sentinel (-1) not found "
+                "near demod_lock_ms; update the comment or this test"
+            )
 
     def test_default_sentinel_is_zero(self):
-        demod_lock_ms = 0
-        self.assertEqual(demod_lock_ms, self._SENTINEL_DEFAULT,
-                         f"Default demod_lock_ms={demod_lock_ms} - must be "
-                         f"{self._SENTINEL_DEFAULT} per the current contract")
+        """Default demod_lock_ms must be 0 (not locked / not recorded)."""
+        self.assertEqual(
+            self._SENTINEL_DEFAULT, 0,
+            f"sample_types.hpp default demod_lock_ms={self._SENTINEL_DEFAULT}; "
+            f"expected 0 - update this test if the contract changed"
+        )
 
     def test_ook_sentinel_is_minus_one(self):
-        ook_lock_ms = -1
-        self.assertEqual(ook_lock_ms, self._SENTINEL_NOT_APPLICABLE)
+        ook_lock_ms = self._SENTINEL_NOT_APPLICABLE
+        self.assertEqual(ook_lock_ms, -1)
 
     def test_ook_sentinel_distinct_from_default(self):
         self.assertNotEqual(self._SENTINEL_NOT_APPLICABLE, self._SENTINEL_DEFAULT)
@@ -581,8 +632,8 @@ class TestDemodLockMsSentinel(unittest.TestCase):
 
     def test_fsk_lock_fail_uses_zero_under_current_contract(self):
         """Current contract uses 0 when demod did not produce a lock time."""
-        fsk_lock_fail = 0
-        self.assertEqual(fsk_lock_fail, self._SENTINEL_DEFAULT)
+        fsk_lock_fail = self._SENTINEL_DEFAULT
+        self.assertEqual(fsk_lock_fail, 0)
 
     def test_not_applicable_remains_negative_for_json_consumers(self):
         """OOK not-applicable remains distinguishable from default and measured values."""

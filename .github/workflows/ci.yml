@@ -16,6 +16,17 @@ on:
       - ".github/workflows/ci.yml"
   pull_request:
     branches: ["main", "master"]
+    paths:
+      - "src/**"
+      - "include/**"
+      - "tools/**"
+      - "tests/**"
+      - "ops/**"
+      - "CMakeLists.txt"
+      - "Dockerfile"
+      - "install.sh"
+      - "requirements.txt"
+      - ".github/workflows/ci.yml"
 
 # Default to read-only permissions for all jobs; individual jobs may widen
 # specific permissions as needed (e.g. docker job needs packages: write).

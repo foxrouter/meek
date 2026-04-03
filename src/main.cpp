@@ -227,7 +227,7 @@ static void handle_term(int) noexcept {
 // ---------------------------------------------------------------------------
 
 static void write_snapshot(const std::string& dir, std::span<const std::complex<float>> samples,
-                           double conf, std::uint64_t ts_ns, const std::string& band_name,
+                           double conf, std::int64_t ts_ns, const std::string& band_name,
                            std::atomic<std::uint64_t>& snap_errors) noexcept {
   try {
     std::filesystem::create_directories(dir);
@@ -393,7 +393,7 @@ struct SnapTask {
   std::vector<std::complex<float>> samples;
   std::string dir;
   double conf{0.0};
-  std::uint64_t ts_ns{0};
+  std::int64_t ts_ns{0};
   std::string band_name;  // embedded in filename; empty when no band matched
 };
 
@@ -438,9 +438,10 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
     }
 
     blk.samples.assign(buf.begin(), buf.begin() + n);
-    blk.timestamp_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                           std::chrono::system_clock::now().time_since_epoch())
-                           .count();
+    const auto raw_ts_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::system_clock::now().time_since_epoch())
+                               .count();
+    blk.timestamp_ns = (raw_ts_ns >= 0) ? raw_ts_ns : 0;
     blk.center_freq_hz = sdr.center_freq_hz();
     blk.sample_rate_hz = sdr.sample_rate_hz();
 
