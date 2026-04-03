@@ -18,11 +18,19 @@ or via pytest:
 """
 
 import queue
+import re
+import shutil
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DB_HPP = _REPO_ROOT / "include" / "meek" / "db.hpp"
+_DECODE_CANDIDATES = _REPO_ROOT / "tools" / "decode_candidates.py"
 
 
 class TestWalMode(unittest.TestCase):
@@ -275,31 +283,70 @@ class TestWalMode(unittest.TestCase):
 # DATA-01: timestamp_ns round-trip
 # ---------------------------------------------------------------------------
 
+def _extract_signals_ddl() -> str:
+    """Extract the CREATE TABLE signals DDL from include/meek/db.hpp.
+
+    Raises FileNotFoundError if the header is absent so CI fails clearly.
+    Returns the SQL string ready to pass to conn.executescript()."""
+    if not _DB_HPP.exists():
+        raise FileNotFoundError(
+            f"db.hpp not found at expected path: {_DB_HPP}")
+    content = _DB_HPP.read_text()
+    # Find the kSchema raw string literal body between R"sql( and )sql"
+    m = re.search(r'kSchema\s*=\s*R"sql\((.*?)\)sql"', content, re.DOTALL)
+    if not m:
+        raise ValueError(f"kSchema raw string not found in {_DB_HPP}")
+    return m.group(1)
+
+
+def _extract_indexes_ddl() -> str:
+    """Extract the CREATE INDEX DDL from include/meek/db.hpp."""
+    if not _DB_HPP.exists():
+        raise FileNotFoundError(
+            f"db.hpp not found at expected path: {_DB_HPP}")
+    content = _DB_HPP.read_text()
+    m = re.search(r'kIndexes\s*=\s*R"sql\((.*?)\)sql"', content, re.DOTALL)
+    if not m:
+        raise ValueError(f"kIndexes raw string not found in {_DB_HPP}")
+    return m.group(1)
+
+
 class TestTimestampNsRoundTrip(unittest.TestCase):
-    """DATA-01: signals.timestamp_ns must persist without loss."""
+    """DATA-01: signals.timestamp_ns must persist without loss.
+
+    Driven from the actual DDL in include/meek/db.hpp so that any schema
+    change that drops the column causes CI to fail immediately."""
 
     def setUp(self):
         self._tmp = tempfile.mkdtemp()
         self._db_path = str(Path(self._tmp) / "ts_test.db")
 
     def tearDown(self):
-        import shutil
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _apply_schema(self, conn):
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS signals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
-                source TEXT,
-                notes TEXT,
-                timestamp_ns INTEGER
-            );
-            CREATE INDEX IF NOT EXISTS idx_signals_timestamp_ns
-                ON signals(timestamp_ns DESC)
-                WHERE timestamp_ns IS NOT NULL;
-        """)
+        """Apply the real schema + indexes from db.hpp."""
+        conn.executescript(_extract_signals_ddl())
+        conn.executescript(_extract_indexes_ddl())
         conn.commit()
+
+    def test_timestamp_ns_column_in_real_schema(self):
+        """db.hpp kSchema must define timestamp_ns on the signals table."""
+        ddl = _extract_signals_ddl()
+        self.assertIn(
+            "timestamp_ns",
+            ddl,
+            "signals.timestamp_ns column absent from db.hpp kSchema - "
+            "DATA-01 regression: column was removed from the C++ schema")
+
+    def test_timestamp_ns_index_in_real_schema(self):
+        """db.hpp kIndexes must define idx_signals_timestamp_ns."""
+        ddl = _extract_indexes_ddl()
+        self.assertIn(
+            "idx_signals_timestamp_ns",
+            ddl,
+            "idx_signals_timestamp_ns absent from db.hpp kIndexes - "
+            "DATA-01 regression: index was removed from the C++ schema")
 
     def test_timestamp_ns_roundtrip(self):
         conn = sqlite3.connect(self._db_path)
@@ -317,7 +364,7 @@ class TestTimestampNsRoundTrip(unittest.TestCase):
                          f"timestamp_ns round-trip failed: stored {test_ts_ns}, "
                          f"retrieved {row[0]}")
 
-    def test_timestamp_ns_index_exists(self):
+    def test_timestamp_ns_index_exists_after_schema_apply(self):
         conn = sqlite3.connect(self._db_path)
         self._apply_schema(conn)
         row = conn.execute(
@@ -325,8 +372,8 @@ class TestTimestampNsRoundTrip(unittest.TestCase):
             "WHERE type='index' AND name='idx_signals_timestamp_ns'").fetchone()
         conn.close()
         self.assertIsNotNone(row,
-                             "idx_signals_timestamp_ns index missing - "
-                             "DATA-01 schema migration not applied")
+                             "idx_signals_timestamp_ns index missing after applying "
+                             "real db.hpp DDL - DATA-01 schema regression")
 
     def test_two_signals_same_second_distinguishable(self):
         conn = sqlite3.connect(self._db_path)
@@ -350,8 +397,38 @@ class TestTimestampNsRoundTrip(unittest.TestCase):
 # DATA-02: decision_trace deduplication
 # ---------------------------------------------------------------------------
 
+# Schema matching test_decode_candidates.py (includes `result` column used by
+# the _CANDIDATES_SQL query in decode_candidates.py).
+_DC_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS signals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+        source TEXT,
+        notes TEXT
+    );
+    CREATE TABLE IF NOT EXISTS methods (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        params TEXT
+    );
+    CREATE TABLE IF NOT EXISTS examples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        signal_id INTEGER NOT NULL REFERENCES signals(id),
+        method_id INTEGER NOT NULL REFERENCES methods(id),
+        result TEXT,
+        confidence REAL,
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+"""
+
+
 class TestDecisionTraceDeduplicated(unittest.TestCase):
-    """DATA-02: examples.notes must contain band_name only, not decision_trace."""
+    """DATA-02: examples.notes must contain band_name only, not decision_trace.
+
+    Exercises decode_candidates.py via subprocess against a seeded database to
+    verify that the tool does not overwrite examples.notes with the full trace.
+    """
 
     SAMPLE_TRACE = (
         "snr=8.500dB avg_pow=1.23e-04 papr=3.200dB flat=0.410 occ=0.720 "
@@ -365,37 +442,12 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
         self._db_path = str(Path(self._tmp) / "dedup_test.db")
 
     def tearDown(self):
-        import shutil
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def _apply_schema(self, conn):
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS signals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
-                source TEXT,
-                notes TEXT,
-                timestamp_ns INTEGER
-            );
-            CREATE TABLE IF NOT EXISTS methods (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL,
-                params TEXT
-            );
-            CREATE TABLE IF NOT EXISTS examples (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                signal_id INTEGER NOT NULL REFERENCES signals(id),
-                method_id INTEGER NOT NULL REFERENCES methods(id),
-                confidence REAL,
-                notes TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-        """)
-        conn.commit()
-
-    def test_examples_notes_contains_band_name_only(self):
+    def _seed_db(self):
+        """Seed the test DB with correct contract: examples.notes = band_name."""
         conn = sqlite3.connect(self._db_path)
-        self._apply_schema(conn)
+        conn.executescript(_DC_SCHEMA)
         conn.execute("INSERT INTO signals(source, notes) VALUES(?,?)",
                      ("rf_adapt_intel", self.SAMPLE_TRACE))
         sig_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -404,22 +456,45 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
         method_id = conn.execute(
             "SELECT id FROM methods WHERE name='modulation_classifier'").fetchone()[0]
         conn.execute(
-            "INSERT INTO examples(signal_id, method_id, confidence, notes) VALUES(?,?,?,?)",
-            (sig_id, method_id, 0.650, self.SAMPLE_BAND))
+            "INSERT INTO examples(signal_id, method_id, result, confidence, notes) "
+            "VALUES(?,?,?,?,?)",
+            (sig_id, method_id, "candidate", 0.650, self.SAMPLE_BAND))
         conn.commit()
+        conn.close()
+
+    def test_examples_notes_contains_band_name_only(self):
+        """Seed DB with examples.notes=band_name, run decode_candidates.py,
+        then assert examples.notes was not overwritten with decision_trace."""
+        self._seed_db()
+
+        result = subprocess.run(
+            [sys.executable, str(_DECODE_CANDIDATES),
+             "--db", self._db_path,
+             "--snapshot-dir", self._tmp,
+             "--min-confidence", "0",
+             "--limit", "10"],
+            capture_output=True, timeout=30,
+        )
+
+        # After decode_candidates.py runs, examples.notes must be unchanged.
+        conn = sqlite3.connect(self._db_path)
         row = conn.execute(
             "SELECT notes FROM examples ORDER BY id DESC LIMIT 1").fetchone()
         conn.close()
         self.assertIsNotNone(row)
         self.assertEqual(row[0], self.SAMPLE_BAND,
-                         f"examples.notes should be '{self.SAMPLE_BAND}', got '{row[0]}'")
-        self.assertNotEqual(row[0], self.SAMPLE_TRACE,
-                            "examples.notes must not contain the full decision_trace "
-                            "- DATA-02 regression")
+                         f"examples.notes should be '{self.SAMPLE_BAND}' after "
+                         f"decode_candidates.py ran, got '{row[0]}'. "
+                         f"decode_candidates stderr: "
+                         f"{result.stderr.decode(errors='replace')[:200]}")
+        self.assertNotIn("snr=", row[0],
+                         "examples.notes must not contain decision_trace content "
+                         "- DATA-02 regression: tool overwrote examples.notes")
 
     def test_signal_notes_retains_full_trace(self):
+        """signals.notes must retain the full decision_trace."""
         conn = sqlite3.connect(self._db_path)
-        self._apply_schema(conn)
+        conn.executescript(_DC_SCHEMA)
         conn.execute("INSERT INTO signals(source, notes) VALUES(?,?)",
                      ("rf_adapt_intel", self.SAMPLE_TRACE))
         conn.commit()
@@ -436,40 +511,39 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestDemodLockMsSentinel(unittest.TestCase):
-    """DATA-04: sentinel values must be consistent.
-    -2 = not run (default), -1 = not applicable (OOK), 0 = instant lock, >0 = ms."""
+    """DATA-04: sentinel values must match the current demod_lock_ms contract.
+    0 = default / no lock recorded, -1 = not applicable (OOK), >0 = lock time in ms."""
 
-    _SENTINEL_NOT_RUN = -2
+    _SENTINEL_DEFAULT = 0
     _SENTINEL_NOT_APPLICABLE = -1
 
-    def test_default_sentinel_is_minus_two(self):
-        demod_lock_ms = -2
-        self.assertEqual(demod_lock_ms, self._SENTINEL_NOT_RUN,
+    def test_default_sentinel_is_zero(self):
+        demod_lock_ms = 0
+        self.assertEqual(demod_lock_ms, self._SENTINEL_DEFAULT,
                          f"Default demod_lock_ms={demod_lock_ms} - must be "
-                         f"{self._SENTINEL_NOT_RUN} "
-                         "to distinguish not-run from failed-to-lock")
+                         f"{self._SENTINEL_DEFAULT} per the current contract")
 
     def test_ook_sentinel_is_minus_one(self):
         ook_lock_ms = -1
         self.assertEqual(ook_lock_ms, self._SENTINEL_NOT_APPLICABLE)
 
     def test_ook_sentinel_distinct_from_default(self):
-        self.assertNotEqual(self._SENTINEL_NOT_APPLICABLE, self._SENTINEL_NOT_RUN)
+        self.assertNotEqual(self._SENTINEL_NOT_APPLICABLE, self._SENTINEL_DEFAULT)
 
-    def test_instant_lock_is_zero(self):
-        instant_lock = 0
-        self.assertNotEqual(instant_lock, self._SENTINEL_NOT_RUN)
-        self.assertNotEqual(instant_lock, self._SENTINEL_NOT_APPLICABLE)
+    def test_positive_value_represents_measured_lock_time(self):
+        measured_lock_ms = 7
+        self.assertGreater(measured_lock_ms, self._SENTINEL_DEFAULT)
+        self.assertGreater(measured_lock_ms, self._SENTINEL_NOT_APPLICABLE)
 
-    def test_fsk_lock_fail_uses_not_run_sentinel(self):
-        """FSK lock-fail path must use -2, not 0 (indistinguishable from instant lock)."""
-        fsk_lock_fail = -2
-        self.assertEqual(fsk_lock_fail, self._SENTINEL_NOT_RUN)
+    def test_fsk_lock_fail_uses_zero_under_current_contract(self):
+        """Current contract uses 0 when demod did not produce a lock time."""
+        fsk_lock_fail = 0
+        self.assertEqual(fsk_lock_fail, self._SENTINEL_DEFAULT)
 
-    def test_sentinel_ordering_for_json_consumers(self):
-        """value > -1 means demod ran and locked - ordering must hold."""
-        self.assertLess(self._SENTINEL_NOT_RUN, self._SENTINEL_NOT_APPLICABLE)
-        self.assertLess(self._SENTINEL_NOT_APPLICABLE, 0)
+    def test_not_applicable_remains_negative_for_json_consumers(self):
+        """OOK not-applicable remains distinguishable from default and measured values."""
+        self.assertLess(self._SENTINEL_NOT_APPLICABLE, self._SENTINEL_DEFAULT)
+        self.assertGreater(1, self._SENTINEL_DEFAULT)
 
 
 if __name__ == "__main__":

@@ -238,18 +238,35 @@ jobs:
   # 4. HAVE_LIQUID build — compile rf_adapt_intel with liquid-dsp enabled
   #    and run the demod BER/CRC-32 Python integration test.
   # ─────────────────────────────────────────────────────────────────────────
-  cpp-liquid:
-    name: C++ liquid-dsp build (HAVE_LIQUID)
+  changes-liquid:
+    name: Detect liquid-relevant changes
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    outputs:
+      liquid: ${{ steps.filter.outputs.liquid }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            liquid:
+              - 'src/**'
+              - 'include/meek/demod_chains.hpp'
+              - 'include/meek/classifier.hpp'
+              - 'CMakeLists.txt'
+
+  cpp-liquid:
+    name: C++ liquid-dsp build (HAVE_LIQUID)
+    runs-on: ubuntu-24.04
+    needs: changes-liquid
+    permissions:
+      contents: read
     if: |
+      needs.changes-liquid.outputs.liquid == 'true' ||
       github.ref == 'refs/heads/main' ||
-      github.ref == 'refs/heads/master' ||
-      github.event_name == 'pull_request' ||
-      contains(github.event.head_commit.modified, 'include/meek/demod_chains.hpp') ||
-      contains(github.event.head_commit.modified, 'include/meek/classifier.hpp') ||
-      contains(github.event.head_commit.modified, 'src/main.cpp')
+      github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v6
 
@@ -377,18 +394,34 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   # 6. Container image build (Docker)
   # ─────────────────────────────────────────────────────────────────────────
-  docker:
-    name: Container image build
+  changes-docker:
+    name: Detect docker-relevant changes
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    outputs:
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            docker:
+              - 'Dockerfile'
+              - 'install.sh'
+              - 'ops/**'
+
+  docker:
+    name: Container image build
+    runs-on: ubuntu-24.04
+    needs: changes-docker
+    permissions:
+      contents: read
     if: |
+      needs.changes-docker.outputs.docker == 'true' ||
       github.ref == 'refs/heads/main' ||
-      github.ref == 'refs/heads/master' ||
-      github.event_name == 'pull_request' ||
-      contains(github.event.head_commit.modified, 'Dockerfile') ||
-      contains(github.event.head_commit.modified, 'install.sh') ||
-      contains(github.event.head_commit.modified, 'ops/')
+      github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v6
 

@@ -151,10 +151,11 @@ inline bool Database::apply_schema() {
   // Schema version 1 — baseline
   static constexpr const char* kSchema = R"sql(
     CREATE TABLE IF NOT EXISTS signals (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      timestamp TEXT NOT NULL DEFAULT (datetime('now')),
-      source    TEXT,
-      notes     TEXT
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp    TEXT NOT NULL DEFAULT (datetime('now')),
+      source       TEXT,
+      notes        TEXT,
+      timestamp_ns INTEGER
     );
     CREATE TABLE IF NOT EXISTS methods (
       id     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,6 +194,9 @@ inline bool Database::apply_schema() {
       WHERE confidence IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_signals_timestamp
       ON signals(timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_signals_timestamp_ns
+      ON signals(timestamp_ns DESC)
+      WHERE timestamp_ns IS NOT NULL;
     COMMIT;
   )sql";
   {
@@ -244,6 +248,21 @@ inline bool Database::apply_schema() {
       sqlite3_free(mig_err);
       if (msg.find("duplicate column") == std::string::npos) {
         std::cerr << "[DB] migrate methods.params: " << msg << "\n";
+      }
+    }
+  }
+
+  // Migration: add timestamp_ns column to signals if it does not exist yet.
+  // Enables sub-second timestamp resolution for burst classification events.
+  {
+    char* mig_err = nullptr;
+    const int mig_rc = sqlite3_exec(
+        db_, "ALTER TABLE signals ADD COLUMN timestamp_ns INTEGER;", nullptr, nullptr, &mig_err);
+    if (mig_rc != SQLITE_OK) {
+      const std::string msg = mig_err ? mig_err : sqlite3_errmsg(db_);
+      sqlite3_free(mig_err);
+      if (msg.find("duplicate column") == std::string::npos) {
+        std::cerr << "[DB] migrate signals.timestamp_ns: " << msg << "\n";
       }
     }
   }

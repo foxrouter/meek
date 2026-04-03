@@ -13,14 +13,25 @@ Run with:
 Requires: no external dependencies
 """
 
+import re
 import sys
 import unittest
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_REPO_ROOT / "tests"))
+_HEADER_PATH = _REPO_ROOT / "include" / "meek" / "band_profiles.hpp"
+
+# kBandSnrUseDefault sentinel from the C++ header.
+_BAND_SNR_USE_DEFAULT = -999.0
+
+# Regex helpers for parsing C++ entries.
+_TOK_STR = re.compile(r'"((?:[^"\\]|\\.)*)"')
+_TOK_MODCLASS = re.compile(r'ModClass::(\w+)')
+_TOK_SNR_DEFAULT = re.compile(r'kBandSnrUseDefault')
+_TOK_FLOAT = re.compile(r'([+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)')
 
 
 @dataclass
@@ -36,101 +47,133 @@ class BandProfile:
     notes: str
 
 
-_BAND_SNR_USE_DEFAULT = -999.0
+def _parse_entry(entry_text: str) -> BandProfile:
+    """Parse one brace-delimited kUkBands entry into a BandProfile."""
+    pos = 0
+    strings: List[str] = []
+    floats: List[float] = []
+    modclass: Optional[str] = None
 
-# Mirror of kUkBands - must match include/meek/band_profiles.hpp exactly.
-kUkBands: List[BandProfile] = [
-    BandProfile("ADS-B", "ADS-B 1090 MHz Mode-S transponders (PPM)",
-                1090e6, 2e6, 1e6, "UNKNOWN", 3.0, 0.0,
-                "PPM modulation - not classifiable by heuristic classifier. "
-                "Capture and decode externally with dump1090 or readsb."),
-    BandProfile("VDL2", "VHF Data Link Mode 2 (136.9 MHz)",
-                136.9e6, 0.5e6, 25e3, "PSK_QAM_LIKE", 2.0, 0.15, ""),
-    BandProfile("ACARS", "Aircraft Communications Addressing and Reporting System",
-                131.725e6, 0.3e6, 8e3, "OOK_AM_LIKE", 1.0, 0.15, ""),
-    BandProfile("AIS-A", "AIS channel A (161.975 MHz)",
-                161.975e6, 0.05e6, 16e3, "FSK_LIKE", 1.0, 0.20, ""),
-    BandProfile("AIS-B", "AIS channel B (162.025 MHz)",
-                162.025e6, 0.05e6, 16e3, "FSK_LIKE", 1.0, 0.20, ""),
-    BandProfile("POCSAG-153", "POCSAG paging (153 MHz band)",
-                153.35e6, 2.0e6, 12.5e3, "FSK_LIKE", 0.0, 0.18, ""),
-    BandProfile("FLEX-931", "FLEX high-speed paging (931 MHz)",
-                931.9375e6, 2.0e6, 15e3, "FSK_LIKE", 1.0, 0.15, ""),
-    BandProfile("RADIOSONDE", "Meteorological radiosonde (400-406 MHz)",
-                402.5e6, 5.0e6, 100e3, "FSK_LIKE", 2.0, 0.18, ""),
-    BandProfile("NOAA-APT", "NOAA weather satellite APT (137.5 MHz)",
-                137.5e6, 0.2e6, 34e3, "FSK_LIKE", 1.0, 0.15, ""),
-    BandProfile("ISM-433", "ISM 433 MHz band (OOK/ASK devices)",
-                433.92e6, 2.0e6, 250e3, "OOK_AM_LIKE", 0.0, 0.10, ""),
-    BandProfile("LORA-868", "LoRa IoT (868 MHz EU band)",
-                868.1e6, 2.0e6, 500e3, "FSK_LIKE", 1.0, 0.15, ""),
-    BandProfile("SMETS2", "Smart meter SMETS2 (868.3 MHz)",
-                868.3e6, 0.5e6, 200e3, "FSK_LIKE", 1.0, 0.12, ""),
-    BandProfile("ZWAVE-868", "Z-Wave home automation (868.42 MHz)",
-                868.42e6, 0.1e6, 100e3, "FSK_LIKE", 1.0, 0.12, ""),
-    BandProfile("TPMS-433", "Tyre Pressure Monitoring System (433 MHz)",
-                433.92e6, 0.5e6, 100e3, "FSK_LIKE", 0.0, 0.12, ""),
-    BandProfile("DAB-12B", "DAB Block 12B - UK National / BBC (218.640 MHz)",
-                218.64e6, 0.9e6, 1.5e6, "PSK_QAM_LIKE", 3.0, 0.18, ""),
-    BandProfile("DAB-11D", "DAB Block 11D - UK Commercial (222.064 MHz)",
-                222.064e6, 0.9e6, 1.5e6, "PSK_QAM_LIKE", 3.0, 0.18, ""),
-    BandProfile("TETRA", "TETRA public safety radio (380-430 MHz)",
-                392.0e6, 20.0e6, 25e3, "PSK_QAM_LIKE", 2.0, 0.20, ""),
-    BandProfile("DMR", "DMR digital voice (446 MHz PMR446)",
-                446.0e6, 10.0e6, 12.5e3, "FSK_LIKE", 1.0, 0.15, ""),
-    BandProfile("GPS-L1", "GPS L1 C/A (1575.42 MHz)",
-                1575.42e6, 5e6, 2e6, "PSK_QAM_LIKE", -5.0, 0.10, ""),
-    BandProfile("APRS", "APRS 2m packet radio (144.800 MHz)",
-                144.8e6, 0.1e6, 16e3, "FSK_LIKE", _BAND_SNR_USE_DEFAULT, 0.18, ""),
-    BandProfile("MARINE-CH16", "Marine VHF channel 16 (156.800 MHz)",
-                156.8e6, 0.025e6, 16e3, "UNKNOWN", _BAND_SNR_USE_DEFAULT, 0.0, ""),
-    BandProfile("MARINE-CH70", "Marine VHF DSC channel 70 (156.525 MHz)",
-                156.525e6, 0.025e6, 16e3, "FSK_LIKE", _BAND_SNR_USE_DEFAULT, 0.15, ""),
-    BandProfile("METEOR-LRPT", "Meteor-M LRPT satellite (137.1 MHz)",
-                137.1e6, 0.15e6, 120e3, "PSK_QAM_LIKE", 3.0, 0.15, ""),
-    BandProfile("ELT-406", "Emergency Locator Transmitter 406 MHz",
-                406.028e6, 0.1e6, 12e3, "FSK_LIKE", _BAND_SNR_USE_DEFAULT, 0.12, ""),
-    BandProfile("SIGFOX-868", "Sigfox IoT network (868.130 MHz)",
-                868.13e6, 0.1e6, 200e3, "OOK_AM_LIKE", _BAND_SNR_USE_DEFAULT, 0.12, ""),
-    BandProfile("WMBUS-169", "Wireless M-Bus 169 MHz",
-                169.406e6, 0.1e6, 12.5e3, "FSK_LIKE", _BAND_SNR_USE_DEFAULT, 0.13, ""),
-    BandProfile("ZIGBEE-868", "ZigBee 868 MHz (EU channel 0)",
-                868.3e6, 0.05e6, 600e3, "PSK_QAM_LIKE", _BAND_SNR_USE_DEFAULT, 0.12, ""),
-    BandProfile("DECT", "DECT cordless phones (1881.792 MHz)",
-                1881.792e6, 20.0e6, 1.728e6, "FSK_LIKE", _BAND_SNR_USE_DEFAULT, 0.15, ""),
-    BandProfile("PMR446", "PMR446 licence-free radio (446.006 MHz)",
-                446.006e6, 0.5e6, 12.5e3, "FSK_LIKE", _BAND_SNR_USE_DEFAULT, 0.15, ""),
-    BandProfile("ACARS-VHF", "ACARS VHF aviation data (136.9 MHz)",
-                136.9e6, 0.05e6, 8e3, "OOK_AM_LIKE", _BAND_SNR_USE_DEFAULT, 0.15, ""),
-    BandProfile("ISM-169", "ISM 169 MHz sub-GHz IoT",
-                169.406e6, 0.05e6, 12.5e3, "FSK_LIKE", _BAND_SNR_USE_DEFAULT, 0.12, ""),
-    BandProfile("IRIDIUM", "Iridium LEO satellite (1621.250 MHz)",
-                1621.25e6, 5.0e6, 100e3, "PSK_QAM_LIKE", 3.0, 0.15, ""),
-    BandProfile("INMARSAT-AERO", "Inmarsat Aero L-band (1545.000 MHz)",
-                1545.0e6, 15.0e6, 500e3, "PSK_QAM_LIKE", 3.0, 0.13, ""),
-    BandProfile("CNI-UHF", "Combat Net Radio UHF (225-400 MHz)",
-                312.5e6, 87.5e6, 25e3, "FSK_LIKE", _BAND_SNR_USE_DEFAULT, 0.10, ""),
-    BandProfile("GSM-R-876", "Network Rail GSM-R uplink (876 MHz)",
-                876.0e6, 12e6, 200e3, "FSK_LIKE", 2.0, 0.15, ""),
-    BandProfile("AIRBAND-VHF", "VHF airband AM voice (118-136 MHz)",
-                127.0e6, 9e6, 8e3, "OOK_AM_LIKE", 1.0, 0.12, ""),
-    BandProfile("VOLMET", "London VOLMET continuous weather broadcast",
-                126.6e6, 0.05e6, 8e3, "OOK_AM_LIKE", _BAND_SNR_USE_DEFAULT, 0.10, ""),
-    BandProfile("ACARS-129", "ACARS secondary frequency B (129.125 MHz)",
-                129.125e6, 0.1e6, 8e3, "OOK_AM_LIKE", 1.0, 0.15, ""),
-    BandProfile("ACARS-130", "ACARS secondary frequency C (130.025 MHz)",
-                130.025e6, 0.1e6, 8e3, "OOK_AM_LIKE", 1.0, 0.15, ""),
-]
+    while pos < len(entry_text):
+        m = _TOK_STR.match(entry_text, pos)
+        if m:
+            strings.append(m.group(1))
+            pos = m.end()
+            continue
+        m = _TOK_MODCLASS.match(entry_text, pos)
+        if m:
+            modclass = m.group(1)
+            pos = m.end()
+            continue
+        m = _TOK_SNR_DEFAULT.match(entry_text, pos)
+        if m:
+            floats.append(_BAND_SNR_USE_DEFAULT)
+            pos = m.end()
+            continue
+        c = entry_text[pos]
+        if c.isdigit() or (c in '+-' and pos + 1 < len(entry_text)
+                           and entry_text[pos + 1].isdigit()):
+            m = _TOK_FLOAT.match(entry_text, pos)
+            if m:
+                floats.append(float(m.group(1)))
+                pos = m.end()
+                continue
+        pos += 1
+
+    if len(strings) < 2:
+        raise ValueError(
+            f"Entry has fewer than 2 string literals: {entry_text[:80]!r}")
+    if len(floats) < 5:
+        raise ValueError(
+            f"Entry has fewer than 5 numeric values: {entry_text[:80]!r}")
+    if modclass is None:
+        raise ValueError(
+            f"No ModClass found in entry: {entry_text[:80]!r}")
+
+    # C++ adjacent string literal concatenation: join without extra space.
+    notes = ''.join(strings[2:]) if len(strings) > 2 else ''
+
+    return BandProfile(
+        name=strings[0],
+        description=strings[1],
+        center_hz=floats[0],
+        tolerance_hz=floats[1],
+        expected_bw_hz=floats[2],
+        expected_mod=modclass,
+        snr_min_db=floats[3],
+        prior_boost=floats[4],
+        notes=notes,
+    )
+
+
+def _load_kuk_bands() -> List[BandProfile]:
+    """Parse kUkBands from include/meek/band_profiles.hpp at test runtime.
+
+    Raises FileNotFoundError if the header is absent so CI fails clearly."""
+    if not _HEADER_PATH.exists():
+        raise FileNotFoundError(
+            f"band_profiles.hpp not found at expected path: {_HEADER_PATH}")
+
+    content = _HEADER_PATH.read_text()
+    m = re.search(r'kUkBands\s*=\s*\{\{(.*?)\}\};', content, re.DOTALL)
+    if not m:
+        raise ValueError(
+            f"kUkBands constexpr array not found in {_HEADER_PATH}")
+    array_body = m.group(1)
+
+    # Extract each top-level {…} entry via brace matching; string literals
+    # are tracked to avoid counting braces that appear inside them.
+    entries: List[BandProfile] = []
+    j = 0
+    depth = 0
+    start = -1
+    in_str = False
+    while j < len(array_body):
+        c = array_body[j]
+        if in_str:
+            if c == '\\':
+                j += 2          # skip escape sequence
+                continue
+            if c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == '{':
+                if depth == 0:
+                    start = j
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    entries.append(_parse_entry(array_body[start + 1:j]))
+                    start = -1
+        j += 1
+
+    if not entries:
+        raise ValueError(
+            f"No BandProfile entries extracted from {_HEADER_PATH}")
+    return entries
+
+
+# Load once at module import time; failures here abort the whole test run.
+kUkBands: List[BandProfile] = _load_kuk_bands()
 
 
 def find_band(center_hz: float) -> Optional[BandProfile]:
-    """Python mirror of meek::find_band() - O(N) closest-within-tolerance."""
+    """Python mirror of meek::find_band() - O(N) closest-within-tolerance.
+
+    Tie-break: prefer narrower tolerance_hz so specific profiles beat wide ones
+    at shared centre frequencies."""
     best: Optional[BandProfile] = None
     best_dist = -1.0
     for bp in kUkBands:
         dist = abs(center_hz - bp.center_hz)
         if dist <= bp.tolerance_hz:
-            if best is None or dist < best_dist:
+            if (best is None
+                    or dist < best_dist
+                    or (dist == best_dist
+                        and bp.tolerance_hz < best.tolerance_hz)):
                 best = bp
                 best_dist = dist
     return best
@@ -166,20 +209,49 @@ class TestBandReachability(unittest.TestCase):
                 self.fail(
                     f"Profile '{bp.name}' shares center_hz={bp.center_hz/1e6:.3f} MHz "
                     f"and tolerance_hz={bp.tolerance_hz/1e3:.0f} kHz with "
-                    f"'{seen[key]}' - '{bp.name}' is permanently unreachable via find_band()")
+                    f"'{seen[key]}' - '{bp.name}' is permanently unreachable "
+                    f"via find_band()")
             seen[key] = bp.name
 
-    def test_ism_433_reachable_at_centre(self):
-        bp = find_band(433.92e6)
+    def test_narrower_tolerance_wins_on_same_centre(self):
+        """When two profiles share center_hz, find_band must prefer the one
+        with narrower tolerance at exact centre - otherwise the narrower
+        profile is permanently unreachable at that frequency."""
+        groups = defaultdict(list)
+        for bp in kUkBands:
+            groups[bp.center_hz].append(bp)
+        shared = {hz: profiles for hz, profiles in groups.items()
+                  if len(profiles) > 1}
+        for hz, profiles in shared.items():
+            narrowest = min(profiles, key=lambda b: b.tolerance_hz)
+            result = find_band(hz)
+            self.assertIsNotNone(result,
+                                 f"find_band returned None at {hz/1e6:.3f} MHz")
+            self.assertEqual(result.name, narrowest.name,
+                             f"At {hz/1e6:.3f} MHz find_band returned '{result.name}' "
+                             f"but narrowest-tolerance profile is '{narrowest.name}' "
+                             f"({narrowest.tolerance_hz/1e3:.0f} kHz) - update "
+                             f"find_band() tie-break to prefer narrower tolerance")
+
+    def test_ism_433_reachable_outside_tpms_range(self):
+        """ISM-433 must be findable at a freq within its 2 MHz window
+        but outside TPMS-433's narrower 500 kHz window."""
+        # 433.92 + 600 kHz: within ISM-433 (±2 MHz) but outside TPMS-433 (±500 kHz)
+        bp = find_band(433.92e6 + 600e3)
         self.assertIsNotNone(bp)
         self.assertEqual(bp.name, "ISM-433",
-                         f"Expected ISM-433 at 433.92 MHz, got {bp.name if bp else 'None'}")
+                         f"Expected ISM-433 at 434.52 MHz, got "
+                         f"{bp.name if bp else 'None'}")
 
-    def test_smets2_reachable_at_centre(self):
-        bp = find_band(868.3e6)
+    def test_smets2_reachable_outside_zigbee_range(self):
+        """SMETS2 must be findable at a freq within its 500 kHz window
+        but outside ZIGBEE-868's narrower 50 kHz window."""
+        # 868.3 - 60 kHz: within SMETS2 (±500 kHz) but outside ZIGBEE-868 (±50 kHz)
+        bp = find_band(868.3e6 - 60e3)
         self.assertIsNotNone(bp)
         self.assertEqual(bp.name, "SMETS2",
-                         f"Expected SMETS2 at 868.3 MHz, got {bp.name if bp else 'None'}")
+                         f"Expected SMETS2 at 868.24 MHz, got "
+                         f"{bp.name if bp else 'None'}")
 
 
 class TestDabTolerance(unittest.TestCase):
@@ -198,8 +270,8 @@ class TestDabTolerance(unittest.TestCase):
             bp = find_band(freq_hz)
             if bp is not None:
                 self.assertFalse(bp.name.startswith("DAB"),
-                                 f"DAB profile '{bp.name}' incorrectly matched airband at "
-                                 f"{freq_hz/1e6:.1f} MHz - tolerance too wide")
+                                 f"DAB profile '{bp.name}' incorrectly matched "
+                                 f"airband at {freq_hz/1e6:.1f} MHz - tolerance too wide")
 
     def test_dab_does_not_match_vdl2(self):
         bp = find_band(136.9e6)
@@ -220,14 +292,16 @@ class TestAdsbModClass(unittest.TestCase):
         adsb = next((b for b in kUkBands if b.name == "ADS-B"), None)
         self.assertIsNotNone(adsb, "ADS-B profile missing from kUkBands")
         self.assertEqual(adsb.expected_mod, "UNKNOWN",
-                         f"ADS-B expected_mod is '{adsb.expected_mod}' - must be 'UNKNOWN' "
+                         f"ADS-B expected_mod is '{adsb.expected_mod}' "
+                         "- must be 'UNKNOWN' "
                          "(PPM cannot be decoded by FSK/PSK/OOK demod chains)")
 
     def test_adsb_prior_boost_is_zero(self):
         adsb = next((b for b in kUkBands if b.name == "ADS-B"), None)
         self.assertIsNotNone(adsb)
         self.assertAlmostEqual(adsb.prior_boost, 0.0, places=6,
-                               msg=f"ADS-B prior_boost={adsb.prior_boost} - must be 0.0")
+                               msg=f"ADS-B prior_boost={adsb.prior_boost} "
+                               "- must be 0.0")
 
     def test_adsb_reachable_at_1090mhz(self):
         bp = find_band(1090e6)
@@ -239,8 +313,8 @@ class TestAdsbModClass(unittest.TestCase):
         adsb = next((b for b in kUkBands if b.name == "ADS-B"), None)
         self.assertIsNotNone(adsb)
         self.assertIn("PPM", adsb.notes,
-                      "ADS-B notes must mention PPM so the reason for UNKNOWN is clear "
-                      "in decision_trace")
+                      "ADS-B notes must mention PPM so the reason for UNKNOWN "
+                      "is clear in decision_trace")
 
 
 if __name__ == "__main__":
