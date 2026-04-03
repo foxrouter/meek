@@ -45,7 +45,8 @@ class Database {
   Database& operator=(const Database&) = delete;
 
   /// Insert a signal observation and return its row-id, or -1 on error.
-  [[nodiscard]] std::int64_t insert_signal(const std::string& source, const std::string& notes);
+  [[nodiscard]] std::int64_t insert_signal(const std::string& source, const std::string& notes,
+                                           std::uint64_t timestamp_ns);
 
   /// Upsert the modulation classifier method and return its row-id, or -1.
   [[nodiscard]] std::int64_t upsert_method(const std::string& name, const std::string& params_json);
@@ -194,9 +195,6 @@ inline bool Database::apply_schema() {
       WHERE confidence IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_signals_timestamp
       ON signals(timestamp DESC);
-    CREATE INDEX IF NOT EXISTS idx_signals_timestamp_ns
-      ON signals(timestamp_ns DESC)
-      WHERE timestamp_ns IS NOT NULL;
     COMMIT;
   )sql";
   {
@@ -267,13 +265,31 @@ inline bool Database::apply_schema() {
     }
   }
 
+  // idx_signals_timestamp_ns is created here (after the migration that adds
+  // the column) so it never fails with "no such column" on an upgraded DB.
+  {
+    char* idx_err = nullptr;
+    const int idx_rc = sqlite3_exec(
+        db_,
+        "CREATE INDEX IF NOT EXISTS idx_signals_timestamp_ns "
+        "ON signals(timestamp_ns DESC) WHERE timestamp_ns IS NOT NULL;",
+        nullptr, nullptr, &idx_err);
+    if (idx_rc != SQLITE_OK) {
+      std::cerr << "[DB] idx_signals_timestamp_ns: "
+                << (idx_err ? idx_err : sqlite3_errmsg(db_)) << "\n";
+      sqlite3_free(idx_err);
+      // Non-fatal: missing index only degrades time-range query performance.
+    }
+  }
+
   return true;
 }
 
 inline bool Database::prepare_statements() {
   sqlite3_stmt* s = nullptr;
 
-  static constexpr const char* kInsertSignal = "INSERT INTO signals(source, notes) VALUES(?, ?)";
+  static constexpr const char* kInsertSignal =
+      "INSERT INTO signals(source, notes, timestamp_ns) VALUES(?, ?, ?)";
   if (sqlite3_prepare_v2(db_, kInsertSignal, -1, &s, nullptr) != SQLITE_OK) {
     std::cerr << "[DB] prepare insert_signal: " << sqlite3_errmsg(db_) << "\n";
     return false;
@@ -307,11 +323,13 @@ inline bool Database::prepare_statements() {
   return true;
 }
 
-inline std::int64_t Database::insert_signal(const std::string& source, const std::string& notes) {
+inline std::int64_t Database::insert_signal(const std::string& source, const std::string& notes,
+                                             std::uint64_t timestamp_ns) {
   sqlite3_stmt* stmt = insert_signal_stmt_.get();
   sqlite3_reset(stmt);
   sqlite3_bind_text(stmt, 1, source.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(stmt, 2, notes.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(stmt, 3, static_cast<sqlite3_int64>(timestamp_ns));
   if (sqlite3_step(stmt) != SQLITE_DONE)
     return -1;
   return sqlite3_last_insert_rowid(db_);

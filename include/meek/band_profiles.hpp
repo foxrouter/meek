@@ -35,7 +35,7 @@ struct BandProfile {
 inline constexpr double kBandSnrUseDefault = -999.0;
 
 // ---------------------------------------------------------------------------
-// UK band profile table (38 entries) — compiled in, zero runtime cost
+// UK band profile table (39 entries) — compiled in, zero runtime cost
 // ---------------------------------------------------------------------------
 
 // clang-format off
@@ -83,10 +83,10 @@ inline constexpr std::array<BandProfile, 39> kUkBands = {{
   {"TPMS-433", "Tyre Pressure Monitoring System (433 MHz)",
    433.92e6, 0.5e6, 100e3, ModClass::FSK_LIKE, 0.0, 0.12,
    "OBD/TPMS sensors from vehicles at 433.92 MHz. FSK or OOK. Decode with rtl_433."},
-  {"DAB-12B", "DAB Block 12B - UK National / BBC (218.640 MHz)",
+  {"DAB", "DAB Block 12B - UK National / BBC (218.640 MHz)",
    218.64e6, 0.9e6, 1.5e6, ModClass::PSK_QAM_LIKE, 3.0, 0.18,
    "Digital Audio Broadcasting block 12B. OFDM/DQPSK in 1.536 MHz channels."},
-  {"DAB-11D", "DAB Block 11D - UK Commercial (222.064 MHz)",
+  {"DAB", "DAB Block 11D - UK Commercial (222.064 MHz)",
    222.064e6, 0.9e6, 1.5e6, ModClass::PSK_QAM_LIKE, 3.0, 0.18,
    "Digital Audio Broadcasting block 11D. OFDM/DQPSK in 1.536 MHz channels."},
   {"TETRA", "TETRA public safety radio (380-430 MHz)",
@@ -173,6 +173,8 @@ inline constexpr std::array<BandProfile, 39> kUkBands = {{
 
 /// Returns a pointer to the closest BandProfile whose centre is within
 /// tolerance_hz of center_hz, or nullptr if no profile matches.
+/// Tie-break: narrower tolerance_hz wins so specific profiles always beat
+/// wide catch-all bands at a shared centre frequency.
 /// Pure function; O(N) over kUkBands.
 [[nodiscard]] inline const BandProfile* find_band(double center_hz) noexcept {
   const BandProfile* best = nullptr;
@@ -180,7 +182,8 @@ inline constexpr std::array<BandProfile, 39> kUkBands = {{
   for (const auto& bp : kUkBands) {
     double dist = std::abs(center_hz - bp.center_hz);
     if (dist <= bp.tolerance_hz) {
-      if (best == nullptr || dist < best_dist) {
+      if (best == nullptr || dist < best_dist ||
+          (dist == best_dist && bp.tolerance_hz < best->tolerance_hz)) {
         best = &bp;
         best_dist = dist;
       }

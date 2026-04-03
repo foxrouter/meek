@@ -278,7 +278,7 @@ class TestDabTolerance(unittest.TestCase):
             self.assertFalse(bp.name.startswith("DAB"),
                              "DAB matched VDL2 at 136.9 MHz - tolerance too wide")
 
-    def test_dab_12b_matches_at_centre(self):
+    def test_dab_matches_at_218mhz(self):
         bp = find_band(218.64e6)
         self.assertIsNotNone(bp, "No profile matched 218.640 MHz")
         self.assertTrue(bp.name.startswith("DAB"),

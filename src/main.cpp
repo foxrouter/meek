@@ -788,7 +788,8 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
       metrics.conf_sum += cr.confidence;
 
       if (method_id >= 0) {
-        const std::int64_t sig_id = db.insert_signal("rf_adapt_intel", cr.decision_trace);
+        const std::int64_t sig_id = db.insert_signal("rf_adapt_intel", cr.decision_trace,
+                                                        cr.timestamp_ns);
         if (sig_id >= 0) {
           if (db.insert_example(sig_id, method_id, cr.confidence, cr.decision_trace) < 0) {
             ++metrics.db_errors;

@@ -311,6 +311,14 @@ def _extract_indexes_ddl() -> str:
     return m.group(1)
 
 
+def _db_hpp_content() -> str:
+    """Return the full text of include/meek/db.hpp."""
+    if not _DB_HPP.exists():
+        raise FileNotFoundError(
+            f"db.hpp not found at expected path: {_DB_HPP}")
+    return _DB_HPP.read_text()
+
+
 class TestTimestampNsRoundTrip(unittest.TestCase):
     """DATA-01: signals.timestamp_ns must persist without loss.
 
@@ -325,9 +333,21 @@ class TestTimestampNsRoundTrip(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _apply_schema(self, conn):
-        """Apply the real schema + indexes from db.hpp."""
+        """Apply the real schema + indexes from db.hpp, then run the
+        timestamp_ns migration and its post-migration index (replicating the
+        startup sequence of Database::apply_schema())."""
         conn.executescript(_extract_signals_ddl())
         conn.executescript(_extract_indexes_ddl())
+        # Migration: add timestamp_ns column (silently ignored on fresh DBs)
+        try:
+            conn.execute("ALTER TABLE signals ADD COLUMN timestamp_ns INTEGER")
+        except Exception:
+            pass
+        # Post-migration index — created after the column exists
+        conn.executescript(
+            "CREATE INDEX IF NOT EXISTS idx_signals_timestamp_ns "
+            "ON signals(timestamp_ns DESC) WHERE timestamp_ns IS NOT NULL;"
+        )
         conn.commit()
 
     def test_timestamp_ns_column_in_real_schema(self):
@@ -340,12 +360,15 @@ class TestTimestampNsRoundTrip(unittest.TestCase):
             "DATA-01 regression: column was removed from the C++ schema")
 
     def test_timestamp_ns_index_in_real_schema(self):
-        """db.hpp kIndexes must define idx_signals_timestamp_ns."""
-        ddl = _extract_indexes_ddl()
+        """db.hpp must define idx_signals_timestamp_ns somewhere in its body.
+
+        The index is created after the timestamp_ns migration (not inside
+        kIndexes) so the search covers the full header."""
+        content = _db_hpp_content()
         self.assertIn(
             "idx_signals_timestamp_ns",
-            ddl,
-            "idx_signals_timestamp_ns absent from db.hpp kIndexes - "
+            content,
+            "idx_signals_timestamp_ns absent from db.hpp - "
             "DATA-01 regression: index was removed from the C++ schema")
 
     def test_timestamp_ns_roundtrip(self):
@@ -426,8 +449,10 @@ _DC_SCHEMA = """
 class TestDecisionTraceDeduplicated(unittest.TestCase):
     """DATA-02: examples.notes must contain band_name only, not decision_trace.
 
-    Exercises decode_candidates.py via subprocess against a seeded database to
-    verify that the tool does not overwrite examples.notes with the full trace.
+    Validates that decode_candidates.py correctly exposes signals.notes
+    (decision_trace) and examples.notes (band_name) as distinct fields in its
+    output report.  decode_candidates.py is a read-only tool; this test
+    verifies the correct read/mapping behaviour rather than DB mutation.
     """
 
     SAMPLE_TRACE = (
@@ -445,7 +470,7 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _seed_db(self):
-        """Seed the test DB with correct contract: examples.notes = band_name."""
+        """Seed the test DB: signals.notes = full trace, examples.notes = band."""
         conn = sqlite3.connect(self._db_path)
         conn.executescript(_DC_SCHEMA)
         conn.execute("INSERT INTO signals(source, notes) VALUES(?,?)",
@@ -462,17 +487,22 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
         conn.commit()
         conn.close()
 
-    def test_examples_notes_contains_band_name_only(self):
-        """Seed DB with examples.notes=band_name, run decode_candidates.py,
-        then assert examples.notes was not overwritten with decision_trace."""
+    def test_output_band_comes_from_decision_trace_not_examples_notes(self):
+        """decode_candidates.py must parse band from signals.notes (decision_trace)
+        and report it in the output JSON.  examples.notes (band_name) is a
+        separate field in the query result and must not be confused with the
+        full trace stored in signals.notes."""
+        import json
         self._seed_db()
+        out_path = str(Path(self._tmp) / "report.json")
 
         result = subprocess.run(
             [sys.executable, str(_DECODE_CANDIDATES),
              "--db", self._db_path,
              "--snapshot-dir", self._tmp,
              "--min-confidence", "0",
-             "--limit", "10"],
+             "--limit", "10",
+             "--out", out_path],
             capture_output=True, timeout=30,
         )
         self.assertEqual(
@@ -480,21 +510,24 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
             f"decode_candidates.py exited {result.returncode}: "
             f"{result.stderr.decode(errors='replace')[:400]}"
         )
-
-        # After decode_candidates.py runs, examples.notes must be unchanged.
-        conn = sqlite3.connect(self._db_path)
-        row = conn.execute(
-            "SELECT notes FROM examples ORDER BY id DESC LIMIT 1").fetchone()
-        conn.close()
-        self.assertIsNotNone(row)
-        self.assertEqual(row[0], self.SAMPLE_BAND,
-                         f"examples.notes should be '{self.SAMPLE_BAND}' after "
-                         f"decode_candidates.py ran, got '{row[0]}'. "
-                         f"decode_candidates stderr: "
-                         f"{result.stderr.decode(errors='replace')[:200]}")
-        self.assertNotIn("snr=", row[0],
-                         "examples.notes must not contain decision_trace content "
-                         "- DATA-02 regression: tool overwrote examples.notes")
+        with open(out_path, encoding="utf-8") as fh:
+            report = json.load(fh)
+        candidates = report.get("candidates") or report.get("results") or []
+        if not candidates:
+            # Older/alternate output format: top-level list
+            candidates = report if isinstance(report, list) else []
+        self.assertGreater(len(candidates), 0,
+                           "decode_candidates.py produced no candidate entries "
+                           "in the output JSON")
+        entry = candidates[0]
+        # band is parsed by parse_decision_trace() from signals.notes
+        self.assertEqual(entry.get("band"), self.SAMPLE_BAND,
+                         f"output 'band' should be '{self.SAMPLE_BAND}' "
+                         f"(parsed from decision_trace), got {entry.get('band')!r}")
+        # band must be just the name, not the full decision_trace string
+        self.assertNotIn("snr=", entry.get("band", ""),
+                         "output 'band' must not contain the full decision_trace "
+                         "- DATA-02 regression: band field is wrong")
 
     def test_signal_notes_retains_full_trace(self):
         """signals.notes must retain the full decision_trace."""
