@@ -71,8 +71,7 @@ def _parse_entry(entry_text: str) -> BandProfile:
             pos = m.end()
             continue
         c = entry_text[pos]
-        if c.isdigit() or (c in '+-' and pos + 1 < len(entry_text)
-                           and entry_text[pos + 1].isdigit()):
+        if c.isdigit() or c in '+-.':
             m = _TOK_FLOAT.match(entry_text, pos)
             if m:
                 floats.append(float(m.group(1)))

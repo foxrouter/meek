@@ -475,6 +475,11 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
              "--limit", "10"],
             capture_output=True, timeout=30,
         )
+        self.assertEqual(
+            result.returncode, 0,
+            f"decode_candidates.py exited {result.returncode}: "
+            f"{result.stderr.decode(errors='replace')[:400]}"
+        )
 
         # After decode_candidates.py runs, examples.notes must be unchanged.
         conn = sqlite3.connect(self._db_path)
