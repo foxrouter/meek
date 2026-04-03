@@ -38,13 +38,16 @@ def _build_crc32_table() -> List[int]:
         table.append(c)
     return table
 
+
 _CRC32_TABLE = _build_crc32_table()
+
 
 def _crc32_bytes(data: bytes) -> int:
     crc = 0xFFFFFFFF
     for b in data:
         crc = _CRC32_TABLE[(crc ^ b) & 0xFF] ^ (crc >> 8)
     return crc ^ 0xFFFFFFFF
+
 
 def _append_crc32(bits: List[int]) -> List[int]:
     n = len(bits)
@@ -58,6 +61,7 @@ def _append_crc32(bits: List[int]) -> List[int]:
     crc = _crc32_bytes(bytes(data))
     crc_bits = [(crc >> (31 - i)) & 1 for i in range(32)]
     return bits + crc_bits
+
 
 def _check_crc32(bits: List[int]) -> bool:
     if len(bits) < 40:
@@ -90,6 +94,7 @@ def _gen_fsk2_iq(bits: List[int], k: int, fdev_norm: float) -> np.ndarray:
             phase += phase_inc
     return iq
 
+
 def _gen_ook_iq(bits: List[int], k: int, phase_offset: int = 0,
                 snr_db: float = 15.0) -> np.ndarray:
     n_samp = len(bits) * k
@@ -112,8 +117,9 @@ def _gen_ook_iq(bits: List[int], k: int, phase_offset: int = 0,
 def _gardner_timing_error(x_cur, x_mid, x_sym) -> float:
     return float(np.real((x_cur - x_sym) * np.conj(x_mid)))
 
+
 def _demod_fsk_gardner(iq: np.ndarray, k: int, fdev_norm: float,
-                        use_scaled_gain: bool = True) -> Tuple[List[int], bool]:
+                       use_scaled_gain: bool = True) -> Tuple[List[int], bool]:
     """
     use_scaled_gain=True  → DEM-04 fix: gain normalised by k² and symbol energy
     use_scaled_gain=False → original broken: fixed gain 0.01
@@ -127,9 +133,9 @@ def _demod_fsk_gardner(iq: np.ndarray, k: int, fdev_norm: float,
     err_ema = 1.0
     lock_sym = -1
     pos = 0
-    while pos + k <= n:
+    while pos + k < n:
         mid_pos = pos + k // 2
-        end_pos = pos + k - 1
+        end_pos = pos + k
         x_mid = complex(iq[mid_pos])
         x_cur = complex(iq[end_pos])
         e = _gardner_timing_error(x_cur, x_mid, x_sym)
@@ -155,31 +161,44 @@ def _demod_fsk_gardner(iq: np.ndarray, k: int, fdev_norm: float,
         pos += max(1, advance)
     return bits_out, lock_sym >= 0
 
+
 def _demod_ook_phase_search(iq: np.ndarray, k: int) -> List[int]:
-    """DEM-05 fix: max-variance phase search."""
+    """DEM-05 fix: min-intra-symbol-variance phase search."""
     env = np.abs(iq)
     n = len(env)
     max_syms = n // k
     best_phase = k // 2
-    best_var = -1.0
+    best_score = float('inf')
     for phi in range(k):
-        idxs = [si * k + phi for si in range(max_syms) if si * k + phi < n]
-        if not idxs:
+        intra_vars: List[float] = []
+        for si in range(max_syms):
+            start = phi + si * k
+            end = min(start + k, n)
+            if start >= n or end - start < 2:
+                continue
+            intra_vars.append(float(np.var(env[start:end])))
+        if not intra_vars:
             continue
-        var = float(np.var(env[idxs]))
-        if var > best_var:
-            best_var = var
+        score = float(np.mean(intra_vars))
+        if score < best_score:
+            best_score = score
             best_phase = phi
-    all_env = sorted(env)
-    p10 = all_env[n // 10]
-    p90 = all_env[9 * n // 10]
-    threshold = p10 + (p90 - p10) * 0.5
-    bits_out = []
+    sym_energies: List[float] = []
     for si in range(max_syms):
-        idx = si * k + best_phase
-        if idx < n:
-            bits_out.append(1 if env[idx] >= threshold else 0)
-    return bits_out
+        start = best_phase + si * k
+        end = min(start + k, n)
+        if start >= n:
+            break
+        sym_energies.append(float(np.mean(env[start:end])))
+    if not sym_energies:
+        return []
+    sorted_e = sorted(sym_energies)
+    ns = len(sorted_e)
+    t10 = sorted_e[ns // 10]
+    t90 = sorted_e[9 * ns // 10]
+    threshold = t10 + (t90 - t10) * 0.5
+    return [1 if e >= threshold else 0 for e in sym_energies]
+
 
 def _demod_ook_fixed_grid(iq: np.ndarray, k: int) -> List[int]:
     """Original broken: fixed k//2 grid."""
@@ -196,6 +215,7 @@ def _demod_ook_fixed_grid(iq: np.ndarray, k: int) -> List[int]:
         if idx < n:
             bits_out.append(1 if env[idx] >= threshold else 0)
     return bits_out
+
 
 def _ber(tx: List[int], rx: List[int]) -> float:
     n = min(len(tx), len(rx))
@@ -224,21 +244,21 @@ class TestGardnerTimingConvergence(unittest.TestCase):
 
     def test_scaled_gain_achieves_lock(self):
         _, lock = _demod_fsk_gardner(self.iq, self.K, self.FDEV_NORM,
-                                      use_scaled_gain=True)
+                                     use_scaled_gain=True)
         self.assertTrue(lock,
-            f"Gardner with scaled gain failed to converge at k={self.K}")
+                        f"Gardner with scaled gain failed to converge at k={self.K}")
 
     def test_scaled_gain_ber_below_threshold(self):
         rx_bits, _ = _demod_fsk_gardner(self.iq, self.K, self.FDEV_NORM,
-                                         use_scaled_gain=True)
+                                        use_scaled_gain=True)
         ber = _ber(self.tx_bits, rx_bits)
         self.assertLess(ber, 0.15,
-            f"BER={ber:.3f} at k={self.K} with scaled gain — expected < 0.15")
+                        f"BER={ber:.3f} at k={self.K} with scaled gain — expected < 0.15")
 
     def test_fixed_gain_fails_at_k16(self):
         """Documents the known failure DEM-04 fixes."""
         _, lock = _demod_fsk_gardner(self.iq, self.K, self.FDEV_NORM,
-                                      use_scaled_gain=False)
+                                     use_scaled_gain=False)
         if lock:
             import warnings
             warnings.warn(
@@ -250,7 +270,7 @@ class TestGardnerTimingConvergence(unittest.TestCase):
         k = 2
         iq_k2 = _gen_fsk2_iq(self.tx_bits, k, self.FDEV_NORM * 4)
         _, lock = _demod_fsk_gardner(iq_k2, k, self.FDEV_NORM * 4,
-                                      use_scaled_gain=True)
+                                     use_scaled_gain=True)
         self.assertTrue(lock, f"Scaled gain failed to converge at k={k}")
 
 
@@ -271,7 +291,7 @@ class TestOokTimingRecovery(unittest.TestCase):
 
     def _ber_at_offset(self, phi: int, use_phase_search: bool) -> float:
         iq = _gen_ook_iq(self.tx_bits, self.K, phase_offset=phi,
-                          snr_db=self.SNR_DB)
+                         snr_db=self.SNR_DB)
         rx = (_demod_ook_phase_search(iq, self.K) if use_phase_search
               else _demod_ook_fixed_grid(iq, self.K))
         return _ber(self.tx_bits, rx)
@@ -280,21 +300,21 @@ class TestOokTimingRecovery(unittest.TestCase):
         for phi in range(self.K):
             ber = self._ber_at_offset(phi, use_phase_search=True)
             self.assertLess(ber, 0.10,
-                f"Phase search BER={ber:.3f} at phi={phi} — expected < 0.10")
+                            f"Phase search BER={ber:.3f} at phi={phi} — expected < 0.10")
 
     def test_fixed_grid_fails_at_bad_offsets(self):
         """Documents the failure DEM-05 fixes."""
-        phi = self.K // 4
+        phi = (self.K * 3) // 4
         ber_fixed = self._ber_at_offset(phi, use_phase_search=False)
         ber_search = self._ber_at_offset(phi, use_phase_search=True)
         self.assertLess(ber_search, ber_fixed,
-            f"Phase search BER ({ber_search:.3f}) not better than fixed grid "
-            f"({ber_fixed:.3f}) at phi={phi} — regression suspected")
+                        f"Phase search BER ({ber_search:.3f}) not better than fixed grid "
+                        f"({ber_fixed:.3f}) at phi={phi} — regression suspected")
 
     def test_phase_search_zero_offset(self):
         ber = self._ber_at_offset(0, use_phase_search=True)
         self.assertLess(ber, 0.10,
-            f"Phase search failed at phi=0 (aligned burst): BER={ber:.3f}")
+                        f"Phase search failed at phi=0 (aligned burst): BER={ber:.3f}")
 
     def test_ook_timing_snr_3db(self):
         phi = self.K // 3
@@ -302,7 +322,7 @@ class TestOokTimingRecovery(unittest.TestCase):
         rx = _demod_ook_phase_search(iq, self.K)
         ber = _ber(self.tx_bits, rx)
         self.assertLess(ber, 0.15,
-            f"Phase search BER={ber:.3f} at SNR=3 dB — expected < 0.15")
+                        f"Phase search BER={ber:.3f} at SNR=3 dB — expected < 0.15")
 
 
 if __name__ == "__main__":
