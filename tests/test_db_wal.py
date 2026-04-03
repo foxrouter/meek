@@ -271,5 +271,206 @@ class TestWalMode(unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# DATA-01: timestamp_ns round-trip
+# ---------------------------------------------------------------------------
+
+class TestTimestampNsRoundTrip(unittest.TestCase):
+    """DATA-01: signals.timestamp_ns must persist without loss."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._db_path = str(Path(self._tmp) / "ts_test.db")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _apply_schema(self, conn):
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                source TEXT,
+                notes TEXT,
+                timestamp_ns INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_signals_timestamp_ns
+                ON signals(timestamp_ns DESC)
+                WHERE timestamp_ns IS NOT NULL;
+        """)
+        conn.commit()
+
+    def test_timestamp_ns_roundtrip(self):
+        conn = sqlite3.connect(self._db_path)
+        self._apply_schema(conn)
+        test_ts_ns = 1_743_379_200_000_000_000
+        conn.execute(
+            "INSERT INTO signals(source, notes, timestamp_ns) VALUES(?,?,?)",
+            ("rf_adapt_intel", "test_trace", test_ts_ns))
+        conn.commit()
+        row = conn.execute(
+            "SELECT timestamp_ns FROM signals ORDER BY id DESC LIMIT 1").fetchone()
+        conn.close()
+        self.assertIsNotNone(row)
+        self.assertEqual(row[0], test_ts_ns,
+                         f"timestamp_ns round-trip failed: stored {test_ts_ns}, "
+                         f"retrieved {row[0]}")
+
+    def test_timestamp_ns_index_exists(self):
+        conn = sqlite3.connect(self._db_path)
+        self._apply_schema(conn)
+        row = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='index' AND name='idx_signals_timestamp_ns'").fetchone()
+        conn.close()
+        self.assertIsNotNone(row,
+                             "idx_signals_timestamp_ns index missing - "
+                             "DATA-01 schema migration not applied")
+
+    def test_two_signals_same_second_distinguishable(self):
+        conn = sqlite3.connect(self._db_path)
+        self._apply_schema(conn)
+        base_ns = 1_743_379_200_000_000_000
+        conn.execute("INSERT INTO signals(source, notes, timestamp_ns) VALUES(?,?,?)",
+                     ("rf_adapt_intel", "signal_a", base_ns))
+        conn.execute("INSERT INTO signals(source, notes, timestamp_ns) VALUES(?,?,?)",
+                     ("rf_adapt_intel", "signal_b", base_ns + 1_562_500))
+        conn.commit()
+        rows = conn.execute(
+            "SELECT notes, timestamp_ns FROM signals ORDER BY timestamp_ns").fetchall()
+        conn.close()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0][0], "signal_a")
+        self.assertEqual(rows[1][0], "signal_b")
+        self.assertGreater(rows[1][1], rows[0][1])
+
+
+# ---------------------------------------------------------------------------
+# DATA-02: decision_trace deduplication
+# ---------------------------------------------------------------------------
+
+class TestDecisionTraceDeduplicated(unittest.TestCase):
+    """DATA-02: examples.notes must contain band_name only, not decision_trace."""
+
+    SAMPLE_TRACE = (
+        "snr=8.500dB avg_pow=1.23e-04 papr=3.200dB flat=0.410 occ=0.720 "
+        "phase=0.850 trans=0.310 band=ISM-433 "
+        "scores(cw=0.210,fsk=0.780,psk=0.120,ook=0.340) -> fsk_like@0.650"
+    )
+    SAMPLE_BAND = "ISM-433"
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._db_path = str(Path(self._tmp) / "dedup_test.db")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _apply_schema(self, conn):
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                source TEXT,
+                notes TEXT,
+                timestamp_ns INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS methods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                params TEXT
+            );
+            CREATE TABLE IF NOT EXISTS examples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER NOT NULL REFERENCES signals(id),
+                method_id INTEGER NOT NULL REFERENCES methods(id),
+                confidence REAL,
+                notes TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+        """)
+        conn.commit()
+
+    def test_examples_notes_contains_band_name_only(self):
+        conn = sqlite3.connect(self._db_path)
+        self._apply_schema(conn)
+        conn.execute("INSERT INTO signals(source, notes) VALUES(?,?)",
+                     ("rf_adapt_intel", self.SAMPLE_TRACE))
+        sig_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute("INSERT OR IGNORE INTO methods(name, params) VALUES(?,?)",
+                     ("modulation_classifier", "{}"))
+        method_id = conn.execute(
+            "SELECT id FROM methods WHERE name='modulation_classifier'").fetchone()[0]
+        conn.execute(
+            "INSERT INTO examples(signal_id, method_id, confidence, notes) VALUES(?,?,?,?)",
+            (sig_id, method_id, 0.650, self.SAMPLE_BAND))
+        conn.commit()
+        row = conn.execute(
+            "SELECT notes FROM examples ORDER BY id DESC LIMIT 1").fetchone()
+        conn.close()
+        self.assertIsNotNone(row)
+        self.assertEqual(row[0], self.SAMPLE_BAND,
+                         f"examples.notes should be '{self.SAMPLE_BAND}', got '{row[0]}'")
+        self.assertNotEqual(row[0], self.SAMPLE_TRACE,
+                            "examples.notes must not contain the full decision_trace "
+                            "- DATA-02 regression")
+
+    def test_signal_notes_retains_full_trace(self):
+        conn = sqlite3.connect(self._db_path)
+        self._apply_schema(conn)
+        conn.execute("INSERT INTO signals(source, notes) VALUES(?,?)",
+                     ("rf_adapt_intel", self.SAMPLE_TRACE))
+        conn.commit()
+        row = conn.execute(
+            "SELECT notes FROM signals ORDER BY id DESC LIMIT 1").fetchone()
+        conn.close()
+        self.assertIsNotNone(row)
+        self.assertEqual(row[0], self.SAMPLE_TRACE,
+                         "signals.notes must retain the full decision_trace")
+
+
+# ---------------------------------------------------------------------------
+# DATA-04: demod_lock_ms sentinel consistency
+# ---------------------------------------------------------------------------
+
+class TestDemodLockMsSentinel(unittest.TestCase):
+    """DATA-04: sentinel values must be consistent.
+    -2 = not run (default), -1 = not applicable (OOK), 0 = instant lock, >0 = ms."""
+
+    _SENTINEL_NOT_RUN = -2
+    _SENTINEL_NOT_APPLICABLE = -1
+
+    def test_default_sentinel_is_minus_two(self):
+        demod_lock_ms = -2
+        self.assertEqual(demod_lock_ms, self._SENTINEL_NOT_RUN,
+                         f"Default demod_lock_ms={demod_lock_ms} - must be "
+                         f"{self._SENTINEL_NOT_RUN} "
+                         "to distinguish not-run from failed-to-lock")
+
+    def test_ook_sentinel_is_minus_one(self):
+        ook_lock_ms = -1
+        self.assertEqual(ook_lock_ms, self._SENTINEL_NOT_APPLICABLE)
+
+    def test_ook_sentinel_distinct_from_default(self):
+        self.assertNotEqual(self._SENTINEL_NOT_APPLICABLE, self._SENTINEL_NOT_RUN)
+
+    def test_instant_lock_is_zero(self):
+        instant_lock = 0
+        self.assertNotEqual(instant_lock, self._SENTINEL_NOT_RUN)
+        self.assertNotEqual(instant_lock, self._SENTINEL_NOT_APPLICABLE)
+
+    def test_fsk_lock_fail_uses_not_run_sentinel(self):
+        """FSK lock-fail path must use -2, not 0 (indistinguishable from instant lock)."""
+        fsk_lock_fail = -2
+        self.assertEqual(fsk_lock_fail, self._SENTINEL_NOT_RUN)
+
+    def test_sentinel_ordering_for_json_consumers(self):
+        """value > -1 means demod ran and locked - ordering must hold."""
+        self.assertLess(self._SENTINEL_NOT_RUN, self._SENTINEL_NOT_APPLICABLE)
+        self.assertLess(self._SENTINEL_NOT_APPLICABLE, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,18 +3,17 @@ name: CI
 on:
   push:
     branches: ["main", "master", "copilot/**"]
-    paths-ignore:
-      - "docs/**"
-      - "README.md"
-      - ".github/CODEOWNERS"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
+    paths:
+      - "src/**"
+      - "include/**"
+      - "tools/**"
+      - "tests/**"
+      - "CMakeLists.txt"
+      - "Dockerfile"
+      - "requirements.txt"
+      - ".github/workflows/ci.yml"
   pull_request:
     branches: ["main", "master"]
-    paths-ignore:
-      - "docs/**"
-      - "README.md"
-      - ".github/CODEOWNERS"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
 
 # Default to read-only permissions for all jobs; individual jobs may widen
 # specific permissions as needed (e.g. docker job needs packages: write).
@@ -58,6 +57,7 @@ jobs:
             tests/test_iq_metrics.py \
             tests/test_db_wal.py \
             tests/test_classifier_correctness.py \
+            tests/test_band_profiles.py \
             benchmarks/bench_iq_metrics.py
 
       - name: test_autotune
@@ -71,6 +71,9 @@ jobs:
 
       - name: test_classifier_correctness
         run: python3 tests/test_classifier_correctness.py -v
+
+      - name: test_band_profiles
+        run: python3 tests/test_band_profiles.py -v
 
       - name: test_db_wal
         run: python3 tests/test_db_wal.py -v
@@ -237,10 +240,16 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   cpp-liquid:
     name: C++ liquid-dsp build (HAVE_LIQUID)
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    if: |
+      github.ref == 'refs/heads/main' ||
+      github.ref == 'refs/heads/master' ||
+      github.event_name == 'pull_request' ||
+      contains(github.event.head_commit.modified, 'include/meek/demod_chains.hpp') ||
+      contains(github.event.head_commit.modified, 'include/meek/classifier.hpp') ||
+      contains(github.event.head_commit.modified, 'src/main.cpp')
     steps:
       - uses: actions/checkout@v6
 
@@ -370,10 +379,16 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   docker:
     name: Container image build
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    if: |
+      github.ref == 'refs/heads/main' ||
+      github.ref == 'refs/heads/master' ||
+      github.event_name == 'pull_request' ||
+      contains(github.event.head_commit.modified, 'Dockerfile') ||
+      contains(github.event.head_commit.modified, 'install.sh') ||
+      contains(github.event.head_commit.modified, 'ops/')
     steps:
       - uses: actions/checkout@v6
 
