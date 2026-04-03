@@ -448,6 +448,17 @@ class TestTimestampNsRoundTrip(unittest.TestCase):
 # DATA-02: decision_trace deduplication
 # ---------------------------------------------------------------------------
 
+def _add_column_if_missing(conn, alter_sql):
+    """Execute an ALTER TABLE ... ADD COLUMN statement, ignoring the expected
+    duplicate-column OperationalError on fresh DBs (where the column is
+    already defined in kSchema).  Any other OperationalError propagates."""
+    try:
+        conn.execute(alter_sql)
+    except sqlite3.OperationalError as exc:
+        if "duplicate column" not in str(exc).lower():
+            raise
+
+
 def _apply_dc_schema(conn):
     """Apply the production schema from db.hpp to conn, then run migrations.
 
@@ -462,25 +473,10 @@ def _apply_dc_schema(conn):
     """
     schema_sql = _extract_signals_ddl()
     conn.executescript(schema_sql)
-
-    # Migration: timestamp_ns on signals (kSchema now includes it; fresh DBs
-    # will get a duplicate-column error which is expected and tolerated).
-    try:
-        conn.execute("ALTER TABLE signals ADD COLUMN timestamp_ns INTEGER")
-    except sqlite3.OperationalError as exc:
-        msg = str(exc).lower()
-        if "duplicate column" not in msg:
-            raise
-
-    # Migration: result column on examples (kSchema now includes it; same
-    # duplicate-column tolerance applies).
-    try:
-        conn.execute("ALTER TABLE examples ADD COLUMN result TEXT")
-    except sqlite3.OperationalError as exc:
-        msg = str(exc).lower()
-        if "duplicate column" not in msg:
-            raise
-
+    # Migrations (duplicate-column errors tolerated on fresh DBs where
+    # kSchema already defines these columns).
+    _add_column_if_missing(conn, "ALTER TABLE signals ADD COLUMN timestamp_ns INTEGER")
+    _add_column_if_missing(conn, "ALTER TABLE examples ADD COLUMN result TEXT")
     conn.commit()
 
 
