@@ -338,11 +338,17 @@ class TestTimestampNsRoundTrip(unittest.TestCase):
         startup sequence of Database::apply_schema())."""
         conn.executescript(_extract_signals_ddl())
         conn.executescript(_extract_indexes_ddl())
-        # Migration: add timestamp_ns column (silently ignored on fresh DBs)
+        # Migration: add timestamp_ns column. On fresh DBs the column already
+        # exists (kSchema includes it), so only the expected duplicate-column
+        # OperationalError is tolerated here.
         try:
             conn.execute("ALTER TABLE signals ADD COLUMN timestamp_ns INTEGER")
-        except Exception:
-            pass
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            self.assertIn("duplicate column name", msg,
+                          f"Unexpected OperationalError from ALTER TABLE: {exc}")
+            self.assertIn("timestamp_ns", msg,
+                          f"Unexpected OperationalError from ALTER TABLE: {exc}")
         # Post-migration index — created after the column exists
         conn.executescript(
             "CREATE INDEX IF NOT EXISTS idx_signals_timestamp_ns "

@@ -248,15 +248,14 @@ jobs:
     outputs:
       liquid: ${{ steps.filter.outputs.liquid }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
             liquid:
               - 'src/**'
-              - 'include/meek/demod_chains.hpp'
-              - 'include/meek/classifier.hpp'
+              - 'include/**'
               - 'CMakeLists.txt'
 
   cpp-liquid:
@@ -404,7 +403,7 @@ jobs:
     outputs:
       docker: ${{ steps.filter.outputs.docker }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v3
         id: filter
         with:

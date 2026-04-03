@@ -46,7 +46,7 @@ class Database {
 
   /// Insert a signal observation and return its row-id, or -1 on error.
   [[nodiscard]] std::int64_t insert_signal(const std::string& source, const std::string& notes,
-                                           std::uint64_t timestamp_ns);
+                                           std::int64_t timestamp_ns);
 
   /// Upsert the modulation classifier method and return its row-id, or -1.
   [[nodiscard]] std::int64_t upsert_method(const std::string& name, const std::string& params_json);
@@ -323,12 +323,14 @@ inline bool Database::prepare_statements() {
 }
 
 inline std::int64_t Database::insert_signal(const std::string& source, const std::string& notes,
-                                            std::uint64_t timestamp_ns) {
+                                            std::int64_t timestamp_ns) {
+  // timestamp_ns: nanoseconds since Unix epoch, always positive; max
+  // representable value (INT64_MAX) corresponds to year 2262.
   sqlite3_stmt* stmt = insert_signal_stmt_.get();
   sqlite3_reset(stmt);
   sqlite3_bind_text(stmt, 1, source.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(stmt, 2, notes.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_bind_int64(stmt, 3, static_cast<sqlite3_int64>(timestamp_ns));
+  sqlite3_bind_int64(stmt, 3, timestamp_ns);
   if (sqlite3_step(stmt) != SQLITE_DONE)
     return -1;
   return sqlite3_last_insert_rowid(db_);

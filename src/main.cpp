@@ -438,10 +438,9 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
     }
 
     blk.samples.assign(buf.begin(), buf.begin() + n);
-    blk.timestamp_ns =
-        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                       std::chrono::system_clock::now().time_since_epoch())
-                                       .count());
+    blk.timestamp_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::system_clock::now().time_since_epoch())
+                           .count();
     blk.center_freq_hz = sdr.center_freq_hz();
     blk.sample_rate_hz = sdr.sample_rate_hz();
 

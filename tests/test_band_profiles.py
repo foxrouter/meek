@@ -284,6 +284,13 @@ class TestDabTolerance(unittest.TestCase):
         self.assertTrue(bp.name.startswith("DAB"),
                         f"Expected a DAB profile at 218.640 MHz, got '{bp.name}'")
 
+    def test_dab_11d_matches_at_centre(self):
+        """DAB-11D must match at its centre frequency 222.064 MHz."""
+        bp = find_band(222.064e6)
+        self.assertIsNotNone(bp, "No profile matched 222.064 MHz")
+        self.assertTrue(bp.name.startswith("DAB"),
+                        f"Expected a DAB profile at 222.064 MHz, got '{bp.name}'")
+
 
 class TestAdsbModClass(unittest.TestCase):
 
