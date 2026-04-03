@@ -256,8 +256,8 @@ inline bool Database::apply_schema() {
   // Enables sub-second timestamp resolution for burst classification events.
   {
     char* mig_err = nullptr;
-    const int mig_rc = sqlite3_exec(
-        db_, "ALTER TABLE signals ADD COLUMN timestamp_ns INTEGER;", nullptr, nullptr, &mig_err);
+    const int mig_rc = sqlite3_exec(db_, "ALTER TABLE signals ADD COLUMN timestamp_ns INTEGER;",
+                                    nullptr, nullptr, &mig_err);
     if (mig_rc != SQLITE_OK) {
       const std::string msg = mig_err ? mig_err : sqlite3_errmsg(db_);
       sqlite3_free(mig_err);
