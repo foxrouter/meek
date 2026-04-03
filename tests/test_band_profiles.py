@@ -14,7 +14,6 @@ Requires: no external dependencies
 """
 
 import re
-import sys
 import unittest
 from collections import defaultdict
 from dataclasses import dataclass
