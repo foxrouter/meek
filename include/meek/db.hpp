@@ -269,14 +269,13 @@ inline bool Database::apply_schema() {
   // the column) so it never fails with "no such column" on an upgraded DB.
   {
     char* idx_err = nullptr;
-    const int idx_rc = sqlite3_exec(
-        db_,
-        "CREATE INDEX IF NOT EXISTS idx_signals_timestamp_ns "
-        "ON signals(timestamp_ns DESC) WHERE timestamp_ns IS NOT NULL;",
-        nullptr, nullptr, &idx_err);
+    const int idx_rc = sqlite3_exec(db_,
+                                    "CREATE INDEX IF NOT EXISTS idx_signals_timestamp_ns "
+                                    "ON signals(timestamp_ns DESC) WHERE timestamp_ns IS NOT NULL;",
+                                    nullptr, nullptr, &idx_err);
     if (idx_rc != SQLITE_OK) {
-      std::cerr << "[DB] idx_signals_timestamp_ns: "
-                << (idx_err ? idx_err : sqlite3_errmsg(db_)) << "\n";
+      std::cerr << "[DB] idx_signals_timestamp_ns: " << (idx_err ? idx_err : sqlite3_errmsg(db_))
+                << "\n";
       sqlite3_free(idx_err);
       // Non-fatal: missing index only degrades time-range query performance.
     }
@@ -324,7 +323,7 @@ inline bool Database::prepare_statements() {
 }
 
 inline std::int64_t Database::insert_signal(const std::string& source, const std::string& notes,
-                                             std::uint64_t timestamp_ns) {
+                                            std::uint64_t timestamp_ns) {
   sqlite3_stmt* stmt = insert_signal_stmt_.get();
   sqlite3_reset(stmt);
   sqlite3_bind_text(stmt, 1, source.c_str(), -1, SQLITE_TRANSIENT);
