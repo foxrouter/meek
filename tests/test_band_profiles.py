@@ -184,8 +184,8 @@ class TestBandReachability(unittest.TestCase):
         ism = next((b for b in kUkBands if b.name == "ISM-433"), None)
         self.assertIsNotNone(tpms, "TPMS-433 profile missing from kUkBands")
         self.assertIsNotNone(ism, "ISM-433 profile missing from kUkBands")
-        self.assertNotEqual(tpms.expected_mod, "OOK_AM_LIKE",
-                            "TPMS-433 must have FSK_LIKE expected_mod, not OOK_AM_LIKE")
+        self.assertEqual(tpms.expected_mod, "FSK_LIKE",
+                         "TPMS-433 must have FSK_LIKE expected_mod")
         self.assertLess(tpms.tolerance_hz, ism.tolerance_hz,
                         f"TPMS-433 tolerance ({tpms.tolerance_hz/1e3:.0f} kHz) must be "
                         f"< ISM-433 tolerance ({ism.tolerance_hz/1e3:.0f} kHz)")

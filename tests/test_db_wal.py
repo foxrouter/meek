@@ -305,11 +305,12 @@ class TestWalMode(unittest.TestCase):
 # DATA-01: timestamp_ns round-trip
 # ---------------------------------------------------------------------------
 
-def _extract_signals_ddl() -> str:
-    """Extract the CREATE TABLE signals DDL from include/meek/db.hpp.
+def _extract_schema_sql() -> str:
+    """Extract the full kSchema SQL block from include/meek/db.hpp.
 
-    Raises FileNotFoundError if the header is absent so CI fails clearly.
-    Returns the SQL string ready to pass to conn.executescript()."""
+    Returns the complete SQL string (signals, methods, examples tables)
+    ready to pass to conn.executescript().
+    Raises FileNotFoundError if the header is absent so CI fails clearly."""
     if not _DB_HPP.exists():
         raise FileNotFoundError(
             f"db.hpp not found at expected path: {_DB_HPP}")
@@ -358,7 +359,7 @@ class TestTimestampNsRoundTrip(unittest.TestCase):
         """Apply the real schema + indexes from db.hpp, then run the
         timestamp_ns migration and its post-migration index (replicating the
         startup sequence of Database::apply_schema())."""
-        conn.executescript(_extract_signals_ddl())
+        conn.executescript(_extract_schema_sql())
         conn.executescript(_extract_indexes_ddl())
         # Migration: add timestamp_ns column. On fresh DBs the column already
         # exists (kSchema includes it), so only the expected duplicate-column
@@ -380,7 +381,7 @@ class TestTimestampNsRoundTrip(unittest.TestCase):
 
     def test_timestamp_ns_column_in_real_schema(self):
         """db.hpp kSchema must define timestamp_ns on the signals table."""
-        ddl = _extract_signals_ddl()
+        ddl = _extract_schema_sql()
         self.assertIn(
             "timestamp_ns",
             ddl,
@@ -471,7 +472,7 @@ def _apply_dc_schema(conn):
 
     Raises FileNotFoundError if db.hpp cannot be found.
     """
-    schema_sql = _extract_signals_ddl()
+    schema_sql = _extract_schema_sql()
     conn.executescript(schema_sql)
     # Migrations (duplicate-column errors tolerated on fresh DBs where
     # kSchema already defines these columns).
