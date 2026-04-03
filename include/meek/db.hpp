@@ -287,9 +287,8 @@ inline bool Database::apply_schema() {
   // column was added must be upgraded here so the SELECT does not fail.
   {
     char* mig_err = nullptr;
-    const int mig_rc =
-        sqlite3_exec(db_, "ALTER TABLE examples ADD COLUMN result TEXT;", nullptr, nullptr,
-                     &mig_err);
+    const int mig_rc = sqlite3_exec(db_, "ALTER TABLE examples ADD COLUMN result TEXT;", nullptr,
+                                    nullptr, &mig_err);
     if (mig_rc != SQLITE_OK) {
       const std::string msg = mig_err ? mig_err : sqlite3_errmsg(db_);
       sqlite3_free(mig_err);
