@@ -448,39 +448,51 @@ class TestTimestampNsRoundTrip(unittest.TestCase):
 # DATA-02: decision_trace deduplication
 # ---------------------------------------------------------------------------
 
-# Schema matching test_decode_candidates.py (includes `result` column used by
-# the _CANDIDATES_SQL query in decode_candidates.py).
-_DC_SCHEMA = """
-    CREATE TABLE IF NOT EXISTS signals (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp TEXT NOT NULL DEFAULT (datetime('now')),
-        source TEXT,
-        notes TEXT
-    );
-    CREATE TABLE IF NOT EXISTS methods (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE NOT NULL,
-        params TEXT
-    );
-    CREATE TABLE IF NOT EXISTS examples (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        signal_id INTEGER NOT NULL REFERENCES signals(id),
-        method_id INTEGER NOT NULL REFERENCES methods(id),
-        result TEXT,
-        confidence REAL,
-        notes TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-"""
+def _apply_dc_schema(conn):
+    """Apply the production schema from db.hpp to conn, then run migrations.
+
+    Reads the kSchema raw string literal from include/meek/db.hpp so the test
+    is always run against the real production DDL.  After applying the base
+    schema, runs the same ALTER TABLE migrations that Database::apply_schema()
+    applies at startup (timestamp_ns and examples.result), tolerating the
+    expected duplicate-column OperationalError on fresh DBs where kSchema
+    already includes those columns.
+
+    Raises FileNotFoundError if db.hpp cannot be found.
+    """
+    schema_sql = _extract_signals_ddl()
+    conn.executescript(schema_sql)
+
+    # Migration: timestamp_ns on signals (kSchema now includes it; fresh DBs
+    # will get a duplicate-column error which is expected and tolerated).
+    try:
+        conn.execute("ALTER TABLE signals ADD COLUMN timestamp_ns INTEGER")
+    except sqlite3.OperationalError as exc:
+        msg = str(exc).lower()
+        if "duplicate column" not in msg:
+            raise
+
+    # Migration: result column on examples (kSchema now includes it; same
+    # duplicate-column tolerance applies).
+    try:
+        conn.execute("ALTER TABLE examples ADD COLUMN result TEXT")
+    except sqlite3.OperationalError as exc:
+        msg = str(exc).lower()
+        if "duplicate column" not in msg:
+            raise
+
+    conn.commit()
 
 
 class TestDecisionTraceDeduplicated(unittest.TestCase):
-    """DATA-02: examples.notes must contain band_name only, not decision_trace.
+    """DATA-02: derive band from signals.notes / decision_trace, not examples.notes.
 
-    Validates that decode_candidates.py correctly exposes signals.notes
-    (decision_trace) and examples.notes (band_name) as distinct fields in its
-    output report.  decode_candidates.py is a read-only tool; this test
-    verifies the correct read/mapping behaviour rather than DB mutation.
+    Validates that decode_candidates.py correctly reads the decision trace from
+    signals.notes and derives the reported band from that trace. In this test
+    fixture examples.notes is intentionally empty so the report must not rely
+    on examples.notes for band parsing. decode_candidates.py is a read-only
+    tool; this test verifies the correct read/mapping behaviour rather than DB
+    mutation.
     """
 
     SAMPLE_TRACE = (
@@ -502,7 +514,7 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
         The band name must appear only in signals.notes so the test can verify that
         decode_candidates.py derives it from the correct column."""
         conn = sqlite3.connect(self._db_path)
-        conn.executescript(_DC_SCHEMA)
+        _apply_dc_schema(conn)
         conn.execute("INSERT INTO signals(source, notes) VALUES(?,?)",
                      ("rf_adapt_intel", self.SAMPLE_TRACE))
         sig_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -566,7 +578,7 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
     def test_signal_notes_retains_full_trace(self):
         """signals.notes must retain the full decision_trace."""
         conn = sqlite3.connect(self._db_path)
-        conn.executescript(_DC_SCHEMA)
+        _apply_dc_schema(conn)
         conn.execute("INSERT INTO signals(source, notes) VALUES(?,?)",
                      ("rf_adapt_intel", self.SAMPLE_TRACE))
         conn.commit()

@@ -167,6 +167,7 @@ inline bool Database::apply_schema() {
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       signal_id  INTEGER NOT NULL REFERENCES signals(id),
       method_id  INTEGER NOT NULL REFERENCES methods(id),
+      result     TEXT,
       confidence REAL,
       notes      TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -281,6 +282,23 @@ inline bool Database::apply_schema() {
     }
   }
 
+  // Migration: add result column to examples if it does not exist yet.
+  // decode_candidates.py selects e.result; databases created before this
+  // column was added must be upgraded here so the SELECT does not fail.
+  {
+    char* mig_err = nullptr;
+    const int mig_rc =
+        sqlite3_exec(db_, "ALTER TABLE examples ADD COLUMN result TEXT;", nullptr, nullptr,
+                     &mig_err);
+    if (mig_rc != SQLITE_OK) {
+      const std::string msg = mig_err ? mig_err : sqlite3_errmsg(db_);
+      sqlite3_free(mig_err);
+      if (msg.find("duplicate column") == std::string::npos) {
+        std::cerr << "[DB] migrate examples.result: " << msg << "\n";
+      }
+    }
+  }
+
   return true;
 }
 
@@ -324,8 +342,8 @@ inline bool Database::prepare_statements() {
 
 inline std::int64_t Database::insert_signal(const std::string& source, const std::string& notes,
                                             std::int64_t timestamp_ns) {
-  // timestamp_ns: nanoseconds since Unix epoch, always positive; max
-  // representable value (INT64_MAX) corresponds to year 2262.
+  // timestamp_ns: nanoseconds since Unix epoch; non-negative (0 = unset or
+  // pre-epoch clock, clamped at capture point). INT64_MAX = year 2262.
   sqlite3_stmt* stmt = insert_signal_stmt_.get();
   sqlite3_reset(stmt);
   sqlite3_bind_text(stmt, 1, source.c_str(), -1, SQLITE_TRANSIENT);
