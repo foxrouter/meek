@@ -515,6 +515,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   std::vector<float> scratch;
   scratch.reserve(cfg.analysis_len);
 
+  auto last_prune = std::chrono::steady_clock::now();
   // Idle-path progress throttle: steady_clock::now() is called every idle
   // iteration, but the proc_progress atomic is written at most every 250 ms
   // (wall-clock).  Using elapsed time rather than an iteration count avoids
@@ -562,6 +563,10 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
                 std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch())
                     .count()),
             std::memory_order_relaxed);
+      }
+      if (now - last_prune >= std::chrono::hours(24)) {
+        prune_old_snapshots(cfg.snapshot_dir, cfg.snapshot_retention_days);
+        last_prune = now;
       }
       std::this_thread::sleep_for(std::chrono::microseconds(100));
       continue;
@@ -703,7 +708,6 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   ProcMetrics metrics;
   auto last_metrics_write = std::chrono::steady_clock::now();
   auto last_heartbeat = std::chrono::steady_clock::now();
-  auto last_prune = std::chrono::steady_clock::now();
   // Idle-path progress throttle: steady_clock::now() is called every idle
   // iteration, but out_progress is written at most every 250 ms when no items
   // arrive.  The active path always writes (no throttle) and resets this
@@ -898,10 +902,6 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
     if (now - last_heartbeat >= std::chrono::seconds(30)) {
       write_heartbeat(cfg.heartbeat_file);
       last_heartbeat = now;
-    }
-    if (now - last_prune >= std::chrono::hours(24)) {
-      prune_old_snapshots(cfg.snapshot_dir, cfg.snapshot_retention_days);
-      last_prune = now;
     }
   }
 
