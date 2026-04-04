@@ -341,9 +341,9 @@ inline bool Database::prepare_statements() {
 
 inline std::int64_t Database::insert_signal(const std::string& source, const std::string& notes,
                                             std::int64_t timestamp_ns) {
-  // timestamp_ns: nanoseconds since Unix epoch; non-negative. Capture code now
-  // uses a monotonic steady_clock-based fallback for pre-epoch/nonrepresentable
-  // wall-clock timestamps, so 0 means only "unset/unknown". INT64_MAX = year 2262.
+  // timestamp_ns: epoch nanoseconds when available; otherwise a monotonic
+  // steady_clock-based fallback for pre-epoch/nonrepresentable wall-clock
+  // timestamps. 0 means only "unset/unknown". INT64_MAX = year 2262.
   sqlite3_stmt* stmt = insert_signal_stmt_.get();
   sqlite3_reset(stmt);
   sqlite3_bind_text(stmt, 1, source.c_str(), -1, SQLITE_TRANSIENT);
