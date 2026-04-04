@@ -33,18 +33,25 @@ from crc_helpers import append_crc32, crc32_bytes  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# CRC-32 helper (mirrors check_crc32_bits in src/main.cpp)
+# CRC-32 helper for bit sequences used by these tests
 # ---------------------------------------------------------------------------
 
 def crc32_bits(bits: List[int]) -> int:
-    """Compute CRC-32 (IEEE 802.3) of bit sequence packed MSB-first."""
+    """Compute CRC-32 (IEEE 802.3) of bit sequence packed MSB-first.
+
+    If the final group contains fewer than 8 bits it is left-aligned in the
+    byte and zero-padded in the least-significant bits before the CRC is
+    calculated.
+    """
     n = len(bits)
     data = bytearray()
     for i in range(0, n, 8):
         byte = 0
-        for b in range(8):
-            if i + b < n:
-                byte = (byte << 1) | (bits[i + b] & 1)
+        chunk_len = min(8, n - i)
+        for b in range(chunk_len):
+            byte = (byte << 1) | (bits[i + b] & 1)
+        if chunk_len < 8:
+            byte <<= 8 - chunk_len
         data.append(byte)
     return crc32_bytes(bytes(data))
 
