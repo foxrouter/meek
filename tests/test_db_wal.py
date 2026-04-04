@@ -658,9 +658,33 @@ class TestDemodLockMsSentinel(unittest.TestCase):
         cls._SENTINEL_NOT_APPLICABLE = -1
         if m is None:
             # Verify the constant is documented somewhere in the comment block
-            # near the field; if not, assert loudly so the test is not silently
-            # vacuous.
-            if "-1" not in content:
+            # near the field; restrict the search to a small window around the
+            # demod_lock_ms field declaration so unrelated "-1" occurrences
+            # elsewhere in the header do not produce a false pass.
+            field_match = re.search(r"\bint\s+demod_lock_ms\b[^;]*;", content)
+            if field_match is None:
+                raise AssertionError(
+                    "sample_types.hpp: demod_lock_ms field not found; "
+                    "update this test"
+                )
+            window_start = content.rfind("\n", 0, field_match.start())
+            for _ in range(2):
+                if window_start <= 0:
+                    break
+                window_start = content.rfind("\n", 0, window_start)
+            if window_start == -1:
+                window_start = 0
+            else:
+                window_start += 1
+            window_end = field_match.end()
+            for _ in range(3):
+                next_newline = content.find("\n", window_end)
+                if next_newline == -1:
+                    window_end = len(content)
+                    break
+                window_end = next_newline + 1
+            local_window = content[window_start:window_end]
+            if "-1" not in local_window:
                 raise AssertionError(
                     "sample_types.hpp: OOK not-applicable sentinel (-1) not found "
                     "near demod_lock_ms; update the comment or this test"
