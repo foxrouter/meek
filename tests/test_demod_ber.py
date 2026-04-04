@@ -29,42 +29,31 @@ import numpy as np
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "tests"))
 
+from crc_helpers import append_crc32, crc32_bytes  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
-# CRC-32 helper (mirrors check_crc32_bits in src/main.cpp)
+# CRC-32 helper for bit sequences used by these tests
 # ---------------------------------------------------------------------------
-
-def _build_crc32_table() -> List[int]:
-    table = []
-    for i in range(256):
-        c = i
-        for _ in range(8):
-            c = (0xEDB88320 ^ (c >> 1)) if (c & 1) else (c >> 1)
-        table.append(c)
-    return table
-
-
-_CRC32_TABLE = _build_crc32_table()
-
 
 def crc32_bits(bits: List[int]) -> int:
-    """Compute CRC-32 (IEEE 802.3) of bit sequence packed MSB-first."""
-    crc = 0xFFFFFFFF
+    """Compute CRC-32 (IEEE 802.3) of bit sequence packed MSB-first.
+
+    If the final group contains fewer than 8 bits it is left-aligned in the
+    byte and zero-padded in the least-significant bits before the CRC is
+    calculated.
+    """
     n = len(bits)
+    data = bytearray()
     for i in range(0, n, 8):
         byte = 0
-        for b in range(8):
-            if i + b < n:
-                byte = (byte << 1) | (bits[i + b] & 1)
-        crc = _CRC32_TABLE[(crc ^ byte) & 0xFF] ^ (crc >> 8)
-    return crc ^ 0xFFFFFFFF
-
-
-def append_crc32(bits: List[int]) -> List[int]:
-    """Append 32 CRC bits (big-endian) to a bit sequence."""
-    crc = crc32_bits(bits)
-    crc_bits = [(crc >> (31 - i)) & 1 for i in range(32)]
-    return bits + crc_bits
+        chunk_len = min(8, n - i)
+        for b in range(chunk_len):
+            byte = (byte << 1) | (bits[i + b] & 1)
+        if chunk_len < 8:
+            byte <<= 8 - chunk_len
+        data.append(byte)
+    return crc32_bytes(bytes(data))
 
 
 def check_crc32(bits: List[int]) -> bool:
