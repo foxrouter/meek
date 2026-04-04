@@ -52,17 +52,6 @@ def _gen_ook_iq(bits: List[int], k: int, phase_offset: int = 0,
     return iq
 
 
-def _frac_interp(iq: np.ndarray, pos_f: float) -> complex:
-    """Linear interpolation at a fractional sample position."""
-    i = int(math.floor(pos_f))
-    frac = pos_f - i
-    if 0 <= i < len(iq) - 1:
-        return complex(iq[i]) * (1.0 - frac) + complex(iq[i + 1]) * frac
-    if 0 <= i < len(iq):
-        return complex(iq[i])
-    return complex(0, 0)
-
-
 def _demod_fsk_gardner(iq: np.ndarray, k: int,
                        use_scaled_gain: bool = True) -> Tuple[List[int], bool]:
     """
@@ -72,6 +61,15 @@ def _demod_fsk_gardner(iq: np.ndarray, k: int,
     use_scaled_gain=False - original broken implementation: fixed gain 0.01.
     Returns (decoded_bits, lock_achieved).
     """
+    def _interp(buf: np.ndarray, idx_f: float) -> complex:
+        """Linear interpolation between adjacent samples."""
+        i0 = int(math.floor(idx_f))
+        i1 = i0 + 1
+        frac = idx_f - i0
+        s0 = complex(buf[i0]) if 0 <= i0 < len(buf) else 0j
+        s1 = complex(buf[i1]) if 0 <= i1 < len(buf) else 0j
+        return s0 + frac * (s1 - s0)
+
     n = len(iq)
     tau = 0.0
     x_sym = complex(0, 0)
@@ -81,9 +79,11 @@ def _demod_fsk_gardner(iq: np.ndarray, k: int,
     lock_threshold = 0.5 / k  # adaptive: scales with oversampling ratio
     pos = 0
     while pos + k <= n:
-        # Apply fractional tau to sampling instants via linear interpolation
-        x_mid = _frac_interp(iq, pos + k // 2 + tau)
-        x_cur = _frac_interp(iq, pos + k - 1 + tau)
+        # Apply tau (symbol-normalised fraction) to sampling instants
+        mid_f = pos + k / 2.0 + tau * k
+        end_f = pos + k - 1.0 + tau * k
+        x_mid = _interp(iq, mid_f)
+        x_cur = _interp(iq, end_f)
         e = float(np.real((x_cur - x_sym) * np.conj(x_mid)))
         if use_scaled_gain:
             sym_energy = float(np.mean(np.abs(iq[pos:pos + k]) ** 2))
