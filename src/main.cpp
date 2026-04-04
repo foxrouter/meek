@@ -82,6 +82,7 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -534,6 +535,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   // release store after its last push) guarantees no further blocks.
   bool cap_done_seen = false;
   auto last_prune = std::chrono::steady_clock::now();
+  std::future<void> prune_future;
 
   // Loop until stop is requested AND the buffer is truly empty, OR until
   // capture_loop has signalled completion (cap_exiting) and the buffer is
@@ -566,8 +568,14 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       }
       const auto prune_now = std::chrono::steady_clock::now();
       if (prune_now - last_prune >= std::chrono::hours(24)) {
-        prune_old_snapshots(cfg.snapshot_dir, cfg.snapshot_retention_days);
+        if (prune_future.valid())
+          prune_future.wait();
         last_prune = prune_now;
+        const auto snapshot_dir = cfg.snapshot_dir;
+        const auto retention_days = cfg.snapshot_retention_days;
+        prune_future = std::async(std::launch::async, [snapshot_dir, retention_days]() {
+          prune_old_snapshots(snapshot_dir, retention_days);
+        });
       }
       std::this_thread::sleep_for(std::chrono::microseconds(100));
       continue;
@@ -681,19 +689,18 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     }
     const auto prune_now = std::chrono::steady_clock::now();
     if (prune_now - last_prune >= std::chrono::hours(24)) {
-      static std::atomic<bool> prune_in_progress{false};
-      bool expected = false;
-      if (prune_in_progress.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-        last_prune = prune_now;
-        const auto snapshot_dir = cfg.snapshot_dir;
-        const auto retention_days = cfg.snapshot_retention_days;
-        std::thread([snapshot_dir, retention_days]() {
-          prune_old_snapshots(snapshot_dir, retention_days);
-          prune_in_progress.store(false, std::memory_order_release);
-        }).detach();
-      }
+      if (prune_future.valid())
+        prune_future.wait();
+      last_prune = prune_now;
+      const auto snapshot_dir = cfg.snapshot_dir;
+      const auto retention_days = cfg.snapshot_retention_days;
+      prune_future = std::async(std::launch::async, [snapshot_dir, retention_days]() {
+        prune_old_snapshots(snapshot_dir, retention_days);
+      });
     }
   }
+  if (prune_future.valid())
+    prune_future.wait();
   // Signal output_loop that no further ClassificationResults will be pushed.
   // Release ordering ensures all prior pushes to out_buf are visible before
   // output_loop's acquire-load of this flag.
