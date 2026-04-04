@@ -258,9 +258,14 @@ class TestOokTimingRecovery(unittest.TestCase):
 
     def test_fixed_grid_fails_at_bad_offsets(self):
         """Documents the failure DEM-05 fixes."""
-        phi = self.K // 4
+        phi = 3 * self.K // 4
         ber_fixed = self._ber_at_offset(phi, use_phase_search=False)
         ber_search = self._ber_at_offset(phi, use_phase_search=True)
+        self.assertGreater(
+            ber_fixed, 0.3,
+            f"Fixed grid BER={ber_fixed:.3f} at phi={phi} is unexpectedly low "
+            "- the failure mode DEM-05 fixes may not be exercised",
+        )
         self.assertLess(
             ber_search, ber_fixed,
             f"Phase search BER ({ber_search:.3f}) not better than fixed grid "
