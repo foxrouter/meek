@@ -16,12 +16,18 @@ Requires: numpy
 """
 
 import math
+import sys
 import unittest
+from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
 
-from crc_helpers import append_crc32
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
+from crc_helpers import append_crc32  # noqa: E402
 
 
 def _gen_fsk2_iq(bits: List[int], k: int, fdev_norm: float) -> np.ndarray:
@@ -55,9 +61,10 @@ def _gen_ook_iq(bits: List[int], k: int, phase_offset: int = 0,
 def _demod_fsk_gardner(iq: np.ndarray, k: int,
                        use_scaled_gain: bool = True) -> Tuple[List[int], bool]:
     """
-    use_scaled_gain=True  - DEM-04 fix: gain normalised by k-squared and symbol energy;
-                            err_ema also tracks the normalised residual so the adaptive
-                            lock threshold 0.5/k is met quickly.
+    use_scaled_gain=True  - DEM-04 fix: gain normalised by k-squared and
+                            symbol energy; err_ema also tracks the normalised
+                            residual so the adaptive lock threshold 0.5/k is
+                            met quickly.
     use_scaled_gain=False - original broken implementation: fixed gain 0.01.
     Returns (decoded_bits, lock_achieved).
     """
@@ -198,8 +205,12 @@ class TestGardnerTimingConvergence(unittest.TestCase):
     def test_scaled_gain_ber_below_threshold(self):
         rx_bits, _ = _demod_fsk_gardner(self.iq, self.K, use_scaled_gain=True)
         ber = _ber(self.tx_bits, rx_bits)
-        self.assertLess(ber, 0.15,
-                        f"BER={ber:.3f} at k={self.K} with scaled gain - expected < 0.15")
+        self.assertLess(
+            ber,
+            0.15,
+            f"BER={ber:.3f} at k={self.K} with scaled gain - "
+            "expected < 0.15",
+        )
 
     def test_fixed_gain_fails_at_k16(self):
         """Documents the known failure DEM-04 fixes."""
@@ -239,17 +250,26 @@ class TestOokTimingRecovery(unittest.TestCase):
     def test_phase_search_low_ber_all_offsets(self):
         for phi in range(self.K):
             ber = self._ber_at_offset(phi, use_phase_search=True)
-            self.assertLess(ber, 0.10,
-                            f"Phase search BER={ber:.3f} at phi={phi} - expected < 0.10")
+            self.assertLess(
+                ber,
+                0.10,
+                (
+                    f"Phase search BER={ber:.3f} at phi={phi} "
+                    f"- expected < 0.10"
+                ),
+            )
 
     def test_fixed_grid_fails_at_bad_offsets(self):
         """Documents the failure DEM-05 fixes."""
         phi = self.K // 4
         ber_fixed = self._ber_at_offset(phi, use_phase_search=False)
         ber_search = self._ber_at_offset(phi, use_phase_search=True)
-        self.assertLess(ber_search, ber_fixed,
-                        f"Phase search BER ({ber_search:.3f}) not better than fixed grid "
-                        f"({ber_fixed:.3f}) at phi={phi} - regression suspected")
+        self.assertLess(
+            ber_search, ber_fixed,
+            f"Phase search BER ({ber_search:.3f}) not better than fixed grid "
+            f"({ber_fixed:.3f}) at phi={phi}"
+            " - regression suspected",
+        )
 
     def test_phase_search_zero_offset(self):
         ber = self._ber_at_offset(0, use_phase_search=True)
