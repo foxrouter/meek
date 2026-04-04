@@ -564,6 +564,11 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
                     .count()),
             std::memory_order_relaxed);
       }
+      const auto prune_now = std::chrono::steady_clock::now();
+      if (prune_now - last_prune >= std::chrono::hours(24)) {
+        prune_old_snapshots(cfg.snapshot_dir, cfg.snapshot_retention_days);
+        last_prune = prune_now;
+      }
       std::this_thread::sleep_for(std::chrono::microseconds(100));
       continue;
     }
@@ -673,11 +678,6 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     if (!pushed) {
       proc_dropped.fetch_add(1, std::memory_order_relaxed);
       cr = ClassificationResult{};
-    }
-    const auto prune_now = std::chrono::steady_clock::now();
-    if (prune_now - last_prune >= std::chrono::hours(24)) {
-      prune_old_snapshots(cfg.snapshot_dir, cfg.snapshot_retention_days);
-      last_prune = prune_now;
     }
   }
   // Signal output_loop that no further ClassificationResults will be pushed.
