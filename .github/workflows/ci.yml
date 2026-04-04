@@ -112,6 +112,7 @@ jobs:
 
       - name: test_rf_audit
         run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_HARDWARE_TARGETS=OFF
           cmake --build build -t rf_audit
           python3 tests/test_rf_audit.py -v
 

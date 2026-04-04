@@ -85,21 +85,21 @@ class TestRfAuditJsonOutput(unittest.TestCase):
         return json.loads(lines[0])
 
     def test_output_has_required_fields(self):
-        """rf_audit JSON must contain file, snr_db, confidence, and mod_class."""
+        """rf_audit JSON must contain file, snr_db, confidence, and mod."""
         p = Path(self.tmp) / "tone.cf32"
         _write_cf32(p, _make_tone_cf32())
         j = self._run(["--snr-min", "0", "--conf-threshold", "0"], p)
-        for field in ("file", "snr_db", "confidence", "mod_class"):
+        for field in ("file", "snr_db", "confidence", "mod"):
             self.assertIn(field, j,
                 f"Required field '{field}' missing from rf_audit output: {j}")
 
     def test_tone_classifies_as_cw_or_fsk(self):
-        """A clean tone should be classified as CW_LIKE or FSK_LIKE."""
+        """A clean tone should be classified as cw_like or fsk_like."""
         p = Path(self.tmp) / "tone_class.cf32"
         _write_cf32(p, _make_tone_cf32(n=8192, freq_norm=0.05, amplitude=1.0))
         j = self._run(["--snr-min", "0", "--conf-threshold", "0"], p)
-        self.assertIn(j.get("mod_class"), ("CW_LIKE", "FSK_LIKE"),
-            f"Tone classified as {j.get('mod_class')} — expected CW_LIKE or FSK_LIKE")
+        self.assertIn(j.get("mod"), ("cw_like", "fsk_like"),
+            f"Tone classified as {j.get('mod')} — expected cw_like or fsk_like")
 
     def test_snr_field_is_numeric(self):
         """snr_db must be a finite float."""
@@ -128,16 +128,16 @@ class TestRfAuditJsonOutput(unittest.TestCase):
             "rf_audit should exit non-zero for a missing file")
 
     def test_center_freq_triggers_band_match(self):
-        """Passing --center-freq 433920000 must populate band_name in output."""
+        """Passing --center-freq 433920000 must populate band in output."""
         p = Path(self.tmp) / "ism433.cf32"
         _write_cf32(p, _make_tone_cf32(n=8192, freq_norm=0.05))
         j = self._run(
             ["--snr-min", "0", "--conf-threshold", "0",
              "--center-freq", "433920000"], p)
-        self.assertIn("band_name", j,
-            "band_name field missing when --center-freq matches a known band")
-        self.assertEqual(j["band_name"], "ISM-433",
-            f"Expected band_name=ISM-433, got {j.get('band_name')!r}")
+        self.assertIn("band", j,
+            "band field missing when --center-freq matches a known band")
+        self.assertEqual(j["band"], "ISM-433",
+            f"Expected band=ISM-433, got {j.get('band')!r}")
 
     @classmethod
     def tearDownClass(cls):
