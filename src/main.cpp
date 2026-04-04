@@ -456,7 +456,7 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
       while (true) {
         const auto candidate = (steady_ts_ns > last) ? steady_ts_ns : (last + 1);
         if (fallback_ts_ns.compare_exchange_weak(last, candidate, std::memory_order_relaxed,
-                                                 std::memory_order_relaxed)) {
+                                                 std::memory_order_acquire)) {
           blk.timestamp_ns = candidate;
           break;
         }
