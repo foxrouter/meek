@@ -8,11 +8,15 @@ on:
       - "include/**"
       - "tools/**"
       - "tests/**"
+      - "ops/**"
+      - "scripts/**"
+      - "systemd/**"
       - "CMakeLists.txt"
       - "Dockerfile"
       - "install.sh"
-      - "ops/**"
       - "requirements.txt"
+      - ".clang-format"
+      - ".pre-commit-config.yaml"
       - ".github/workflows/**"
   pull_request:
     branches: ["main", "master"]
@@ -22,10 +26,14 @@ on:
       - "tools/**"
       - "tests/**"
       - "ops/**"
+      - "scripts/**"
+      - "systemd/**"
       - "CMakeLists.txt"
       - "Dockerfile"
       - "install.sh"
       - "requirements.txt"
+      - ".clang-format"
+      - ".pre-commit-config.yaml"
       - ".github/workflows/**"
 
 # Default to read-only permissions for all jobs; individual jobs may widen
