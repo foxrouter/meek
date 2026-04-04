@@ -107,8 +107,15 @@ def _demod_fsk_gardner(iq: np.ndarray, k: int,
         if lock_sym < 0 and err_ema < lock_threshold:
             lock_sym = len(bits_out)
         if k > 1:
-            inst_freq = float(np.mean(np.angle(
-                iq[pos + 1:pos + k] * np.conj(iq[pos:pos + k - 1]))))
+            # Compute discriminator over tau-adjusted interpolated positions
+            # so bit decisions are tied to the timing recovery state.
+            phase_incs = []
+            for s in range(k - 1):
+                s0 = _interp(iq, pos + s + tau)
+                s1 = _interp(iq, pos + s + 1 + tau)
+                if abs(s0) > 1e-12 and abs(s1) > 1e-12:
+                    phase_incs.append(float(np.angle(s1 * np.conj(s0))))
+            inst_freq = float(np.mean(phase_incs)) if phase_incs else 0.0
         else:
             inst_freq = 0.0
         bits_out.append(1 if inst_freq > 0 else 0)
