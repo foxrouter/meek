@@ -3,18 +3,40 @@ name: CI
 on:
   push:
     branches: ["main", "master", "copilot/**"]
-    paths-ignore:
-      - "docs/**"
-      - "README.md"
-      - ".github/CODEOWNERS"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
+    paths:
+      - "src/**"
+      - "include/**"
+      - "tools/**"
+      - "tests/**"
+      - "ops/**"
+      - "scripts/**"
+      - "systemd/**"
+      - "CMakeLists.txt"
+      - "Dockerfile"
+      - "install.sh"
+      - "requirements.txt"
+      - ".clang-format"
+      - ".pre-commit-config.yaml"
+      - "benchmarks/**"
+      - ".github/workflows/**"
   pull_request:
     branches: ["main", "master"]
-    paths-ignore:
-      - "docs/**"
-      - "README.md"
-      - ".github/CODEOWNERS"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
+    paths:
+      - "src/**"
+      - "include/**"
+      - "tools/**"
+      - "tests/**"
+      - "ops/**"
+      - "scripts/**"
+      - "systemd/**"
+      - "CMakeLists.txt"
+      - "Dockerfile"
+      - "install.sh"
+      - "requirements.txt"
+      - ".clang-format"
+      - ".pre-commit-config.yaml"
+      - "benchmarks/**"
+      - ".github/workflows/**"
 
 # Default to read-only permissions for all jobs; individual jobs may widen
 # specific permissions as needed (e.g. docker job needs packages: write).
@@ -58,6 +80,7 @@ jobs:
             tests/test_iq_metrics.py \
             tests/test_db_wal.py \
             tests/test_classifier_correctness.py \
+            tests/test_band_profiles.py \
             benchmarks/bench_iq_metrics.py
 
       - name: test_autotune
@@ -71,6 +94,9 @@ jobs:
 
       - name: test_classifier_correctness
         run: python3 tests/test_classifier_correctness.py -v
+
+      - name: test_band_profiles
+        run: python3 tests/test_band_profiles.py -v
 
       - name: test_db_wal
         run: python3 tests/test_db_wal.py -v
@@ -235,12 +261,38 @@ jobs:
   # 4. HAVE_LIQUID build — compile rf_adapt_intel with liquid-dsp enabled
   #    and run the demod BER/CRC-32 Python integration test.
   # ─────────────────────────────────────────────────────────────────────────
-  cpp-liquid:
-    name: C++ liquid-dsp build (HAVE_LIQUID)
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request'
+  changes-liquid:
+    name: Detect liquid-relevant changes
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      pull-requests: read
+    outputs:
+      liquid: ${{ steps.filter.outputs.liquid }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            liquid:
+              - 'src/**'
+              - 'include/**'
+              - 'CMakeLists.txt'
+              - 'tests/test_demod_ber.py'
+
+  cpp-liquid:
+    name: C++ liquid-dsp build (HAVE_LIQUID)
+    runs-on: ubuntu-24.04
+    needs: changes-liquid
+    permissions:
+      contents: read
+    if: |
+      needs.changes-liquid.outputs.liquid == 'true' ||
+      github.ref == 'refs/heads/main' ||
+      github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v6
 
@@ -368,12 +420,37 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   # 6. Container image build (Docker)
   # ─────────────────────────────────────────────────────────────────────────
-  docker:
-    name: Container image build
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+  changes-docker:
+    name: Detect docker-relevant changes
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      pull-requests: read
+    outputs:
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            docker:
+              - 'Dockerfile'
+              - 'install.sh'
+              - 'ops/**'
+
+  docker:
+    name: Container image build
+    runs-on: ubuntu-24.04
+    needs: changes-docker
+    permissions:
+      contents: read
+    if: |
+      needs.changes-docker.outputs.docker == 'true' ||
+      github.ref == 'refs/heads/main' ||
+      github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v6
 

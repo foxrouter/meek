@@ -1,6 +1,6 @@
 // include/meek/band_profiles.hpp — Compile-time UK frequency band profiles.
 //
-// Contains a constexpr array of BandProfile structs covering 38 UK SDR-relevant
+// Contains a constexpr array of BandProfile structs covering 39 UK SDR-relevant
 // frequency allocations.  No runtime JSON/YAML parsing is needed for static data.
 // These are built-in defaults; runtime configuration is handled at a higher level.
 
@@ -35,14 +35,15 @@ struct BandProfile {
 inline constexpr double kBandSnrUseDefault = -999.0;
 
 // ---------------------------------------------------------------------------
-// UK band profile table (38 entries) — compiled in, zero runtime cost
+// UK band profile table (39 entries) — compiled in, zero runtime cost
 // ---------------------------------------------------------------------------
 
 // clang-format off
-inline constexpr std::array<BandProfile, 38> kUkBands = {{
-  {"ADS-B", "ADS-B 1090 MHz transponders",
-   1090e6, 2e6, 1e6, ModClass::OOK_AM_LIKE, 3.0, 0.20,
-   "Mode-S/ADS-B squitters at 1090 MHz. Decode with dump1090 or readsb."},
+inline constexpr std::array<BandProfile, 39> kUkBands = {{
+  {"ADS-B", "ADS-B 1090 MHz Mode-S transponders (PPM)",
+   1090e6, 2e6, 1e6, ModClass::UNKNOWN, 3.0, 0.0,
+   "PPM modulation - not classifiable by heuristic classifier. "
+   "Capture and decode externally with dump1090 or readsb."},
   {"VDL2", "VHF Data Link Mode 2 (136.9 MHz)",
    136.9e6, 0.5e6, 25e3, ModClass::PSK_QAM_LIKE, 2.0, 0.15,
    "ACARS replacement using D8PSK at 10500 bps. Active on 136.900/136.925/136.950 MHz in UK."},
@@ -80,11 +81,14 @@ inline constexpr std::array<BandProfile, 38> kUkBands = {{
    868.42e6, 0.1e6, 100e3, ModClass::FSK_LIKE, 1.0, 0.12,
    "Z-Wave home automation protocol. GFSK 100 kbps. EU frequency 868.42 MHz."},
   {"TPMS-433", "Tyre Pressure Monitoring System (433 MHz)",
-   433.92e6, 2.0e6, 100e3, ModClass::FSK_LIKE, 0.0, 0.12,
+   433.92e6, 0.5e6, 100e3, ModClass::FSK_LIKE, 0.0, 0.12,
    "OBD/TPMS sensors from vehicles at 433.92 MHz. FSK or OOK. Decode with rtl_433."},
-  {"DAB", "DAB/DAB+ digital radio (174-240 MHz)",
-   218.64e6, 36e6, 1.5e6, ModClass::PSK_QAM_LIKE, 3.0, 0.18,
-   "Digital Audio Broadcasting. OFDM/DQPSK in 1.536 MHz channels (Bands III/L)."},
+  {"DAB", "DAB Block 12B - UK National / BBC (218.640 MHz)",
+   218.64e6, 0.9e6, 1.536e6, ModClass::PSK_QAM_LIKE, 3.0, 0.18,
+   "Digital Audio Broadcasting block 12B. OFDM/DQPSK in 1.536 MHz channels."},
+  {"DAB", "DAB Block 11D - UK Commercial (222.064 MHz)",
+   222.064e6, 0.9e6, 1.536e6, ModClass::PSK_QAM_LIKE, 3.0, 0.18,
+   "Digital Audio Broadcasting block 11D. OFDM/DQPSK in 1.536 MHz channels."},
   {"TETRA", "TETRA public safety radio (380-430 MHz)",
    392.0e6, 20.0e6, 25e3, ModClass::PSK_QAM_LIKE, 2.0, 0.20,
    "Terrestrial Trunked Radio. PI/4-DQPSK 25 kHz channels. UK emergency services."},
@@ -116,7 +120,7 @@ inline constexpr std::array<BandProfile, 38> kUkBands = {{
    169.406e6, 0.1e6, 12.5e3, ModClass::FSK_LIKE, kBandSnrUseDefault, 0.13,
    "Wireless M-Bus utility metering at 169.406 MHz (EN 13757-4 mode N). GFSK."},
   {"ZIGBEE-868", "ZigBee 868 MHz (EU channel 0)",
-   868.3e6, 0.1e6, 600e3, ModClass::PSK_QAM_LIKE, kBandSnrUseDefault, 0.12,
+   868.3e6, 0.05e6, 600e3, ModClass::PSK_QAM_LIKE, kBandSnrUseDefault, 0.12,
    "ZigBee/IEEE 802.15.4 at 868.3 MHz (EU channel 0). O-QPSK 250 kbps."},
   {"DECT", "DECT cordless phones (1881.792 MHz)",
    1881.792e6, 20.0e6, 1.728e6, ModClass::FSK_LIKE, kBandSnrUseDefault, 0.15,
@@ -128,7 +132,7 @@ inline constexpr std::array<BandProfile, 38> kUkBands = {{
    136.9e6, 0.05e6, 8e3, ModClass::OOK_AM_LIKE, kBandSnrUseDefault, 0.15,
    "Aircraft Communications Addressing and Reporting System on 136.900 MHz. AM-MSK."},
   {"ISM-169", "ISM 169 MHz sub-GHz IoT",
-   169.406e6, 0.1e6, 12.5e3, ModClass::FSK_LIKE, kBandSnrUseDefault, 0.12,
+   169.406e6, 0.05e6, 12.5e3, ModClass::FSK_LIKE, kBandSnrUseDefault, 0.12,
    "ISM/metering devices at 169.406 MHz. GFSK."},
   {"IRIDIUM", "Iridium LEO satellite (1621.250 MHz)",
    1621.25e6, 5.0e6, 100e3, ModClass::PSK_QAM_LIKE, 3.0, 0.15,
@@ -169,6 +173,8 @@ inline constexpr std::array<BandProfile, 38> kUkBands = {{
 
 /// Returns a pointer to the closest BandProfile whose centre is within
 /// tolerance_hz of center_hz, or nullptr if no profile matches.
+/// Tie-break: narrower tolerance_hz wins so specific profiles always beat
+/// wide catch-all bands at a shared centre frequency.
 /// Pure function; O(N) over kUkBands.
 [[nodiscard]] inline const BandProfile* find_band(double center_hz) noexcept {
   const BandProfile* best = nullptr;
@@ -176,7 +182,8 @@ inline constexpr std::array<BandProfile, 38> kUkBands = {{
   for (const auto& bp : kUkBands) {
     double dist = std::abs(center_hz - bp.center_hz);
     if (dist <= bp.tolerance_hz) {
-      if (best == nullptr || dist < best_dist) {
+      if (best == nullptr || dist < best_dist ||
+          (dist == best_dist && bp.tolerance_hz < best->tolerance_hz)) {
         best = &bp;
         best_dist = dist;
       }

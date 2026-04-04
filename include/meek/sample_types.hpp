@@ -78,7 +78,14 @@ enum class DemodStatus : std::uint8_t {
 
 struct SampleBlock {
   std::vector<std::complex<float>> samples;
-  std::uint64_t timestamp_ns{0};
+  /// Capture timestamp in nanoseconds.
+  /// When a non-negative system_clock time is available, this is nanoseconds
+  /// since the Unix epoch. Otherwise capture_loop may store a steady_clock-
+  /// derived monotonic fallback value to preserve uniqueness/ordering, which
+  /// is not Unix-epoch-based wall-clock time. A value of 0 remains the
+  /// default/unset value. INT64_MAX corresponds to year 2262 for epoch-based
+  /// timestamps.
+  std::int64_t timestamp_ns{0};
   double center_freq_hz{0.0};
   double sample_rate_hz{0.0};
 };
@@ -89,7 +96,14 @@ struct SampleBlock {
 
 struct ClassificationResult {
   // Input metadata
-  std::uint64_t timestamp_ns{0};
+  /// Capture timestamp in nanoseconds.
+  /// When a non-negative system_clock time is available, this is nanoseconds
+  /// since the Unix epoch. Otherwise capture_loop may store a steady_clock-
+  /// derived monotonic fallback value to preserve uniqueness/ordering, which
+  /// is not Unix-epoch-based wall-clock time. A value of 0 remains the
+  /// default/unset value. INT64_MAX corresponds to year 2262 for epoch-based
+  /// timestamps.
+  std::int64_t timestamp_ns{0};
   double center_freq_hz{0.0};
   double sample_rate_hz{0.0};
 

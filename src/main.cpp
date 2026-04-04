@@ -227,7 +227,7 @@ static void handle_term(int) noexcept {
 // ---------------------------------------------------------------------------
 
 static void write_snapshot(const std::string& dir, std::span<const std::complex<float>> samples,
-                           double conf, std::uint64_t ts_ns, const std::string& band_name,
+                           double conf, std::int64_t ts_ns, const std::string& band_name,
                            std::atomic<std::uint64_t>& snap_errors) noexcept {
   try {
     std::filesystem::create_directories(dir);
@@ -393,7 +393,7 @@ struct SnapTask {
   std::vector<std::complex<float>> samples;
   std::string dir;
   double conf{0.0};
-  std::uint64_t ts_ns{0};
+  std::int64_t ts_ns{0};
   std::string band_name;  // embedded in filename; empty when no band matched
 };
 
@@ -438,10 +438,30 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
     }
 
     blk.samples.assign(buf.begin(), buf.begin() + n);
-    blk.timestamp_ns =
-        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                       std::chrono::system_clock::now().time_since_epoch())
-                                       .count());
+    const auto raw_ts_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::system_clock::now().time_since_epoch())
+                               .count();
+    if (raw_ts_ns >= 0) {
+      blk.timestamp_ns = raw_ts_ns;
+    } else {
+      // Preserve uniqueness even when the wall clock is pre-epoch or mis-set.
+      // A plain clamp to 0 causes repeated snapshot filenames such as
+      // "snap_0_..." to collide and overwrite each other. Use a monotonic
+      // fallback derived from steady_clock and force strict increase.
+      static std::atomic<std::int64_t> fallback_ts_ns{0};
+      const auto steady_ts_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                    std::chrono::steady_clock::now().time_since_epoch())
+                                    .count();
+      auto last = fallback_ts_ns.load(std::memory_order_relaxed);
+      while (true) {
+        const auto candidate = (steady_ts_ns > last) ? steady_ts_ns : (last + 1);
+        if (fallback_ts_ns.compare_exchange_weak(last, candidate, std::memory_order_relaxed,
+                                                 std::memory_order_relaxed)) {
+          blk.timestamp_ns = candidate;
+          break;
+        }
+      }
+    }
     blk.center_freq_hz = sdr.center_freq_hz();
     blk.sample_rate_hz = sdr.sample_rate_hz();
 
@@ -788,9 +808,11 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
       metrics.conf_sum += cr.confidence;
 
       if (method_id >= 0) {
-        const std::int64_t sig_id = db.insert_signal("rf_adapt_intel", cr.decision_trace);
+        const std::int64_t sig_id =
+            db.insert_signal("rf_adapt_intel", cr.decision_trace, cr.timestamp_ns);
         if (sig_id >= 0) {
-          if (db.insert_example(sig_id, method_id, cr.confidence, cr.decision_trace) < 0) {
+          if (db.insert_example(sig_id, method_id, cr.confidence, cr.decision_trace,
+                                std::string(mod_class_name(cr.mod_class))) < 0) {
             ++metrics.db_errors;
           }
         } else {
