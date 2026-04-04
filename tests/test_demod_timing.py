@@ -253,10 +253,7 @@ class TestOokTimingRecovery(unittest.TestCase):
             self.assertLess(
                 ber,
                 0.10,
-                (
-                    f"Phase search BER={ber:.3f} at phi={phi} "
-                    f"- expected < 0.10"
-                ),
+                f"Phase search BER={ber:.3f} at phi={phi} - expected < 0.10",
             )
 
     def test_fixed_grid_fails_at_bad_offsets(self):
