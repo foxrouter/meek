@@ -81,6 +81,7 @@ jobs:
             tests/test_db_wal.py \
             tests/test_classifier_correctness.py \
             tests/test_band_profiles.py \
+            tests/test_demod_timing.py \
             benchmarks/bench_iq_metrics.py
 
       - name: test_autotune
@@ -103,6 +104,9 @@ jobs:
 
       - name: test_demod_ber
         run: python3 tests/test_demod_ber.py -v
+
+      - name: test_demod_timing
+        run: python3 tests/test_demod_timing.py -v
 
       - name: test_snr_sweep
         run: python3 tests/test_snr_sweep.py -v
