@@ -50,9 +50,10 @@ def _write_cf32(path: Path, samples: np.ndarray) -> None:
 
 
 def _make_tone_cf32(
-        n: int = 4096,
-        freq_norm: float = 0.1,
-        amplitude: float = 1.0) -> np.ndarray:
+    n: int = 4096,
+    freq_norm: float = 0.1,
+    amplitude: float = 1.0,
+) -> np.ndarray:
     """Generate a complex tone at normalised frequency."""
     t = np.arange(n, dtype=np.float32)
     return (amplitude * np.exp(1j * 2 * np.pi * freq_norm * t)).astype(np.complex64)

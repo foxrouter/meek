@@ -679,6 +679,11 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       proc_dropped.fetch_add(1, std::memory_order_relaxed);
       cr = ClassificationResult{};
     }
+    const auto prune_now = std::chrono::steady_clock::now();
+    if (prune_now - last_prune >= std::chrono::hours(24)) {
+      prune_old_snapshots(cfg.snapshot_dir, cfg.snapshot_retention_days);
+      last_prune = prune_now;
+    }
   }
   // Signal output_loop that no further ClassificationResults will be pushed.
   // Release ordering ensures all prior pushes to out_buf are visible before
