@@ -80,8 +80,9 @@ def _demod_fsk_gardner(iq: np.ndarray, k: int,
     pos = 0
     while pos + k <= n:
         # Apply tau (symbol-normalised fraction) to sampling instants
-        mid_f = pos + k / 2.0 + tau * k
-        end_f = pos + k - 1.0 + tau * k
+        tau_offset = tau * k
+        mid_f = pos + k / 2.0 + tau_offset
+        end_f = pos + k - 1.0 + tau_offset
         x_mid = _interp(iq, mid_f)
         x_cur = _interp(iq, end_f)
         e = float(np.real((x_cur - x_sym) * np.conj(x_mid)))
