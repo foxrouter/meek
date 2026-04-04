@@ -28,7 +28,7 @@ struct Config {
   std::size_t block_len{4096};
   // Analysis window: sub-divides each captured block so that short bursty
   // signals are not diluted by averaging over a large noise-filled window.
-  // Must be >= 32.  Values larger than block_len are silently clamped to
+  // Must be >= 32.  Values larger than block_len are clamped to
   // block_len (single-window path, identical to original behaviour).
   std::size_t analysis_len{4096};
   std::int64_t read_timeout_us{500'000};

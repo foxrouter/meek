@@ -65,7 +65,9 @@ class TestRfAuditJsonOutput(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.rf_audit = _find_rf_audit()
-        cls.tmp = tempfile.mkdtemp()
+        cls._tmpdir = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls._tmpdir.cleanup)
+        cls.tmp = cls._tmpdir.name
 
     def _run(self, args: list, cf32_path: Path) -> dict:
         """Run rf_audit and return parsed JSON output."""
@@ -152,11 +154,6 @@ class TestRfAuditJsonOutput(unittest.TestCase):
             j["band"], "ISM-433",
             f"Expected band=ISM-433, got {j.get('band')!r}",
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        import shutil
-        shutil.rmtree(cls.tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":
