@@ -314,7 +314,7 @@ def _extract_schema_sql() -> str:
     if not _DB_HPP.exists():
         raise FileNotFoundError(
             f"db.hpp not found at expected path: {_DB_HPP}")
-    content = _DB_HPP.read_text()
+    content = _DB_HPP.read_text(encoding="utf-8")
     # Find the kSchema raw string literal body between R"sql( and )sql"
     m = re.search(r'kSchema\s*=\s*R"sql\((.*?)\)sql"', content, re.DOTALL)
     if not m:
@@ -327,7 +327,7 @@ def _extract_indexes_ddl() -> str:
     if not _DB_HPP.exists():
         raise FileNotFoundError(
             f"db.hpp not found at expected path: {_DB_HPP}")
-    content = _DB_HPP.read_text()
+    content = _DB_HPP.read_text(encoding="utf-8")
     m = re.search(r'kIndexes\s*=\s*R"sql\((.*?)\)sql"', content, re.DOTALL)
     if not m:
         raise ValueError(f"kIndexes raw string not found in {_DB_HPP}")
@@ -339,7 +339,7 @@ def _db_hpp_content() -> str:
     if not _DB_HPP.exists():
         raise FileNotFoundError(
             f"db.hpp not found at expected path: {_DB_HPP}")
-    return _DB_HPP.read_text()
+    return _DB_HPP.read_text(encoding="utf-8")
 
 
 class TestTimestampNsRoundTrip(unittest.TestCase):
