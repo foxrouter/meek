@@ -17,6 +17,7 @@ on:
       - "requirements.txt"
       - ".clang-format"
       - ".pre-commit-config.yaml"
+      - "benchmarks/**"
       - ".github/workflows/**"
   pull_request:
     branches: ["main", "master"]
@@ -34,6 +35,7 @@ on:
       - "requirements.txt"
       - ".clang-format"
       - ".pre-commit-config.yaml"
+      - "benchmarks/**"
       - ".github/workflows/**"
 
 # Default to read-only permissions for all jobs; individual jobs may widen
@@ -279,6 +281,7 @@ jobs:
               - 'src/**'
               - 'include/**'
               - 'CMakeLists.txt'
+              - 'tests/test_demod_ber.py'
 
   cpp-liquid:
     name: C++ liquid-dsp build (HAVE_LIQUID)
