@@ -16,18 +16,12 @@ Requires: numpy
 """
 
 import math
-import sys
 import unittest
-from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_REPO_ROOT / "tests"))
-
-
-from crc_helpers import append_crc32  # noqa: E402
+from crc_helpers import append_crc32
 
 
 def _gen_fsk2_iq(bits: List[int], k: int, fdev_norm: float) -> np.ndarray:

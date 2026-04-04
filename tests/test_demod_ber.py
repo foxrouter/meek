@@ -29,7 +29,7 @@ import numpy as np
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "tests"))
 
-from crc_helpers import _CRC32_TABLE, append_crc32  # noqa: E402
+from crc_helpers import append_crc32, crc32_bytes  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -38,15 +38,15 @@ from crc_helpers import _CRC32_TABLE, append_crc32  # noqa: E402
 
 def crc32_bits(bits: List[int]) -> int:
     """Compute CRC-32 (IEEE 802.3) of bit sequence packed MSB-first."""
-    crc = 0xFFFFFFFF
     n = len(bits)
+    data = bytearray()
     for i in range(0, n, 8):
         byte = 0
         for b in range(8):
             if i + b < n:
                 byte = (byte << 1) | (bits[i + b] & 1)
-        crc = _CRC32_TABLE[(crc ^ byte) & 0xFF] ^ (crc >> 8)
-    return crc ^ 0xFFFFFFFF
+        data.append(byte)
+    return crc32_bytes(bytes(data))
 
 
 def check_crc32(bits: List[int]) -> bool:
