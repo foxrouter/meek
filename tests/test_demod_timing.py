@@ -129,6 +129,19 @@ def _demod_fsk_gardner(iq: np.ndarray, k: int, fdev_norm: float,
     return bits_out, lock_sym >= 0
 
 
+def _percentile_threshold(values: List[float]) -> float:
+    """Midpoint between the 10th and 90th percentiles of *values*.
+
+    Used as the OOK decision threshold: robust to outliers and independent of
+    absolute amplitude, so it works across a wide range of SNR levels.
+    """
+    sv = sorted(values)
+    n = len(sv)
+    lo = sv[n // 10]
+    hi = sv[9 * n // 10]
+    return lo + (hi - lo) * 0.5
+
+
 def _demod_ook_phase_search(iq: np.ndarray, k: int) -> List[int]:
     """DEM-05 fix: max-variance block-mean phase search.
 
@@ -157,9 +170,7 @@ def _demod_ook_phase_search(iq: np.ndarray, k: int) -> List[int]:
           if si * k + best_phase + k <= n]
     if not bm:
         return []
-    sorted_bm = sorted(bm)
-    m = len(sorted_bm)
-    threshold = sorted_bm[m // 10] + (sorted_bm[9 * m // 10] - sorted_bm[m // 10]) * 0.5
+    threshold = _percentile_threshold(bm)
     return [1 if v >= threshold else 0 for v in bm]
 
 
@@ -168,8 +179,7 @@ def _demod_ook_fixed_grid(iq: np.ndarray, k: int) -> List[int]:
     env = np.abs(iq)
     n = len(env)
     max_syms = n // k
-    all_env = sorted(env)
-    threshold = all_env[n // 10] + (all_env[9 * n // 10] - all_env[n // 10]) * 0.5
+    threshold = _percentile_threshold(list(env))
     return [1 if env[si * k + k // 2] >= threshold else 0
             for si in range(max_syms) if si * k + k // 2 < n]
 
