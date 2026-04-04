@@ -82,6 +82,7 @@ jobs:
             tests/test_classifier_correctness.py \
             tests/test_band_profiles.py \
             tests/test_demod_timing.py \
+            tests/crc_helpers.py \
             benchmarks/bench_iq_metrics.py
 
       - name: test_autotune

@@ -15,43 +15,19 @@ Run with:
 Requires: numpy
 """
 
+import math
+import sys
 import unittest
+from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
 
-
-def _build_crc32_table() -> List[int]:
-    table = []
-    for i in range(256):
-        c = i
-        for _ in range(8):
-            c = (0xEDB88320 ^ (c >> 1)) if (c & 1) else (c >> 1)
-        table.append(c)
-    return table
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT / "tests"))
 
 
-_CRC32_TABLE = _build_crc32_table()
-
-
-def _crc32_bytes(data: bytes) -> int:
-    crc = 0xFFFFFFFF
-    for b in data:
-        crc = _CRC32_TABLE[(crc ^ b) & 0xFF] ^ (crc >> 8)
-    return crc ^ 0xFFFFFFFF
-
-
-def _append_crc32(bits: List[int]) -> List[int]:
-    n = len(bits)
-    data = bytearray()
-    for i in range(0, n, 8):
-        byte = 0
-        for j in range(8):
-            if i + j < n:
-                byte = (byte << 1) | (bits[i + j] & 1)
-        data.append(byte)
-    crc = _crc32_bytes(bytes(data))
-    return bits + [(crc >> (31 - i)) & 1 for i in range(32)]
+from crc_helpers import append_crc32  # noqa: E402
 
 
 def _gen_fsk2_iq(bits: List[int], k: int, fdev_norm: float) -> np.ndarray:
@@ -82,7 +58,7 @@ def _gen_ook_iq(bits: List[int], k: int, phase_offset: int = 0,
     return iq
 
 
-def _demod_fsk_gardner(iq: np.ndarray, k: int, fdev_norm: float,
+def _demod_fsk_gardner(iq: np.ndarray, k: int,
                        use_scaled_gain: bool = True) -> Tuple[List[int], bool]:
     """
     use_scaled_gain=True  - DEM-04 fix: gain normalised by k-squared and symbol energy;
@@ -115,7 +91,7 @@ def _demod_fsk_gardner(iq: np.ndarray, k: int, fdev_norm: float,
         else:
             tau += 0.01 * e
             err_ema = 0.9 * err_ema + 0.1 * abs(e)
-        tau = float(np.clip(tau, -0.5, 0.5))
+        tau = float(np.clip(tau, -1.0, 1.0))
         x_sym = x_cur
         if lock_sym < 0 and err_ema < lock_threshold:
             lock_sym = len(bits_out)
@@ -125,7 +101,9 @@ def _demod_fsk_gardner(iq: np.ndarray, k: int, fdev_norm: float,
         else:
             inst_freq = 0.0
         bits_out.append(1 if inst_freq > 0 else 0)
-        pos += max(1, k + int(round(tau)))
+        int_correction = int(math.trunc(tau))
+        tau -= int_correction
+        pos += max(1, k + int_correction)
     return bits_out, lock_sym >= 0
 
 
@@ -201,39 +179,33 @@ class TestGardnerTimingConvergence(unittest.TestCase):
     def setUp(self):
         np.random.seed(42)
         raw_bits = list(np.random.randint(0, 2, self.N_SYMBOLS))
-        self.tx_bits = _append_crc32(raw_bits)
+        self.tx_bits = append_crc32(raw_bits)
         self.iq = _gen_fsk2_iq(self.tx_bits, self.K, self.FDEV_NORM)
 
     def test_scaled_gain_achieves_lock(self):
-        _, lock = _demod_fsk_gardner(self.iq, self.K, self.FDEV_NORM,
-                                     use_scaled_gain=True)
+        _, lock = _demod_fsk_gardner(self.iq, self.K, use_scaled_gain=True)
         self.assertTrue(lock,
                         f"Gardner with scaled gain failed to converge at k={self.K} "
                         "(rsym=128 kbaud, fs=2.048 MSPS)")
 
     def test_scaled_gain_ber_below_threshold(self):
-        rx_bits, _ = _demod_fsk_gardner(self.iq, self.K, self.FDEV_NORM,
-                                        use_scaled_gain=True)
+        rx_bits, _ = _demod_fsk_gardner(self.iq, self.K, use_scaled_gain=True)
         ber = _ber(self.tx_bits, rx_bits)
         self.assertLess(ber, 0.15,
                         f"BER={ber:.3f} at k={self.K} with scaled gain - expected < 0.15")
 
     def test_fixed_gain_fails_at_k16(self):
         """Documents the known failure DEM-04 fixes."""
-        _, lock = _demod_fsk_gardner(self.iq, self.K, self.FDEV_NORM,
-                                     use_scaled_gain=False)
-        if lock:
-            import warnings
-            warnings.warn(
-                f"Fixed gain 0.01 unexpectedly converged at k={self.K}. "
-                "Verify signal length and SNR match Woodley configuration.",
-                UserWarning)
+        _, lock = _demod_fsk_gardner(self.iq, self.K, use_scaled_gain=False)
+        self.assertFalse(
+            lock,
+            f"Fixed gain 0.01 unexpectedly converged at k={self.K}. "
+            "Verify signal length and SNR match Woodley configuration.")
 
     def test_scaled_gain_k2_also_converges(self):
         k = 2
         iq_k2 = _gen_fsk2_iq(self.tx_bits, k, self.FDEV_NORM * 4)
-        _, lock = _demod_fsk_gardner(iq_k2, k, self.FDEV_NORM * 4,
-                                     use_scaled_gain=True)
+        _, lock = _demod_fsk_gardner(iq_k2, k, use_scaled_gain=True)
         self.assertTrue(lock, f"Scaled gain failed to converge at k={k}")
 
 
@@ -248,7 +220,7 @@ class TestOokTimingRecovery(unittest.TestCase):
     def setUp(self):
         np.random.seed(7)
         raw_bits = list(np.random.randint(0, 2, self.N_SYMBOLS))
-        self.tx_bits = _append_crc32(raw_bits)
+        self.tx_bits = append_crc32(raw_bits)
 
     def _ber_at_offset(self, phi: int, use_phase_search: bool) -> float:
         iq = _gen_ook_iq(self.tx_bits, self.K, phase_offset=phi,
