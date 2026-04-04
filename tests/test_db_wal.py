@@ -667,12 +667,13 @@ class TestDemodLockMsSentinel(unittest.TestCase):
                     "sample_types.hpp: demod_lock_ms field not found; "
                     "update this test"
                 )
+            # Walk backwards 2 lines from the field to start the window.
             window_start = content.rfind("\n", 0, field_match.start())
-            for _ in range(2):
+            for _lines_back in range(2):
                 if window_start <= 0:
                     break
                 window_start = content.rfind("\n", 0, window_start)
-            if window_start == -1:
+            if window_start <= 0:
                 window_start = 0
             else:
                 window_start += 1
