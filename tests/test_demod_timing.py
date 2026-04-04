@@ -7,7 +7,7 @@ DEM-04: Gardner timing loop with k-squared-normalised gain must converge at
         Original fixed gain 0.01 does not converge at this k.
 
 DEM-05: OOK max-variance phase search must decode correctly for all phase
-        offsets in [0, k). BER < 10% required for SNR >= 3 dB.
+        offsets in [0, k). BER < 15% required for SNR >= 3 dB.
 
 Run with:
     python3 tests/test_demod_timing.py [-v]
@@ -195,6 +195,15 @@ class TestGardnerTimingConvergence(unittest.TestCase):
         raw_bits = list(np.random.randint(0, 2, self.N_SYMBOLS))
         self.tx_bits = append_crc32(raw_bits)
         self.iq = _gen_fsk2_iq(self.tx_bits, self.K, self.FDEV_NORM)
+        # Apply a fractional timing offset (k/4 samples) and AWGN at 15 dB
+        # so BER is non-trivial without timing recovery.
+        shift = self.K // 4
+        self.iq = np.roll(self.iq, shift)
+        rng = np.random.default_rng(123)
+        noise_power = 10 ** (-15.0 / 10.0)
+        noise = (rng.standard_normal(len(self.iq)) +
+                 1j * rng.standard_normal(len(self.iq))).astype(np.complex64)
+        self.iq += noise * np.sqrt(noise_power / 2.0)
 
     def test_scaled_gain_achieves_lock(self):
         _, lock = _demod_fsk_gardner(self.iq, self.K, use_scaled_gain=True)
@@ -257,7 +266,12 @@ class TestOokTimingRecovery(unittest.TestCase):
             )
 
     def test_fixed_grid_fails_at_bad_offsets(self):
-        """Documents the failure DEM-05 fixes."""
+        """Documents the failure DEM-05 fixes at phi = 3*k//4.
+
+        At this offset the fixed k//2 grid samples inside the wrong symbol
+        window, producing high BER. The max-variance phase search recovers
+        the correct phase and keeps BER low.
+        """
         phi = 3 * self.K // 4
         ber_fixed = self._ber_at_offset(phi, use_phase_search=False)
         ber_search = self._ber_at_offset(phi, use_phase_search=True)
