@@ -30,6 +30,9 @@ if str(_TESTS_DIR) not in sys.path:
 from crc_helpers import append_crc32  # noqa: E402
 
 
+_TINY = 1e-12  # Minimum amplitude/energy floor to avoid division by zero or NaN.
+
+
 def _gen_fsk2_iq(bits: List[int], k: int, fdev_norm: float) -> np.ndarray:
     n_samp = len(bits) * k
     phase = 0.0
@@ -95,7 +98,7 @@ def _demod_fsk_gardner(iq: np.ndarray, k: int,
         e = float(np.real((x_cur - x_sym) * np.conj(x_mid)))
         if use_scaled_gain:
             sym_energy = float(np.mean(np.abs(iq[pos:pos + k]) ** 2))
-            sym_energy = max(sym_energy, 1e-12)
+            sym_energy = max(sym_energy, _TINY)
             e_norm = e / (float(k * k) * sym_energy)
             tau += 0.1 * e_norm
             err_ema = 0.9 * err_ema + 0.1 * abs(e_norm)
@@ -113,7 +116,7 @@ def _demod_fsk_gardner(iq: np.ndarray, k: int,
             for s in range(k - 1):
                 s0 = _interp(iq, pos + s + tau)
                 s1 = _interp(iq, pos + s + 1 + tau)
-                if abs(s0) > 1e-12 and abs(s1) > 1e-12:
+                if abs(s0) > _TINY and abs(s1) > _TINY:
                     phase_incs.append(float(np.angle(s1 * np.conj(s0))))
             inst_freq = float(np.mean(phase_incs)) if phase_incs else 0.0
         else:
