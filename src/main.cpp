@@ -449,15 +449,13 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
       // "snap_0_..." to collide and overwrite each other. Use a monotonic
       // fallback derived from steady_clock and force strict increase.
       static std::atomic<std::int64_t> fallback_ts_ns{0};
-      const auto steady_ts_ns =
-          std::chrono::duration_cast<std::chrono::nanoseconds>(
-              std::chrono::steady_clock::now().time_since_epoch())
-              .count();
+      const auto steady_ts_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                    std::chrono::steady_clock::now().time_since_epoch())
+                                    .count();
       auto last = fallback_ts_ns.load(std::memory_order_relaxed);
       while (true) {
         const auto candidate = (steady_ts_ns > last) ? steady_ts_ns : (last + 1);
-        if (fallback_ts_ns.compare_exchange_weak(last, candidate,
-                                                 std::memory_order_relaxed,
+        if (fallback_ts_ns.compare_exchange_weak(last, candidate, std::memory_order_relaxed,
                                                  std::memory_order_relaxed)) {
           blk.timestamp_ns = candidate;
           break;
