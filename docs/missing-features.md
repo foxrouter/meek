@@ -91,25 +91,27 @@ Items marked ⬜ are outstanding.
 
 ## 5. CI test hardening (Blocks A-E)
 
-All items below were added as new test files and CI wiring. No existing
-test files were modified except test_db_wal.py (append-only).
+Items below include new test files, CI wiring, and the supporting
+code/schema/band-profile changes needed to make those checks pass. Existing
+test-file edits were limited to `test_db_wal.py` (append-only) and the
+Python mirror update in `tests/test_band_profiles.py`.
 
 | Item | File(s) | Status |
 |---|---|---|
-| Classifier correctness gates (CLF-01 through CLF-04) | tests/test_classifier_correctness.py | Done |
-| Demod timing convergence gates (DEM-04, DEM-05) | tests/test_demod_timing.py | Done |
-| Band profile static correctness gates (BAND-01 through BAND-03) | tests/test_band_profiles.py | Done |
-| Data quality gates (DATA-01, DATA-02, DATA-04) | tests/test_db_wal.py | Done |
-| CI path filters and job gating (cpp-liquid, docker) | .github/workflows/ci.yml | Done |
-| timestamp_ns added to signals table and insert path | include/meek/db.hpp, src/main.cpp | Done |
-| examples.result column added and migration applied | include/meek/db.hpp | Done |
-| ADS-B expected_mod corrected to UNKNOWN | include/meek/band_profiles.hpp | Done |
-| DAB tolerance narrowed to 0.9 MHz per block, expected_bw_hz corrected to 1.536 MHz | include/meek/band_profiles.hpp | Done |
-| TPMS-433 tolerance narrowed to 0.5 MHz, expected_mod confirmed FSK_LIKE | include/meek/band_profiles.hpp | Done |
-| ZIGBEE-868 tolerance narrowed to 0.05 MHz (below SMETS2 0.5 MHz) | include/meek/band_profiles.hpp | Done |
-| find_band() tie-break on tolerance_hz added (C++ and Python mirror) | include/meek/band_profiles.hpp, tests/test_band_profiles.py | Done |
-| timestamp_ns changed to std::int64_t end-to-end | include/meek/sample_types.hpp, include/meek/db.hpp, src/main.cpp | Done |
-| Monotonic steady_clock fallback for pre-epoch timestamps | src/main.cpp | Done |
-| kUkBands count updated to 39 in comments and array size | include/meek/band_profiles.hpp | Done |
-| dorny/paths-filter with fetch-depth: 0 and pull-requests: read | .github/workflows/ci.yml | Done |
-| push and pull_request paths allowlists aligned and complete | .github/workflows/ci.yml | Done |
+| Classifier correctness gates (CLF-01 through CLF-04) | `tests/test_classifier_correctness.py` | Done |
+| Demod timing convergence gates (DEM-04, DEM-05) | `tests/test_demod_timing.py` | Done |
+| Band profile static correctness gates (BAND-01 through BAND-03) | `tests/test_band_profiles.py` | Done |
+| Data quality gates (DATA-01, DATA-02, DATA-04) | `tests/test_db_wal.py` | Done |
+| CI path filters and job gating (cpp-liquid, docker) | `.github/workflows/ci.yml` | Done |
+| timestamp_ns added to signals table and insert path | `include/meek/db.hpp`, `src/main.cpp` | Done |
+| examples.result column added and migration applied | `include/meek/db.hpp` | Done |
+| ADS-B expected_mod corrected to UNKNOWN | `include/meek/band_profiles.hpp` | Done |
+| DAB tolerance narrowed to 0.9 MHz per block, expected_bw_hz corrected to 1.536 MHz | `include/meek/band_profiles.hpp` | Done |
+| TPMS-433 tolerance narrowed to 0.5 MHz, expected_mod confirmed FSK_LIKE | `include/meek/band_profiles.hpp` | Done |
+| ZIGBEE-868 tolerance narrowed to 0.05 MHz (below SMETS2 0.5 MHz) | `include/meek/band_profiles.hpp` | Done |
+| find_band() tie-break on tolerance_hz added (C++ and Python mirror) | `include/meek/band_profiles.hpp`, `tests/test_band_profiles.py` | Done |
+| timestamp_ns changed to std::int64_t end-to-end | `include/meek/sample_types.hpp`, `include/meek/db.hpp`, `src/main.cpp` | Done |
+| Monotonic steady_clock fallback for pre-epoch timestamps | `src/main.cpp` | Done |
+| kUkBands count updated to 39 in comments and array size | `include/meek/band_profiles.hpp` | Done |
+| dorny/paths-filter with fetch-depth: 0 and pull-requests: read | `.github/workflows/ci.yml` | Done |
+| push and pull_request paths allowlists aligned and complete | `.github/workflows/ci.yml` | Done |
