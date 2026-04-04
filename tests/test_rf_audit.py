@@ -139,9 +139,6 @@ class TestRfAuditJsonOutput(unittest.TestCase):
         self.assertEqual(j["band_name"], "ISM-433",
             f"Expected band_name=ISM-433, got {j.get('band_name')!r}")
 
-    def tearDown(self):
-        pass
-
     @classmethod
     def tearDownClass(cls):
         import shutil

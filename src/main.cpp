@@ -515,7 +515,6 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   std::vector<float> scratch;
   scratch.reserve(cfg.analysis_len);
 
-  auto last_prune = std::chrono::steady_clock::now();
   // Idle-path progress throttle: steady_clock::now() is called every idle
   // iteration, but the proc_progress atomic is written at most every 250 ms
   // (wall-clock).  Using elapsed time rather than an iteration count avoids
@@ -534,6 +533,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   // of its own loop.  Only cap_exiting (set by capture_loop itself as a
   // release store after its last push) guarantees no further blocks.
   bool cap_done_seen = false;
+  auto last_prune = std::chrono::steady_clock::now();
 
   // Loop until stop is requested AND the buffer is truly empty, OR until
   // capture_loop has signalled completion (cap_exiting) and the buffer is
