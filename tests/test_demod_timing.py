@@ -52,6 +52,17 @@ def _gen_ook_iq(bits: List[int], k: int, phase_offset: int = 0,
     return iq
 
 
+def _frac_interp(iq: np.ndarray, pos_f: float) -> complex:
+    """Linear interpolation at a fractional sample position."""
+    i = int(math.floor(pos_f))
+    frac = pos_f - i
+    if 0 <= i < len(iq) - 1:
+        return complex(iq[i]) * (1.0 - frac) + complex(iq[i + 1]) * frac
+    if 0 <= i < len(iq):
+        return complex(iq[i])
+    return complex(0, 0)
+
+
 def _demod_fsk_gardner(iq: np.ndarray, k: int,
                        use_scaled_gain: bool = True) -> Tuple[List[int], bool]:
     """
@@ -64,17 +75,15 @@ def _demod_fsk_gardner(iq: np.ndarray, k: int,
     n = len(iq)
     tau = 0.0
     x_sym = complex(0, 0)
-    x_mid = complex(0, 0)
     bits_out: List[int] = []
     err_ema = 1.0
     lock_sym = -1
     lock_threshold = 0.5 / k  # adaptive: scales with oversampling ratio
     pos = 0
     while pos + k <= n:
-        mid_pos = pos + k // 2
-        end_pos = pos + k - 1
-        x_mid = complex(iq[mid_pos])
-        x_cur = complex(iq[end_pos])
+        # Apply fractional tau to sampling instants via linear interpolation
+        x_mid = _frac_interp(iq, pos + k // 2 + tau)
+        x_cur = _frac_interp(iq, pos + k - 1 + tau)
         e = float(np.real((x_cur - x_sym) * np.conj(x_mid)))
         if use_scaled_gain:
             sym_energy = float(np.mean(np.abs(iq[pos:pos + k]) ** 2))
@@ -157,10 +166,13 @@ def _demod_ook_fixed_grid(iq: np.ndarray, k: int) -> List[int]:
 
 
 def _ber(tx: List[int], rx: List[int]) -> float:
-    n = min(len(tx), len(rx))
+    n = max(len(tx), len(rx))
     if n == 0:
         return 1.0
-    return sum(a != b for a, b in zip(tx[:n], rx[:n])) / n
+    overlap = min(len(tx), len(rx))
+    errors = sum(a != b for a, b in zip(tx[:overlap], rx[:overlap]))
+    errors += abs(len(tx) - len(rx))
+    return errors / n
 
 
 class TestGardnerTimingConvergence(unittest.TestCase):
