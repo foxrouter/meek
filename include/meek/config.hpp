@@ -144,13 +144,15 @@ inline std::string env_str(const char* name, const char* def) {
   const std::int64_t min_analysis_ll = static_cast<std::int64_t>(kMinClassifyBlockSamples);
   const std::int64_t max_analysis_ll = static_cast<std::int64_t>(cfg.block_len);
   if (analysis_len_ll < min_analysis_ll) {
-    std::cerr << "[WARN] RF_ANALYSIS_LEN " << analysis_len_ll << " below minimum "
-              << min_analysis_ll << " — clamped to " << min_analysis_ll << "\n";
+    std::cerr << "[CFG] WARN: RF_ANALYSIS_LEN " << analysis_len_ll
+              << " below minimum " << min_analysis_ll
+              << " — clamped to " << min_analysis_ll << "\n";
     analysis_len_ll = min_analysis_ll;
   }
   if (analysis_len_ll > max_analysis_ll) {
-    std::cerr << "[WARN] RF_ANALYSIS_LEN " << analysis_len_ll << " exceeds block_len "
-              << max_analysis_ll << " — clamped to " << max_analysis_ll << "\n";
+    std::cerr << "[CFG] WARN: RF_ANALYSIS_LEN " << analysis_len_ll
+              << " exceeds block_len " << max_analysis_ll
+              << " — clamped to " << max_analysis_ll << "\n";
     analysis_len_ll = max_analysis_ll;
   }
   cfg.analysis_len = static_cast<std::size_t>(analysis_len_ll);

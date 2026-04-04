@@ -135,7 +135,10 @@ class TestRfAuditJsonOutput(unittest.TestCase):
         )
 
     def test_center_freq_triggers_band_match(self):
-        """Passing --center-freq 433920000 must populate band in output."""
+        """Passing --center-freq 433920000 must populate the band field in output.
+
+        rf_audit emits band (not band_name) when --center-freq matches a
+        known entry in kUkBands."""
         p = Path(self.tmp) / "ism433.cf32"
         _write_cf32(p, _make_tone_cf32(n=8192, freq_norm=0.05))
         j = self._run(
