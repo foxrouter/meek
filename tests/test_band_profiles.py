@@ -35,7 +35,7 @@ def _extract_band_snr_default() -> float:
     Raises FileNotFoundError if the header is absent so CI fails clearly."""
     if not _HEADER_PATH.exists():
         raise FileNotFoundError(f"band_profiles.hpp not found: {_HEADER_PATH}")
-    text = _HEADER_PATH.read_text()
+    text = _HEADER_PATH.read_text(encoding="utf-8")
     m = _TOK_BAND_SNR_DEFAULT_DEF.search(text)
     if m is None:
         raise ValueError("kBandSnrUseDefault definition not found in band_profiles.hpp")
@@ -130,7 +130,7 @@ def _load_kuk_bands() -> List[BandProfile]:
         raise FileNotFoundError(
             f"band_profiles.hpp not found at expected path: {_HEADER_PATH}")
 
-    content = _HEADER_PATH.read_text()
+    content = _HEADER_PATH.read_text(encoding="utf-8")
     m = re.search(r'kUkBands\s*=\s*\{\{(.*?)\}\};', content, re.DOTALL)
     if not m:
         raise ValueError(

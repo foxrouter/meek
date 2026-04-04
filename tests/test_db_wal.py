@@ -444,6 +444,47 @@ class TestTimestampNsRoundTrip(unittest.TestCase):
         self.assertEqual(rows[1][0], "signal_b")
         self.assertGreater(rows[1][1], rows[0][1])
 
+    def test_timestamp_ns_migration_on_legacy_db(self):
+        """Simulate upgrading a legacy DB that has signals without timestamp_ns.
+
+        The migration must add the column and the post-migration index must exist."""
+        conn = sqlite3.connect(self._db_path)
+        # Create legacy schema without timestamp_ns
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS signals (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                source    TEXT,
+                notes     TEXT
+            );
+        """)
+        conn.commit()
+        # Run migration
+        try:
+            conn.execute("ALTER TABLE signals ADD COLUMN timestamp_ns INTEGER")
+        except sqlite3.OperationalError as exc:
+            self.fail(f"Migration failed on legacy DB: {exc}")
+        # Create post-migration index
+        conn.executescript(
+            "CREATE INDEX IF NOT EXISTS idx_signals_timestamp_ns "
+            "ON signals(timestamp_ns DESC) WHERE timestamp_ns IS NOT NULL;"
+        )
+        conn.commit()
+        # Assert column present
+        info = conn.execute("PRAGMA table_info(signals)").fetchall()
+        col_names = [row[1] for row in info]
+        self.assertIn("timestamp_ns", col_names,
+                      "timestamp_ns column missing after migration on legacy DB")
+        # Assert index present
+        row = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='index' AND name='idx_signals_timestamp_ns'").fetchone()
+        conn.close()
+        self.assertIsNotNone(
+            row,
+            "idx_signals_timestamp_ns index missing after migration on legacy DB"
+        )
+
 
 # ---------------------------------------------------------------------------
 # DATA-02: decision_trace deduplication
@@ -531,6 +572,11 @@ class TestDecisionTraceDeduplicated(unittest.TestCase):
         and report it in the output JSON.  examples.notes is seeded empty so the
         test can detect if decode_candidates accidentally reads the wrong column."""
         import json
+        if not _DECODE_CANDIDATES.exists():
+            raise FileNotFoundError(
+                f"decode_candidates.py not found at expected path: "
+                f"{_DECODE_CANDIDATES}"
+            )
         self._seed_db()
         out_path = str(Path(self._tmp) / "report.json")
 
