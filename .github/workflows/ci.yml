@@ -13,7 +13,7 @@ on:
       - "install.sh"
       - "ops/**"
       - "requirements.txt"
-      - ".github/workflows/ci.yml"
+      - ".github/workflows/**"
   pull_request:
     branches: ["main", "master"]
     paths:
@@ -261,6 +261,8 @@ jobs:
       liquid: ${{ steps.filter.outputs.liquid }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -417,6 +419,8 @@ jobs:
       docker: ${{ steps.filter.outputs.docker }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: dorny/paths-filter@v3
         id: filter
         with:

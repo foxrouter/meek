@@ -441,7 +441,29 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
     const auto raw_ts_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                std::chrono::system_clock::now().time_since_epoch())
                                .count();
-    blk.timestamp_ns = (raw_ts_ns >= 0) ? raw_ts_ns : 0;
+    if (raw_ts_ns >= 0) {
+      blk.timestamp_ns = raw_ts_ns;
+    } else {
+      // Preserve uniqueness even when the wall clock is pre-epoch or mis-set.
+      // A plain clamp to 0 causes repeated snapshot filenames such as
+      // "snap_0_..." to collide and overwrite each other. Use a monotonic
+      // fallback derived from steady_clock and force strict increase.
+      static std::atomic<std::int64_t> fallback_ts_ns{0};
+      const auto steady_ts_ns =
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now().time_since_epoch())
+              .count();
+      auto last = fallback_ts_ns.load(std::memory_order_relaxed);
+      while (true) {
+        const auto candidate = (steady_ts_ns > last) ? steady_ts_ns : (last + 1);
+        if (fallback_ts_ns.compare_exchange_weak(last, candidate,
+                                                 std::memory_order_relaxed,
+                                                 std::memory_order_relaxed)) {
+          blk.timestamp_ns = candidate;
+          break;
+        }
+      }
+    }
     blk.center_freq_hz = sdr.center_freq_hz();
     blk.sample_rate_hz = sdr.sample_rate_hz();
 
