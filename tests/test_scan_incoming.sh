@@ -31,7 +31,7 @@ ok()   { [ "$VERBOSE" -eq 1 ] && echo "OK: $1" || true; PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 
 if [ ! -f "$SCAN_INCOMING" ]; then
-    echo "FATAL: scan_incoming.sh not found at $SCAN_INCOMING"
+    echo "FATAL: scan_incoming.sh not found at $SCAN_INCOMING" >&2
     exit 2
 fi
 
@@ -136,6 +136,12 @@ test_raw_file_processed_and_moved() {
         ok "raw file: moved to PROCESSED_DIR"
     else
         fail "raw file: expected file in PROCESSED_DIR and absent from INCOMING_DIR"
+    fi
+    if echo "$out" | grep -q "1 processed, 0 failed"; then
+        ok "raw file: summary reports success"
+    else
+        fail "raw file: expected summary to contain '1 processed, 0 failed'"
+        log "output was: $out"
     fi
     rm -f "$PROCESSED/test_signal.raw"
 }
