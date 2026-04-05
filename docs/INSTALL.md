@@ -196,18 +196,31 @@ cmake --build build -t iq_metrics
 ### Air-gapped / offline builds (air-gapped nodes without internet access)
 
 On a first build with internet access the CMake configure step downloads and
-caches `nlohmann/json` and `cpp-httplib` under `build/_deps/`. After that
+populates the FetchContent source directories under `build/_deps/`. After that
 first successful configure you can build offline on the same machine or copy
-the `build/_deps/` directory to the target node:
+the `build/_deps/` directory to the target node.
+
+**Tool-only build (no SoapySDR hardware, fetches `nlohmann/json` only):**
 
 ```bash
-# First configure (requires internet — downloads and caches dependencies)
+# First configure (requires internet — fetches nlohmann/json into build/_deps/)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_HARDWARE_TARGETS=OFF
 
 # Subsequent offline builds on the same or copied build tree
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
       -DBUILD_HARDWARE_TARGETS=OFF \
       -DBUILD_OFFLINE=ON
+cmake --build build -- -j$(nproc)
+```
+
+**Full hardware build (fetches `nlohmann/json` and `cpp-httplib`):**
+
+```bash
+# First configure (requires internet — fetches both deps into build/_deps/)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+# Subsequent offline builds on the same or copied build tree
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_OFFLINE=ON
 cmake --build build -- -j$(nproc)
 ```
 
