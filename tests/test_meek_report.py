@@ -13,7 +13,6 @@ Requires: no external dependencies beyond stdlib
 """
 
 import json
-import re
 import sqlite3
 import subprocess
 import sys
@@ -44,8 +43,24 @@ class TestMeekReportSmoke(unittest.TestCase):
         out = cls.tmp / "report.html"
         cls._html = out.read_text(encoding="utf-8") if out.exists() else ""
         # Extract the embedded DATA JSON for structured assertions.
-        m = re.search(r"const DATA = ({.*?});", cls._html, re.DOTALL)
-        cls._data = json.loads(m.group(1)) if m else {}
+        cls._data = cls._extract_embedded_data(cls._html)
+
+    @staticmethod
+    def _extract_embedded_data(html: str) -> dict:
+        marker = "// ── Inject data"
+        anchor = html.find(marker)
+        if anchor == -1:
+            anchor = 0
+        decl = "const DATA ="
+        start = html.find(decl, anchor)
+        if start == -1:
+            return {}
+        payload = html[start + len(decl):].lstrip()
+        try:
+            data, _ = json.JSONDecoder().raw_decode(payload)
+        except json.JSONDecodeError:
+            return {}
+        return data
 
     @staticmethod
     def _seed_db(db_path: Path) -> None:
