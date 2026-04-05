@@ -47,6 +47,10 @@ else()
   # A user who passed -DFETCHCONTENT_FULLY_DISCONNECTED=ON independently is
   # left untouched.
   if(_MEEK_FC_DISCONNECTED_BY_BUILD_OFFLINE)
+    # Clear both the normal and cache variables. Removing only the cache
+    # entry can leave the normal variable set for the rest of this configure
+    # run, which would keep FetchContent in disconnected mode.
+    unset(FETCHCONTENT_FULLY_DISCONNECTED)
     unset(FETCHCONTENT_FULLY_DISCONNECTED CACHE)
     unset(_MEEK_FC_DISCONNECTED_BY_BUILD_OFFLINE CACHE)
   endif()
