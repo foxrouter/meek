@@ -143,15 +143,18 @@ class TestRfAuditJsonOutput(unittest.TestCase):
         )
 
     def test_center_freq_triggers_band_match(self):
-        """Passing --center-freq 433920000 must populate the band field in output.
+        """Passing --center-freq 434500000 must populate band=ISM-433 in output.
 
-        rf_audit emits band (not band_name) when --center-freq matches a
-        known entry in kUkBands."""
+        434.5 MHz is 0.58 MHz from the ISM-433 centre (within its 2.0 MHz
+        tolerance) but outside TPMS-433's 0.5 MHz tolerance, so ISM-433 is
+        the unique match. Using the exact centre 433.92 MHz would match
+        TPMS-433 instead because find_band() prefers narrower tolerance on
+        equal-distance ties."""
         p = Path(self.tmp) / "ism433.cf32"
         _write_cf32(p, _make_tone_cf32(n=8192, freq_norm=0.05))
         j = self._run(
             ["--snr-min", "0", "--conf-threshold", "0",
-             "--center-freq", "433920000"], p)
+             "--center-freq", "434500000"], p)
         self.assertIn(
             "band", j,
             "band field missing when --center-freq matches a known band",
