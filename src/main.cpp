@@ -82,6 +82,7 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -533,6 +534,56 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   // of its own loop.  Only cap_exiting (set by capture_loop itself as a
   // release store after its last push) guarantees no further blocks.
   bool cap_done_seen = false;
+  auto last_prune = std::chrono::steady_clock::now();
+  std::future<void> prune_future;
+
+  // Constants for the prune helper — read once here so the lambda does not
+  // copy cfg fields on every invocation (which runs for every processed block
+  // on the active path).
+  const int prune_retention_days = cfg.snapshot_retention_days;
+  const std::string& prune_snapshot_dir = cfg.snapshot_dir;
+  const bool prune_enabled = (prune_retention_days > 0 && !prune_snapshot_dir.empty());
+
+  // Shared helper: schedule a prune pass if the 24 h interval has elapsed.
+  // When allow_blocking is true (idle path) the caller waits for any
+  // in-flight prune before launching a new one — acceptable since we are
+  // idle.  When false (active path) the call is a no-op if a prune is
+  // still running, so classification throughput is never stalled.
+  auto maybe_schedule_prune = [&](std::chrono::steady_clock::time_point now, bool allow_blocking) {
+    if (!prune_enabled)
+      return;
+    if (now - last_prune < std::chrono::hours(24))
+      return;
+    const bool prune_ready =
+        !prune_future.valid() ||
+        prune_future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    if (!prune_ready && !allow_blocking)
+      return;
+    if (prune_future.valid())
+      prune_future.wait();
+    try {
+      const std::string dir_copy = prune_snapshot_dir;
+      const int days_copy = prune_retention_days;
+      prune_future = std::async(std::launch::async, [dir_copy, days_copy]() {
+        prune_old_snapshots(dir_copy, days_copy);
+      });
+      last_prune = now;
+    } catch (const std::exception& ex) {
+      std::cerr << "[PRUNE] WARN: failed to launch async prune: " << ex.what()
+                << " — retention may not run until next interval\n";
+      if (allow_blocking) {
+        // Idle path: safe to run synchronously as fallback.
+        try {
+          prune_old_snapshots(prune_snapshot_dir, prune_retention_days);
+          last_prune = now;
+        } catch (...) {
+        }
+      }
+      // Active path: skip synchronous fallback to avoid stalling
+      // classification throughput; last_prune is unchanged so the next
+      // 24h interval will retry.
+    }
+  };
 
   // Loop until stop is requested AND the buffer is truly empty, OR until
   // capture_loop has signalled completion (cap_exiting) and the buffer is
@@ -563,6 +614,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
                     .count()),
             std::memory_order_relaxed);
       }
+      maybe_schedule_prune(std::chrono::steady_clock::now(), true);
       std::this_thread::sleep_for(std::chrono::microseconds(100));
       continue;
     }
@@ -673,6 +725,14 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       proc_dropped.fetch_add(1, std::memory_order_relaxed);
       cr = ClassificationResult{};
     }
+    maybe_schedule_prune(std::chrono::steady_clock::now(), false);
+  }
+  if (prune_future.valid()) {
+    // Keep shutdown bounded even if prune_old_snapshots() is blocked in
+    // filesystem iteration/removal. Moving the future into a detached waiter
+    // thread prevents both an explicit wait here and a blocking future
+    // destructor in proc_loop().
+    std::thread([f = std::move(prune_future)]() mutable { f.wait(); }).detach();
   }
   // Signal output_loop that no further ClassificationResults will be pushed.
   // Release ordering ensures all prior pushes to out_buf are visible before
@@ -703,7 +763,6 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
   ProcMetrics metrics;
   auto last_metrics_write = std::chrono::steady_clock::now();
   auto last_heartbeat = std::chrono::steady_clock::now();
-  auto last_prune = std::chrono::steady_clock::now();
   // Idle-path progress throttle: steady_clock::now() is called every idle
   // iteration, but out_progress is written at most every 250 ms when no items
   // arrive.  The active path always writes (no throttle) and resets this
@@ -898,10 +957,6 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
     if (now - last_heartbeat >= std::chrono::seconds(30)) {
       write_heartbeat(cfg.heartbeat_file);
       last_heartbeat = now;
-    }
-    if (now - last_prune >= std::chrono::hours(24)) {
-      prune_old_snapshots(cfg.snapshot_dir, cfg.snapshot_retention_days);
-      last_prune = now;
     }
   }
 

@@ -28,8 +28,12 @@ struct Config {
   std::size_t block_len{4096};
   // Analysis window: sub-divides each captured block so that short bursty
   // signals are not diluted by averaging over a large noise-filled window.
-  // Must be >= 32.  Values larger than block_len are silently clamped to
+  // Must be >= 32.  Normally, values larger than block_len are clamped to
   // block_len (single-window path, identical to original behaviour).
+  // Special case: if RF_BLOCK_LEN is smaller than kMinClassifyBlockSamples,
+  // analysis_len may instead be clamped to kMinClassifyBlockSamples, which
+  // can be greater than block_len. Therefore, analysis_len <= block_len only
+  // holds when block_len >= kMinClassifyBlockSamples.
   std::size_t analysis_len{4096};
   std::int64_t read_timeout_us{500'000};
 
@@ -137,16 +141,33 @@ inline std::string env_str(const char* name, const char* def) {
       static_cast<std::size_t>(detail::env_ll("RF_BLOCK_LEN", detail::env_ll("BLOCK_LEN", 4096)));
 
   // RF_ANALYSIS_LEN: clamp in signed space before casting to avoid negative
-  // values wrapping when converted to size_t. Must be at least
-  // kMinClassifyBlockSamples and no more than block_len (wider window adds
-  // no benefit and would exceed the buffer).
+  // values wrapping when converted to size_t. Clamped to
+  // [kMinClassifyBlockSamples, max(block_len, kMinClassifyBlockSamples)].
+  // If RF_BLOCK_LEN is smaller than kMinClassifyBlockSamples, analysis_len
+  // is forced to the minimum and classify_block() will reject every block
+  // until RF_BLOCK_LEN is corrected.
   std::int64_t analysis_len_ll = detail::env_ll("RF_ANALYSIS_LEN", 4096);
   const std::int64_t min_analysis_ll = static_cast<std::int64_t>(kMinClassifyBlockSamples);
-  const std::int64_t max_analysis_ll = static_cast<std::int64_t>(cfg.block_len);
-  if (analysis_len_ll < min_analysis_ll)
+  std::int64_t max_analysis_ll = static_cast<std::int64_t>(cfg.block_len);
+  if (max_analysis_ll < min_analysis_ll) {
+    std::cerr << "[CFG] WARN: RF_BLOCK_LEN " << cfg.block_len
+              << " is below kMinClassifyBlockSamples " << min_analysis_ll
+              << " — analysis_len clamped to minimum\n";
+    // Force a coherent [min, max] range; classify_block() will gate every
+    // block until the operator corrects RF_BLOCK_LEN.
+    max_analysis_ll = min_analysis_ll;
+  }
+  if (analysis_len_ll < min_analysis_ll) {
+    std::cerr << "[CFG] WARN: RF_ANALYSIS_LEN " << analysis_len_ll << " below minimum "
+              << min_analysis_ll << " — clamped to " << min_analysis_ll << "\n";
     analysis_len_ll = min_analysis_ll;
-  if (analysis_len_ll > max_analysis_ll)
+  }
+  if (analysis_len_ll > max_analysis_ll) {
+    std::cerr << "[CFG] WARN: RF_ANALYSIS_LEN " << analysis_len_ll << " exceeds effective maximum "
+              << max_analysis_ll << " (RF_BLOCK_LEN=" << cfg.block_len << ") — clamped to "
+              << max_analysis_ll << "\n";
     analysis_len_ll = max_analysis_ll;
+  }
   cfg.analysis_len = static_cast<std::size_t>(analysis_len_ll);
   cfg.read_timeout_us =
       detail::env_ll("RF_READ_TIMEOUT_US", detail::env_ll("READ_TIMEOUT_US", 500'000));
@@ -164,7 +185,15 @@ inline std::string env_str(const char* name, const char* def) {
   cfg.min_power = detail::env_d("RF_MIN_POWER", 5e-6);
   cfg.snr_min_db = detail::env_d("RF_SNR_MIN_DB", 3.0);
   cfg.expected_bw_hz = detail::env_d("RF_EXPECTED_BW_HZ", 0.0);
-  cfg.papr_max_db = detail::env_d("PAPR_MAX", 0.0);
+  // RF_PAPR_MAX is the canonical name. Fall back to legacy PAPR_MAX only
+  // when RF_PAPR_MAX is absent so the legacy path is never evaluated once
+  // deployments have migrated.
+  {
+    const char* papr_canonical = std::getenv("RF_PAPR_MAX");
+    cfg.papr_max_db = (papr_canonical != nullptr && *papr_canonical != '\0')
+                          ? detail::env_d("RF_PAPR_MAX", 0.0)
+                          : detail::env_d("PAPR_MAX", 0.0);
+  }
 
   // Classifier
   cfg.conf_threshold = detail::env_d("RF_CONF_THRESHOLD", 0.35);
