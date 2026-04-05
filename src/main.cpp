@@ -728,11 +728,13 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     maybe_schedule_prune(std::chrono::steady_clock::now(), false);
   }
   if (prune_future.valid()) {
-    // Join the outstanding prune task before exiting. A std::future returned
-    // by std::async(std::launch::async, ...) may still block in its destructor
-    // if the async work has not completed, so a timed wait here would not
-    // guarantee bounded shutdown.
-    prune_future.wait();
+    // Keep shutdown bounded even if prune_old_snapshots() is blocked in
+    // filesystem iteration/removal. Moving the future into a detached waiter
+    // thread prevents both an explicit wait here and a blocking future
+    // destructor in proc_loop().
+    std::thread([f = std::move(prune_future)]() mutable {
+      f.wait();
+    }).detach();
   }
   // Signal output_loop that no further ClassificationResults will be pushed.
   // Release ordering ensures all prior pushes to out_buf are visible before
