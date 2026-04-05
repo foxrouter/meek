@@ -81,7 +81,13 @@ class TestRfAuditJsonOutput(unittest.TestCase):
         )
         lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
         self.assertGreater(len(lines), 0, "rf_audit produced no output")
-        return json.loads(lines[0])
+        parsed = [json.loads(ln) for ln in lines]
+        self.assertEqual(
+            len(parsed), 1,
+            f"Expected exactly 1 JSON object for a single-file call, "
+            f"got {len(parsed)}: {lines}",
+        )
+        return parsed[0]
 
     def test_output_has_required_fields(self):
         """rf_audit JSON must contain file, snr_db, confidence, and mod."""

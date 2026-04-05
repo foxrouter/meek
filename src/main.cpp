@@ -711,8 +711,13 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     }
     maybe_schedule_prune(std::chrono::steady_clock::now(), false);
   }
-  if (prune_future.valid())
-    prune_future.wait();
+  if (prune_future.valid()) {
+    // Best-effort only: avoid hanging shutdown indefinitely if snapshot
+    // pruning is blocked on slow or hung filesystem I/O.
+    constexpr auto k_prune_shutdown_wait = std::chrono::seconds(1);
+    if (!st.stop_requested())
+      prune_future.wait_for(k_prune_shutdown_wait);
+  }
   // Signal output_loop that no further ClassificationResults will be pushed.
   // Release ordering ensures all prior pushes to out_buf are visible before
   // output_loop's acquire-load of this flag.
