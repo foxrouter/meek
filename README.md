@@ -321,12 +321,18 @@ emits one JSON object per file on stdout.
 
 Build:
 ```bash
-cmake --build build -t rf_audit
+# With SoapySDR installed
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target rf_audit -- -j"$(nproc)"
+
+# Tool-only / offline build on systems without SoapySDR
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_HARDWARE_TARGETS=OFF
+cmake --build build --target rf_audit -- -j"$(nproc)"
 ```
 
 Usage:
 ```bash
-rf_audit [options] <file1.cf32> [file2.cf32 ...]
+./build/rf_audit [options] <file1.cf32> [file2.cf32 ...]
 
 Options:
   --sample-rate FS     Sample rate in Hz (default: 2048000)
