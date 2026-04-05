@@ -312,6 +312,50 @@ reference and writes JSON results to `benchmarks/results/`.
 
 ---
 
+## Offline RF audit (`src/rf_audit.cpp`)
+
+`rf_audit` is a standalone C++20 CLI tool that reads raw CF32 IQ snapshot
+files, classifies the modulation using the same heuristic classifier as the
+daemon, matches the centre frequency against the UK band profile table, and
+emits one JSON object per file on stdout.
+
+Build:
+```bash
+# With SoapySDR installed
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target rf_audit -- -j"$(nproc)"
+
+# Tool-only / offline build on systems without SoapySDR
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_HARDWARE_TARGETS=OFF
+cmake --build build --target rf_audit -- -j"$(nproc)"
+```
+
+Usage:
+```bash
+./build/rf_audit [options] <file1.cf32> [file2.cf32 ...]
+
+Options:
+  --sample-rate FS     Sample rate in Hz (default: 2048000)
+  --center-freq HZ     Centre frequency for band matching (default: 0)
+  --block-size N       Analyse only the first N samples (0 = all)
+  --snr-min DB         SNR gate threshold in dB (default: 0.0)
+  --conf-threshold T   Minimum confidence to flag as candidate (default: 0.0)
+  --pretty             Pretty-print JSON output
+  --help               Show this help message and exit
+```
+
+Output fields per file include: `file`, `n_samples`, `sample_rate_hz`,
+`center_freq_hz`, `mod`, `confidence`, `snr_db`, `avg_power`, `papr_db`,
+`spectral_flatness`, `occupied_bw_hz`, `time_occupancy`, `avg_abs_phase`,
+`trans_ratio`, `p50`, `p90`, `decision_trace`, `snr_gate_pass`,
+`bw_gate_pass`, and `is_candidate`. When `--center-freq` matches a profile
+in `kUkBands`, the output also includes `band` and `band_notes`.
+
+Exit codes: 0 = all files processed, 1 = one or more files failed,
+2 = usage error.
+
+---
+
 ## Offline IQ analysis (`tools/decode_candidates.py`)
 
 `decode_candidates.py` retrieves candidate signal records from the SQLite
