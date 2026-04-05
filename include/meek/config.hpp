@@ -28,8 +28,12 @@ struct Config {
   std::size_t block_len{4096};
   // Analysis window: sub-divides each captured block so that short bursty
   // signals are not diluted by averaging over a large noise-filled window.
-  // Must be >= 32.  Values larger than block_len are clamped to
+  // Must be >= 32.  Normally, values larger than block_len are clamped to
   // block_len (single-window path, identical to original behaviour).
+  // Special case: if RF_BLOCK_LEN is smaller than kMinClassifyBlockSamples,
+  // analysis_len may instead be clamped to kMinClassifyBlockSamples, which
+  // can be greater than block_len. Therefore, analysis_len <= block_len only
+  // holds when block_len >= kMinClassifyBlockSamples.
   std::size_t analysis_len{4096};
   std::int64_t read_timeout_us{500'000};
 

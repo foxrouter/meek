@@ -552,26 +552,29 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       return;
     if (prune_future.valid())
       prune_future.wait();
-    last_prune = now;
     const auto snapshot_dir = cfg.snapshot_dir;
     const auto retention_days = cfg.snapshot_retention_days;
-    if (retention_days > 0 && !snapshot_dir.empty()) {
-      try {
-        prune_future = std::async(std::launch::async, [snapshot_dir, retention_days]() {
+    if (retention_days <= 0 || snapshot_dir.empty())
+      return;
+    try {
+      prune_future = std::async(std::launch::async, [snapshot_dir, retention_days]() {
+        prune_old_snapshots(snapshot_dir, retention_days);
+      });
+      last_prune = now;
+    } catch (const std::exception& ex) {
+      std::cerr << "[PRUNE] WARN: failed to launch async prune: " << ex.what()
+                << " — retention may not run until next interval\n";
+      if (allow_blocking) {
+        // Idle path: safe to run synchronously as fallback.
+        try {
           prune_old_snapshots(snapshot_dir, retention_days);
-        });
-      } catch (const std::exception&) {
-        if (allow_blocking) {
-          // Idle path: safe to run synchronously as fallback.
-          try {
-            prune_old_snapshots(snapshot_dir, retention_days);
-          } catch (...) {
-          }
+          last_prune = now;
+        } catch (...) {
         }
-        // Active path: skip synchronous fallback to avoid stalling
-        // classification throughput; prune will be retried at the next
-        // 24h interval.
       }
+      // Active path: skip synchronous fallback to avoid stalling
+      // classification throughput; last_prune is unchanged so the next
+      // 24h interval will retry.
     }
   };
 
