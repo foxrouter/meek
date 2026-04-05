@@ -333,9 +333,11 @@ Key settings to review:
 > `EnvironmentFile=` entries in `process-worker.service` (including
 > `/etc/rf_worker/thresholds.env` and `-/etc/default/rf-adapt-intel`). If
 > you edit `thresholds.env` and the change has no effect, check whether the
-> same variable is set in `override.conf` — the drop-in always wins.
-> Variables not listed in `override.conf` are read from the
-> `EnvironmentFile=` sources defined by `process-worker.service`.
+> same variable is set in `override.conf` — that drop-in wins over the
+> `EnvironmentFile=` values. Also check other drop-ins under
+> `process-worker.service.d/` (for example `processor.conf`), because later
+> `Environment=` directives there can also override values from the
+> `EnvironmentFile=` sources.
 
 ### 7.2 Restart after config changes
 
