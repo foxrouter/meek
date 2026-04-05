@@ -329,11 +329,13 @@ Key settings to review:
 | `MOD_HINT` | *(unset)* | Classifier prior hint. Valid values: `fsk`, `gmsk`, `psk`, `qam`, `ook`, `am`, `cw`. Adds +0.10 to the named class score. |
 
 > **Note — configuration load order:** `Environment=` lines in
-> `process-worker.service.d/override.conf` take precedence over
-> `EnvironmentFile=/etc/rf_worker/thresholds.env`. If you edit
-> `thresholds.env` and the change has no effect, check whether the same
-> variable is set in `override.conf` — the drop-in always wins. Only
-> variables not listed in `override.conf` are read from `thresholds.env`.
+> `process-worker.service.d/override.conf` take precedence over the
+> `EnvironmentFile=` entries in `process-worker.service` (including
+> `/etc/rf_worker/thresholds.env` and `-/etc/default/rf-adapt-intel`). If
+> you edit `thresholds.env` and the change has no effect, check whether the
+> same variable is set in `override.conf` — the drop-in always wins.
+> Variables not listed in `override.conf` are read from the
+> `EnvironmentFile=` sources defined by `process-worker.service`.
 
 ### 7.2 Restart after config changes
 
