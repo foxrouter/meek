@@ -203,10 +203,10 @@ jobs:
             2>&1 | tee /tmp/clang-tidy-rf_audit.log || true
           grep -qE "error:" /tmp/clang-tidy-rf_audit.log && TIDY_FAIL=1 || true
 
-          # src/main.cpp (C++23, SoapySDR hardware abstraction)
+          # src/main.cpp (C++20, SoapySDR hardware abstraction)
           clang-tidy-18 src/main.cpp \
             --checks="$TIDY_CHECKS" \
-            -- -std=c++23 $COMMON_INCLUDES -DHAVE_SOAPY \
+            -- -std=c++20 $COMMON_INCLUDES -DHAVE_SOAPY \
             2>&1 | tee /tmp/clang-tidy-main.log || true
           grep -qE "error:" /tmp/clang-tidy-main.log && TIDY_FAIL=1 || true
 

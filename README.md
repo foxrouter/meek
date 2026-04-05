@@ -335,6 +335,7 @@ Options:
   --snr-min DB         SNR gate threshold in dB (default: 0.0)
   --conf-threshold T   Minimum confidence to flag as candidate (default: 0.0)
   --pretty             Pretty-print JSON output
+  --help               Show this help message and exit
 ```
 
 Output fields per file include: `file`, `n_samples`, `sample_rate_hz`,
