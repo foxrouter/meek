@@ -18,6 +18,33 @@ option(BUILD_HARDWARE_TARGETS
 option(ENABLE_SANITIZERS
   "Enable AddressSanitizer and UndefinedBehaviourSanitizer" OFF)
 
+option(BUILD_OFFLINE
+  "Disable all FetchContent network access (requires dependency source trees to already exist locally, for example under build/_deps/ or via FETCHCONTENT_SOURCE_DIR_<name> overrides). Use on air-gapped nodes after a first online configure has populated the local FetchContent sources."
+  OFF)
+
+if(BUILD_OFFLINE)
+  # Set as a normal (non-cache) variable so it shadows any cache entry for
+  # this configure run only. This avoids writing to the cache and means no
+  # cleanup is needed when BUILD_OFFLINE is later turned off — any
+  # user-supplied -DFETCHCONTENT_FULLY_DISCONNECTED=ON cache entry is never
+  # touched.
+  set(FETCHCONTENT_FULLY_DISCONNECTED ON)
+  if(BUILD_HARDWARE_TARGETS)
+    message(STATUS
+      "BUILD_OFFLINE=ON: FetchContent will not access the network. "
+      "Ensure the nlohmann_json and cpp_httplib source directories already "
+      "exist locally (e.g. under build/_deps/) or set "
+      "FETCHCONTENT_SOURCE_DIR_nlohmann_json and "
+      "FETCHCONTENT_SOURCE_DIR_cpp_httplib.")
+  else()
+    message(STATUS
+      "BUILD_OFFLINE=ON: FetchContent will not access the network. "
+      "Ensure the nlohmann_json source directory already exists locally "
+      "(e.g. under build/_deps/) or set "
+      "FETCHCONTENT_SOURCE_DIR_nlohmann_json.")
+  endif()
+endif()
+
 # ── Find tools ────────────────────────────────────────────────────────────────
 find_package(PkgConfig REQUIRED)
 
