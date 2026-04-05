@@ -159,9 +159,9 @@ inline std::string env_str(const char* name, const char* def) {
     analysis_len_ll = min_analysis_ll;
   }
   if (analysis_len_ll > max_analysis_ll) {
-    std::cerr << "[CFG] WARN: RF_ANALYSIS_LEN " << analysis_len_ll
-              << " exceeds effective maximum " << max_analysis_ll << " (RF_BLOCK_LEN="
-              << cfg.block_len << ") — clamped to " << max_analysis_ll << "\n";
+    std::cerr << "[CFG] WARN: RF_ANALYSIS_LEN " << analysis_len_ll << " exceeds effective maximum "
+              << max_analysis_ll << " (RF_BLOCK_LEN=" << cfg.block_len << ") — clamped to "
+              << max_analysis_ll << "\n";
     analysis_len_ll = max_analysis_ll;
   }
   cfg.analysis_len = static_cast<std::size_t>(analysis_len_ll);
