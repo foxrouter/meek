@@ -732,9 +732,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     // filesystem iteration/removal. Moving the future into a detached waiter
     // thread prevents both an explicit wait here and a blocking future
     // destructor in proc_loop().
-    std::thread([f = std::move(prune_future)]() mutable {
-      f.wait();
-    }).detach();
+    std::thread([f = std::move(prune_future)]() mutable { f.wait(); }).detach();
   }
   // Signal output_loop that no further ClassificationResults will be pushed.
   // Release ordering ensures all prior pushes to out_buf are visible before
