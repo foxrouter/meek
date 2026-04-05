@@ -85,14 +85,12 @@ class TestMeekReportSmoke(unittest.TestCase):
              "snr=5.1dB avg_pow=8.0e-05 papr=4.1dB band=SMETS2 "
              "scores(fsk=0.61) -> fsk_like@0.62",
              1743379260000000000)).lastrowid
-        method_cur = conn.execute(
+        conn.execute(
             "INSERT OR IGNORE INTO methods(name, params) VALUES(?,?)",
             ("modulation_classifier", "{}"))
-        method_id = method_cur.lastrowid
-        if not method_id:
-            method_id = conn.execute(
-                "SELECT id FROM methods WHERE name = ?",
-                ("modulation_classifier",)).fetchone()[0]
+        method_id = conn.execute(
+            "SELECT id FROM methods WHERE name = ?",
+            ("modulation_classifier",)).fetchone()[0]
         conn.executemany(
             """
             INSERT INTO examples(signal_id, method_id, result, confidence, notes)
