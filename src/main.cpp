@@ -561,10 +561,16 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
           prune_old_snapshots(snapshot_dir, retention_days);
         });
       } catch (const std::exception&) {
-        try {
-          prune_old_snapshots(snapshot_dir, retention_days);
-        } catch (...) {
+        if (allow_blocking) {
+          // Idle path: safe to run synchronously as fallback.
+          try {
+            prune_old_snapshots(snapshot_dir, retention_days);
+          } catch (...) {
+          }
         }
+        // Active path: skip synchronous fallback to avoid stalling
+        // classification throughput; prune will be retried at the next
+        // 24h interval.
       }
     }
   };
@@ -712,10 +718,11 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     maybe_schedule_prune(std::chrono::steady_clock::now(), false);
   }
   if (prune_future.valid()) {
-    // Best-effort only: avoid hanging shutdown indefinitely if snapshot
-    // pruning is blocked on slow or hung filesystem I/O.
-    constexpr auto k_prune_shutdown_wait = std::chrono::seconds(1);
-    prune_future.wait_for(k_prune_shutdown_wait);
+    // Join the outstanding prune task before exiting. A std::future returned
+    // by std::async(std::launch::async, ...) may still block in its destructor
+    // if the async work has not completed, so a timed wait here would not
+    // guarantee bounded shutdown.
+    prune_future.wait();
   }
   // Signal output_loop that no further ClassificationResults will be pushed.
   // Release ordering ensures all prior pushes to out_buf are visible before

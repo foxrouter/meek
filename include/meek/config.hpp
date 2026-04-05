@@ -186,8 +186,9 @@ inline std::string env_str(const char* name, const char* def) {
   // deployments have migrated.
   {
     const char* papr_canonical = std::getenv("RF_PAPR_MAX");
-    cfg.papr_max_db = (papr_canonical != nullptr) ? detail::env_d("RF_PAPR_MAX", 0.0)
-                                                  : detail::env_d("PAPR_MAX", 0.0);
+    cfg.papr_max_db = (papr_canonical != nullptr && *papr_canonical != '\0')
+                          ? detail::env_d("RF_PAPR_MAX", 0.0)
+                          : detail::env_d("PAPR_MAX", 0.0);
   }
 
   // Classifier
