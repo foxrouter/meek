@@ -142,7 +142,15 @@ inline std::string env_str(const char* name, const char* def) {
   // no benefit and would exceed the buffer).
   std::int64_t analysis_len_ll = detail::env_ll("RF_ANALYSIS_LEN", 4096);
   const std::int64_t min_analysis_ll = static_cast<std::int64_t>(kMinClassifyBlockSamples);
-  const std::int64_t max_analysis_ll = static_cast<std::int64_t>(cfg.block_len);
+  std::int64_t max_analysis_ll = static_cast<std::int64_t>(cfg.block_len);
+  if (max_analysis_ll < min_analysis_ll) {
+    std::cerr << "[CFG] WARN: RF_BLOCK_LEN " << cfg.block_len
+              << " is below kMinClassifyBlockSamples " << min_analysis_ll
+              << " — analysis_len clamped to minimum\n";
+    // Force a coherent [min, max] range; classify_block() will gate every
+    // block until the operator corrects RF_BLOCK_LEN.
+    max_analysis_ll = min_analysis_ll;
+  }
   if (analysis_len_ll < min_analysis_ll) {
     std::cerr << "[CFG] WARN: RF_ANALYSIS_LEN " << analysis_len_ll << " below minimum "
               << min_analysis_ll << " — clamped to " << min_analysis_ll << "\n";

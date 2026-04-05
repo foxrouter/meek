@@ -537,6 +537,31 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   auto last_prune = std::chrono::steady_clock::now();
   std::future<void> prune_future;
 
+  // Shared helper: schedule a prune pass if the 24 h interval has elapsed.
+  // When allow_blocking is true (idle path) the caller waits for any
+  // in-flight prune before launching a new one — acceptable since we are
+  // idle.  When false (active path) the call is a no-op if a prune is
+  // still running, so classification throughput is never stalled.
+  auto maybe_schedule_prune = [&](std::chrono::steady_clock::time_point now, bool allow_blocking) {
+    if (now - last_prune < std::chrono::hours(24))
+      return;
+    const bool prune_ready =
+        !prune_future.valid() ||
+        prune_future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    if (!prune_ready && !allow_blocking)
+      return;
+    if (prune_future.valid())
+      prune_future.wait();
+    last_prune = now;
+    const auto snapshot_dir = cfg.snapshot_dir;
+    const auto retention_days = cfg.snapshot_retention_days;
+    if (retention_days > 0 && !snapshot_dir.empty()) {
+      prune_future = std::async(std::launch::async, [snapshot_dir, retention_days]() {
+        prune_old_snapshots(snapshot_dir, retention_days);
+      });
+    }
+  };
+
   // Loop until stop is requested AND the buffer is truly empty, OR until
   // capture_loop has signalled completion (cap_exiting) and the buffer is
   // confirmed empty via the two-step pattern above.  pop() uses an acquire
@@ -566,19 +591,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
                     .count()),
             std::memory_order_relaxed);
       }
-      const auto prune_now = std::chrono::steady_clock::now();
-      if (prune_now - last_prune >= std::chrono::hours(24)) {
-        if (prune_future.valid())
-          prune_future.wait();
-        last_prune = prune_now;
-        const auto snapshot_dir = cfg.snapshot_dir;
-        const auto retention_days = cfg.snapshot_retention_days;
-        if (retention_days > 0 && !snapshot_dir.empty()) {
-          prune_future = std::async(std::launch::async, [snapshot_dir, retention_days]() {
-            prune_old_snapshots(snapshot_dir, retention_days);
-          });
-        }
-      }
+      maybe_schedule_prune(std::chrono::steady_clock::now(), true);
       std::this_thread::sleep_for(std::chrono::microseconds(100));
       continue;
     }
@@ -689,19 +702,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       proc_dropped.fetch_add(1, std::memory_order_relaxed);
       cr = ClassificationResult{};
     }
-    const auto prune_now = std::chrono::steady_clock::now();
-    if (prune_now - last_prune >= std::chrono::hours(24)) {
-      if (prune_future.valid())
-        prune_future.wait();
-      last_prune = prune_now;
-      const auto snapshot_dir = cfg.snapshot_dir;
-      const auto retention_days = cfg.snapshot_retention_days;
-      if (retention_days > 0 && !snapshot_dir.empty()) {
-        prune_future = std::async(std::launch::async, [snapshot_dir, retention_days]() {
-          prune_old_snapshots(snapshot_dir, retention_days);
-        });
-      }
-    }
+    maybe_schedule_prune(std::chrono::steady_clock::now(), false);
   }
   if (prune_future.valid())
     prune_future.wait();
