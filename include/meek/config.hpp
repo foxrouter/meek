@@ -170,9 +170,14 @@ inline std::string env_str(const char* name, const char* def) {
   cfg.min_power = detail::env_d("RF_MIN_POWER", 5e-6);
   cfg.snr_min_db = detail::env_d("RF_SNR_MIN_DB", 3.0);
   cfg.expected_bw_hz = detail::env_d("RF_EXPECTED_BW_HZ", 0.0);
-  // RF_PAPR_MAX is the canonical name; fall back to legacy PAPR_MAX so
-  // existing deployments continue to work without a config change.
-  cfg.papr_max_db = detail::env_d("RF_PAPR_MAX", detail::env_d("PAPR_MAX", 0.0));
+  // RF_PAPR_MAX is the canonical name. Fall back to legacy PAPR_MAX only
+  // when RF_PAPR_MAX is absent so the legacy path is never evaluated once
+  // deployments have migrated.
+  {
+    const char* papr_canonical = std::getenv("RF_PAPR_MAX");
+    cfg.papr_max_db = (papr_canonical != nullptr) ? detail::env_d("RF_PAPR_MAX", 0.0)
+                                                  : detail::env_d("PAPR_MAX", 0.0);
+  }
 
   // Classifier
   cfg.conf_threshold = detail::env_d("RF_CONF_THRESHOLD", 0.35);
