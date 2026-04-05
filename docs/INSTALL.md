@@ -427,6 +427,7 @@ bash tests/test_setup.sh -v
 bash tests/test_deploy.sh -v
 bash tests/test_canary.sh -v
 bash tests/test_install.sh -v
+bash tests/test_scan_incoming.sh -v
 
 # All via CTest
 cmake --build build --target test

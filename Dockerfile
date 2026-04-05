@@ -52,6 +52,7 @@ RUN cmake -S /src -B /build \
     cmake --build /build -t iq_metrics rf_audit
 
 # ── Run Python tests + iq_metrics validation ────────────────────────────────
+RUN cd /src && bash tests/test_scan_incoming.sh -v
 RUN cd /src && python3 tests/test_autotune.py -v
 RUN cd /src && python3 tests/test_decode_candidates.py -v
 RUN cd /src && python3 tests/test_guardrails.py -v
