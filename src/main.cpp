@@ -556,9 +556,16 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     const auto snapshot_dir = cfg.snapshot_dir;
     const auto retention_days = cfg.snapshot_retention_days;
     if (retention_days > 0 && !snapshot_dir.empty()) {
-      prune_future = std::async(std::launch::async, [snapshot_dir, retention_days]() {
-        prune_old_snapshots(snapshot_dir, retention_days);
-      });
+      try {
+        prune_future = std::async(std::launch::async, [snapshot_dir, retention_days]() {
+          prune_old_snapshots(snapshot_dir, retention_days);
+        });
+      } catch (const std::exception&) {
+        try {
+          prune_old_snapshots(snapshot_dir, retention_days);
+        } catch (...) {
+        }
+      }
     }
   };
 
