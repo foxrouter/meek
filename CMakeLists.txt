@@ -23,11 +23,12 @@ option(BUILD_OFFLINE
   OFF)
 
 if(BUILD_OFFLINE)
-  set(FETCHCONTENT_FULLY_DISCONNECTED ON CACHE BOOL
-    "Populated by BUILD_OFFLINE — do not edit directly" FORCE)
-  # Remember that we were the one who forced this, so the else() branch
-  # can safely undo it without touching a user-supplied value.
-  set(_MEEK_FC_DISCONNECTED_BY_BUILD_OFFLINE ON CACHE INTERNAL "")
+  # Set as a normal (non-cache) variable so it shadows any cache entry for
+  # this configure run only. This avoids writing to the cache and means no
+  # cleanup is needed when BUILD_OFFLINE is later turned off — any
+  # user-supplied -DFETCHCONTENT_FULLY_DISCONNECTED=ON cache entry is never
+  # touched.
+  set(FETCHCONTENT_FULLY_DISCONNECTED ON)
   if(BUILD_HARDWARE_TARGETS)
     message(STATUS
       "BUILD_OFFLINE=ON: FetchContent will not access the network. "
@@ -41,18 +42,6 @@ if(BUILD_OFFLINE)
       "Ensure the nlohmann_json source directory already exists locally "
       "(e.g. under build/_deps/) or set "
       "FETCHCONTENT_SOURCE_DIR_nlohmann_json.")
-  endif()
-else()
-  # Only undo the forced-ON value if BUILD_OFFLINE was the one that set it.
-  # A user who passed -DFETCHCONTENT_FULLY_DISCONNECTED=ON independently is
-  # left untouched.
-  if(_MEEK_FC_DISCONNECTED_BY_BUILD_OFFLINE)
-    # Clear both the normal and cache variables. Removing only the cache
-    # entry can leave the normal variable set for the rest of this configure
-    # run, which would keep FetchContent in disconnected mode.
-    unset(FETCHCONTENT_FULLY_DISCONNECTED)
-    unset(FETCHCONTENT_FULLY_DISCONNECTED CACHE)
-    unset(_MEEK_FC_DISCONNECTED_BY_BUILD_OFFLINE CACHE)
   endif()
 endif()
 
