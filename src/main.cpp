@@ -543,6 +543,10 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   // idle.  When false (active path) the call is a no-op if a prune is
   // still running, so classification throughput is never stalled.
   auto maybe_schedule_prune = [&](std::chrono::steady_clock::time_point now, bool allow_blocking) {
+    const auto snapshot_dir = cfg.snapshot_dir;
+    const auto retention_days = cfg.snapshot_retention_days;
+    if (retention_days <= 0 || snapshot_dir.empty())
+      return;
     if (now - last_prune < std::chrono::hours(24))
       return;
     const bool prune_ready =
@@ -552,10 +556,6 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       return;
     if (prune_future.valid())
       prune_future.wait();
-    const auto snapshot_dir = cfg.snapshot_dir;
-    const auto retention_days = cfg.snapshot_retention_days;
-    if (retention_days <= 0 || snapshot_dir.empty())
-      return;
     try {
       prune_future = std::async(std::launch::async, [snapshot_dir, retention_days]() {
         prune_old_snapshots(snapshot_dir, retention_days);
