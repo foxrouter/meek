@@ -18,6 +18,19 @@ option(BUILD_HARDWARE_TARGETS
 option(ENABLE_SANITIZERS
   "Enable AddressSanitizer and UndefinedBehaviourSanitizer" OFF)
 
+option(BUILD_OFFLINE
+  "Disable all FetchContent network access (requires dependencies already in the CMake cache or local SOURCE_DIR). Use on air-gapped nodes after a first online configure has populated the cache."
+  OFF)
+
+if(BUILD_OFFLINE)
+  set(FETCHCONTENT_FULLY_DISCONNECTED ON CACHE BOOL
+    "Populated by BUILD_OFFLINE — do not edit directly" FORCE)
+  message(STATUS
+    "BUILD_OFFLINE=ON: FetchContent will not access the network. "
+    "Ensure nlohmann_json and cpp_httplib are already in the CMake cache "
+    "or provide SOURCE_DIR overrides.")
+endif()
+
 # ── Find tools ────────────────────────────────────────────────────────────────
 find_package(PkgConfig REQUIRED)
 

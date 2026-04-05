@@ -195,6 +195,7 @@ sudo cmake --install .
 |---|---|---|
 | `BUILD_HARDWARE_TARGETS` | `ON` | Build `rf_adapt_intel` and `soapy_read_test` (requires SoapySDR). Set `OFF` in CI or on machines without SDR hardware. |
 | `ENABLE_SANITIZERS` | `OFF` | Compile with AddressSanitizer and UndefinedBehaviorSanitizer (Clang recommended). |
+| `BUILD_OFFLINE` | `OFF` | Disable FetchContent network access for air-gapped builds. Requires a prior online configure to have populated the CMake cache. |
 
 Build only `iq_metrics` (no SDR hardware required):
 

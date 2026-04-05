@@ -193,6 +193,24 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_HARDWARE_TARGETS=OFF
 cmake --build build -t iq_metrics
 ```
 
+### Air-gapped / offline builds (air-gapped nodes without internet access)
+
+On a first build with internet access the CMake configure step downloads and
+caches `nlohmann/json` and `cpp-httplib` under `build/_deps/`. After that
+first successful configure you can build offline on the same machine or copy
+the `build/_deps/` directory to the target node:
+
+```bash
+# First configure (requires internet — downloads and caches dependencies)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_HARDWARE_TARGETS=OFF
+
+# Subsequent offline builds on the same or copied build tree
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_HARDWARE_TARGETS=OFF \
+      -DBUILD_OFFLINE=ON
+cmake --build build -- -j$(nproc)
+```
+
 ### Automated build via `scripts/deploy_and_restart.sh`
 
 If the service is already deployed and you want to rebuild and restart in one step:
