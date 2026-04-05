@@ -193,9 +193,9 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_HARDWARE_TARGETS=OFF
 cmake --build build -t iq_metrics
 ```
 
-### Air-gapped / offline builds (air-gapped nodes without internet access)
+### Air-gapped / offline builds (no internet access)
 
-On a first build with internet access the CMake configure step downloads and
+On a first build with internet access, the CMake configure step downloads and
 populates the FetchContent source directories under `build/_deps/`. After that
 first successful configure you can build offline on the same machine or copy
 the `build/_deps/` directory to the target node.
