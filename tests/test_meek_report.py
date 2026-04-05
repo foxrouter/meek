@@ -51,13 +51,17 @@ class TestMeekReportSmoke(unittest.TestCase):
         anchor = html.find(marker)
         if anchor == -1:
             anchor = 0
-        decl = "const DATA ="
+        decl = "const DATA"
         start = html.find(decl, anchor)
         if start == -1:
             return {}
-        payload = html[start + len(decl):].lstrip()
+        # Find the first '{' after 'const DATA' to tolerate any whitespace
+        # or formatting around the '=' (e.g. 'const DATA=' or 'const DATA =').
+        brace = html.find("{", start + len(decl))
+        if brace == -1:
+            return {}
         try:
-            data, _ = json.JSONDecoder().raw_decode(payload)
+            data, _ = json.JSONDecoder().raw_decode(html[brace:])
         except json.JSONDecodeError:
             return {}
         return data
