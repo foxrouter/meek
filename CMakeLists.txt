@@ -39,6 +39,12 @@ if(BUILD_OFFLINE)
       "(e.g. under build/_deps/) or set "
       "FETCHCONTENT_SOURCE_DIR_nlohmann_json.")
   endif()
+else()
+  # Clear any cached value that BUILD_OFFLINE previously forced ON, so the
+  # variable reverts to the CMake default.  A user who passes
+  # -DFETCHCONTENT_FULLY_DISCONNECTED=ON explicitly will have it re-applied
+  # on the next configure invocation.
+  unset(FETCHCONTENT_FULLY_DISCONNECTED CACHE)
 endif()
 
 # ── Find tools ────────────────────────────────────────────────────────────────
