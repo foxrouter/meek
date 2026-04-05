@@ -328,6 +328,17 @@ Key settings to review:
 | `FDEV` | `50000` | FSK frequency deviation (Hz). Used by the FSK demod chain. Only active when built with `HAVE_LIQUID`. |
 | `MOD_HINT` | *(unset)* | Classifier prior hint. Valid values: `fsk`, `gmsk`, `psk`, `qam`, `ook`, `am`, `cw`. Adds +0.10 to the named class score. |
 
+> **Note — configuration load order:** `Environment=` lines in
+> `process-worker.service.d/override.conf` take precedence over the
+> `EnvironmentFile=` entries in `process-worker.service` (including
+> `/etc/rf_worker/thresholds.env` and `-/etc/default/rf-adapt-intel`). If
+> you edit `thresholds.env` and the change has no effect, check whether the
+> same variable is set in `override.conf` — that drop-in wins over the
+> `EnvironmentFile=` values. Also check other drop-ins under
+> `process-worker.service.d/` (for example `processor.conf`), because later
+> `Environment=` directives there can also override values from the
+> `EnvironmentFile=` sources.
+
 ### 7.2 Restart after config changes
 
 ```bash
