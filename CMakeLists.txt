@@ -25,6 +25,9 @@ option(BUILD_OFFLINE
 if(BUILD_OFFLINE)
   set(FETCHCONTENT_FULLY_DISCONNECTED ON CACHE BOOL
     "Populated by BUILD_OFFLINE — do not edit directly" FORCE)
+  # Remember that we were the one who forced this, so the else() branch
+  # can safely undo it without touching a user-supplied value.
+  set(_MEEK_FC_DISCONNECTED_BY_BUILD_OFFLINE ON CACHE INTERNAL "")
   if(BUILD_HARDWARE_TARGETS)
     message(STATUS
       "BUILD_OFFLINE=ON: FetchContent will not access the network. "
@@ -40,11 +43,13 @@ if(BUILD_OFFLINE)
       "FETCHCONTENT_SOURCE_DIR_nlohmann_json.")
   endif()
 else()
-  # Clear any cached value that BUILD_OFFLINE previously forced ON, so the
-  # variable reverts to the CMake default.  A user who passes
-  # -DFETCHCONTENT_FULLY_DISCONNECTED=ON explicitly will have it re-applied
-  # on the next configure invocation.
-  unset(FETCHCONTENT_FULLY_DISCONNECTED CACHE)
+  # Only undo the forced-ON value if BUILD_OFFLINE was the one that set it.
+  # A user who passed -DFETCHCONTENT_FULLY_DISCONNECTED=ON independently is
+  # left untouched.
+  if(_MEEK_FC_DISCONNECTED_BY_BUILD_OFFLINE)
+    unset(FETCHCONTENT_FULLY_DISCONNECTED CACHE)
+    unset(_MEEK_FC_DISCONNECTED_BY_BUILD_OFFLINE CACHE)
+  endif()
 endif()
 
 # ── Find tools ────────────────────────────────────────────────────────────────
