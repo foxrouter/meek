@@ -337,11 +337,12 @@ Options:
   --pretty             Pretty-print JSON output
 ```
 
-Output fields per file: `file`, `n_samples`, `sample_rate_hz`,
+Output fields per file include: `file`, `n_samples`, `sample_rate_hz`,
 `center_freq_hz`, `mod`, `confidence`, `snr_db`, `avg_power`, `papr_db`,
-`spectral_flatness`, `occupied_bw_hz`, `time_occupancy`, `snr_gate_pass`,
-`bw_gate_pass`, `is_candidate`. The `band` field is added when
-`--center-freq` matches a profile in `kUkBands`.
+`spectral_flatness`, `occupied_bw_hz`, `time_occupancy`, `avg_abs_phase`,
+`trans_ratio`, `p50`, `p90`, `decision_trace`, `snr_gate_pass`,
+`bw_gate_pass`, and `is_candidate`. When `--center-freq` matches a profile
+in `kUkBands`, the output also includes `band` and `band_notes`.
 
 Exit codes: 0 = all files processed, 1 = one or more files failed,
 2 = usage error.
