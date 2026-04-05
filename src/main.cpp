@@ -537,15 +537,20 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   auto last_prune = std::chrono::steady_clock::now();
   std::future<void> prune_future;
 
+  // Constants for the prune helper — read once here so the lambda does not
+  // copy cfg fields on every invocation (which runs for every processed block
+  // on the active path).
+  const int prune_retention_days = cfg.snapshot_retention_days;
+  const std::string& prune_snapshot_dir = cfg.snapshot_dir;
+  const bool prune_enabled = (prune_retention_days > 0 && !prune_snapshot_dir.empty());
+
   // Shared helper: schedule a prune pass if the 24 h interval has elapsed.
   // When allow_blocking is true (idle path) the caller waits for any
   // in-flight prune before launching a new one — acceptable since we are
   // idle.  When false (active path) the call is a no-op if a prune is
   // still running, so classification throughput is never stalled.
   auto maybe_schedule_prune = [&](std::chrono::steady_clock::time_point now, bool allow_blocking) {
-    const auto snapshot_dir = cfg.snapshot_dir;
-    const auto retention_days = cfg.snapshot_retention_days;
-    if (retention_days <= 0 || snapshot_dir.empty())
+    if (!prune_enabled)
       return;
     if (now - last_prune < std::chrono::hours(24))
       return;
@@ -557,8 +562,10 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     if (prune_future.valid())
       prune_future.wait();
     try {
-      prune_future = std::async(std::launch::async, [snapshot_dir, retention_days]() {
-        prune_old_snapshots(snapshot_dir, retention_days);
+      const std::string dir_copy = prune_snapshot_dir;
+      const int days_copy = prune_retention_days;
+      prune_future = std::async(std::launch::async, [dir_copy, days_copy]() {
+        prune_old_snapshots(dir_copy, days_copy);
       });
       last_prune = now;
     } catch (const std::exception& ex) {
@@ -567,7 +574,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
       if (allow_blocking) {
         // Idle path: safe to run synchronously as fallback.
         try {
-          prune_old_snapshots(snapshot_dir, retention_days);
+          prune_old_snapshots(prune_snapshot_dir, prune_retention_days);
           last_prune = now;
         } catch (...) {
         }
