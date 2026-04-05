@@ -39,9 +39,6 @@ if(BUILD_OFFLINE)
       "(e.g. under build/_deps/) or set "
       "FETCHCONTENT_SOURCE_DIR_nlohmann_json.")
   endif()
-else()
-  set(FETCHCONTENT_FULLY_DISCONNECTED OFF CACHE BOOL
-    "Populated by BUILD_OFFLINE — do not edit directly" FORCE)
 endif()
 
 # ── Find tools ────────────────────────────────────────────────────────────────
