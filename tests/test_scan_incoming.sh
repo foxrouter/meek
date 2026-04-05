@@ -27,8 +27,8 @@ done
 [ "${1:-}" = "-v" ] && VERBOSE=1
 
 log()  { [ "$VERBOSE" -eq 1 ] && echo "[INFO] $*" || true; }
-ok()   { echo "OK: $1";   PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; FAIL=$((FAIL + 1)); }
+ok()   { [ "$VERBOSE" -eq 1 ] && echo "OK: $1" || true; PASS=$((PASS + 1)); }
+fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 
 if [ ! -f "$SCAN_INCOMING" ]; then
     echo "FATAL: scan_incoming.sh not found at $SCAN_INCOMING"
@@ -57,12 +57,12 @@ chmod +x "$STUB"
 # create_test_iq_file <path> — write a minimal CF32 file (32 samples = 256 bytes)
 create_test_iq_file() {
     python3 -c "
-import struct, math
+import struct, math, sys
 data = b''
 for i in range(32):
     data += struct.pack('<ff', math.cos(i * 0.1), math.sin(i * 0.1))
-open('$1', 'wb').write(data)
-"
+open(sys.argv[1], 'wb').write(data)
+" "$1"
 }
 
 # Pre-populate INCOMING for the first test that needs it
@@ -178,12 +178,29 @@ test_processed_dir_created_if_absent() {
     local out rc=0
     out="$(INCOMING_DIR="$INCOMING" PROCESSED_DIR="$new_processed" PROCESS_SCRIPT="$STUB" \
            bash "$SCAN_INCOMING" 2>&1)" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        ok "auto-create PROCESSED_DIR: exits 0"
+    else
+        fail "auto-create PROCESSED_DIR: expected exit 0, got $rc"
+        log "output was: $out"
+    fi
     if [ -d "$new_processed" ]; then
         ok "auto-create PROCESSED_DIR: directory created"
     else
         fail "auto-create PROCESSED_DIR: expected directory to be created"
     fi
+    if [ ! -f "$INCOMING/create_dir.cf32" ]; then
+        ok "auto-create PROCESSED_DIR: source file removed from INCOMING_DIR"
+    else
+        fail "auto-create PROCESSED_DIR: source file should be moved from INCOMING_DIR"
+    fi
+    if [ -f "$new_processed/create_dir.cf32" ]; then
+        ok "auto-create PROCESSED_DIR: file moved to processed directory"
+    else
+        fail "auto-create PROCESSED_DIR: expected file in created PROCESSED_DIR"
+    fi
     rm -rf "$new_processed"
+    rm -f "$INCOMING/create_dir.cf32"
 }
 
 test_non_iq_files_ignored() {
