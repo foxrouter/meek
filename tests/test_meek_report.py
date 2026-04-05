@@ -12,6 +12,8 @@ Run with:
 Requires: no external dependencies beyond stdlib
 """
 
+import json
+import re
 import sqlite3
 import subprocess
 import sys
@@ -37,6 +39,13 @@ class TestMeekReportSmoke(unittest.TestCase):
         cls.tmp = Path(cls._tmpdir.name)
         cls.db_path = cls.tmp / "test.db"
         cls._seed_db(cls.db_path)
+        # Run the report once; all passing tests share the cached result.
+        cls._result = cls._run_report_cmd()
+        out = cls.tmp / "report.html"
+        cls._html = out.read_text(encoding="utf-8") if out.exists() else ""
+        # Extract the embedded DATA JSON for structured assertions.
+        m = re.search(r"const DATA = ({.*?});", cls._html, re.DOTALL)
+        cls._data = json.loads(m.group(1)) if m else {}
 
     @staticmethod
     def _seed_db(db_path: Path) -> None:
@@ -98,15 +107,16 @@ class TestMeekReportSmoke(unittest.TestCase):
         conn.commit()
         conn.close()
 
-    def _run_report(
-        self, extra_args: list[str] | None = None
+    @classmethod
+    def _run_report_cmd(
+        cls, extra_args: list[str] | None = None
     ) -> subprocess.CompletedProcess:
         cmd = [
             sys.executable,
             str(_MEEK_REPORT),
-            "--db", str(self.db_path),
+            "--db", str(cls.db_path),
             "--days", "365",
-            "--out", str(self.tmp / "report.html"),
+            "--out", str(cls.tmp / "report.html"),
         ]
         if extra_args:
             cmd += extra_args
@@ -116,24 +126,16 @@ class TestMeekReportSmoke(unittest.TestCase):
 
     def test_exits_zero(self):
         """meek_report.py must exit 0 on a valid database."""
-        result = self._run_report()
         self.assertEqual(
-            result.returncode, 0,
-            f"meek_report.py exited {result.returncode}:\n{result.stderr}",
+            self._result.returncode, 0,
+            f"meek_report.py exited {self._result.returncode}:\n"
+            f"{self._result.stderr}",
         )
 
     def test_html_file_created(self):
         """meek_report.py must create the output HTML file."""
-        result = self._run_report()
-        self.assertEqual(
-            result.returncode, 0,
-            f"meek_report.py exited {result.returncode}:\n{result.stderr}",
-        )
         out = self.tmp / "report.html"
-        self.assertTrue(
-            out.exists(),
-            "Output HTML file was not created",
-        )
+        self.assertTrue(out.exists(), "Output HTML file was not created")
         self.assertGreater(
             out.stat().st_size, 0,
             "Output HTML file is empty",
@@ -141,40 +143,36 @@ class TestMeekReportSmoke(unittest.TestCase):
 
     def test_html_contains_signal_data(self):
         """HTML output must contain counts derived from the seeded DB rows."""
-        result = self._run_report()
+        # Verify the DATA JSON block was found and parsed.
+        self.assertTrue(
+            self._data,
+            "Could not extract const DATA = {...} JSON from report HTML",
+        )
+        # band_totals are populated by the examples JOIN in league_table();
+        # a non-zero count proves the seeded rows were actually queried.
+        band_totals = self._data.get("band_totals", {})
         self.assertEqual(
-            result.returncode, 0,
-            f"meek_report.py exited {result.returncode}:\n{result.stderr}",
+            band_totals.get("ISM-433"), 1,
+            f"band_totals['ISM-433'] should be 1; got {band_totals}",
         )
-        html = (self.tmp / "report.html").read_text(encoding="utf-8")
-        # %%TOTAL_SIGNALS%% is replaced with the actual count from the DB;
-        # with 2 seeded signals this must be "2", not the literal placeholder.
-        self.assertNotIn(
-            "%%TOTAL_SIGNALS%%", html,
-            "%%TOTAL_SIGNALS%% placeholder was not replaced",
+        self.assertEqual(
+            band_totals.get("SMETS2"), 1,
+            f"band_totals['SMETS2'] should be 1; got {band_totals}",
         )
-        self.assertIn(
-            ">2<", html,
-            "HTML does not contain the expected total signal count of 2",
-        )
-        # The embedded DATA JSON must reflect a non-zero count for ISM-433
-        # (populated via the seeded examples JOIN in league_table).
-        self.assertIn(
-            '"ISM-433": 1', html,
-            "band_totals for ISM-433 should be 1 from seeded examples",
+        # group_totals are aggregated per band-group; both seeded bands belong
+        # to 'IoT & Smart Infrastructure', so the total must be 2.
+        group_totals = self._data.get("group_totals", {})
+        self.assertEqual(
+            group_totals.get("IoT & Smart Infrastructure"), 2,
+            f"group_totals['IoT & Smart Infrastructure'] should be 2; "
+            f"got {group_totals}",
         )
 
     def test_html_is_valid_structure(self):
         """HTML output must contain basic HTML structure tags."""
-        result = self._run_report()
-        self.assertEqual(
-            result.returncode, 0,
-            f"meek_report.py exited {result.returncode}:\n{result.stderr}",
-        )
-        html = (self.tmp / "report.html").read_text(encoding="utf-8")
         for tag in ("<!DOCTYPE", "<html", "<head", "<body", "<title"):
             self.assertIn(
-                tag, html,
+                tag, self._html,
                 f"HTML output is missing expected tag: {tag}",
             )
 
