@@ -2,9 +2,9 @@
 """
 tests/test_meek_report.py - Smoke tests for tools/meek_report.py.
 
-Creates a minimal in-memory SQLite database seeded with synthetic signal
-rows, runs meek_report.py via subprocess, and validates that the HTML
-output contains expected structure and signal data.
+Creates a minimal temporary on-disk SQLite database file seeded with
+synthetic signal rows, runs meek_report.py via subprocess, and validates
+that the HTML output contains expected structure and signal data.
 
 Run with:
     python3 tests/test_meek_report.py [-v]
@@ -12,7 +12,6 @@ Run with:
 Requires: no external dependencies beyond stdlib
 """
 
-import json
 import sqlite3
 import subprocess
 import sys
@@ -65,25 +64,43 @@ class TestMeekReportSmoke(unittest.TestCase):
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
         """)
-        conn.execute(
+        signal_1_id = conn.execute(
             "INSERT INTO signals(source, notes, timestamp_ns) VALUES(?,?,?)",
             ("rf_adapt_intel",
              "snr=8.5dB avg_pow=1.2e-04 papr=3.2dB band=ISM-433 "
              "scores(fsk=0.78) -> fsk_like@0.65",
-             1743379200000000000))
-        conn.execute(
+             1743379200000000000)).lastrowid
+        signal_2_id = conn.execute(
             "INSERT INTO signals(source, notes, timestamp_ns) VALUES(?,?,?)",
             ("rf_adapt_intel",
              "snr=5.1dB avg_pow=8.0e-05 papr=4.1dB band=SMETS2 "
              "scores(fsk=0.61) -> fsk_like@0.62",
-             1743379260000000000))
-        conn.execute(
+             1743379260000000000)).lastrowid
+        method_cur = conn.execute(
             "INSERT OR IGNORE INTO methods(name, params) VALUES(?,?)",
             ("modulation_classifier", "{}"))
+        method_id = method_cur.lastrowid
+        if not method_id:
+            method_id = conn.execute(
+                "SELECT id FROM methods WHERE name = ?",
+                ("modulation_classifier",)).fetchone()[0]
+        conn.executemany(
+            """
+            INSERT INTO examples(signal_id, method_id, result, confidence, notes)
+            VALUES(?,?,?,?,?)
+            """,
+            [
+                (signal_1_id, method_id, "fsk_like", 0.65,
+                 "seeded smoke-test example for ISM-433 detection"),
+                (signal_2_id, method_id, "fsk_like", 0.62,
+                 "seeded smoke-test example for SMETS2 detection"),
+            ])
         conn.commit()
         conn.close()
 
-    def _run_report(self, extra_args: list | None = None) -> subprocess.CompletedProcess:
+    def _run_report(
+        self, extra_args: list[str] | None = None
+    ) -> subprocess.CompletedProcess:
         cmd = [
             sys.executable,
             str(_MEEK_REPORT),
@@ -123,16 +140,28 @@ class TestMeekReportSmoke(unittest.TestCase):
         )
 
     def test_html_contains_signal_data(self):
-        """HTML output must contain data from the seeded signals."""
+        """HTML output must contain counts derived from the seeded DB rows."""
         result = self._run_report()
         self.assertEqual(
             result.returncode, 0,
             f"meek_report.py exited {result.returncode}:\n{result.stderr}",
         )
         html = (self.tmp / "report.html").read_text(encoding="utf-8")
+        # %%TOTAL_SIGNALS%% is replaced with the actual count from the DB;
+        # with 2 seeded signals this must be "2", not the literal placeholder.
+        self.assertNotIn(
+            "%%TOTAL_SIGNALS%%", html,
+            "%%TOTAL_SIGNALS%% placeholder was not replaced",
+        )
         self.assertIn(
-            "ISM-433", html,
-            "HTML output does not contain expected band name ISM-433",
+            ">2<", html,
+            "HTML does not contain the expected total signal count of 2",
+        )
+        # The embedded DATA JSON must reflect a non-zero count for ISM-433
+        # (populated via the seeded examples JOIN in league_table).
+        self.assertIn(
+            '"ISM-433": 1', html,
+            "band_totals for ISM-433 should be 1 from seeded examples",
         )
 
     def test_html_is_valid_structure(self):
