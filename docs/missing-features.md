@@ -42,7 +42,7 @@ Items marked ⬜ are outstanding.
 
 | Item | File | Status |
 |---|---|---|
-| `PAPR_MAX` env var not enforced | `src/main.cpp` | ✅ Implemented: `PAPR_MAX` read via `env_to_d` and enforced in `classify_block()` PAPR gate. |
+| `RF_PAPR_MAX` env var enforcement | `src/main.cpp`, `include/meek/config.hpp` | ✅ Implemented: canonical `RF_PAPR_MAX` read with lazy fallback to legacy `PAPR_MAX`; enforced in `classify_block()` PAPR gate. |
 | `MOD_HINT` prior bias not consumed | `src/main.cpp` | ✅ Implemented: `MOD_HINT` read and applied as additive +0.10 prior in `classify_block()`. |
 | File-replay mode in `process_incoming.sh` | `scripts/process_incoming.sh` | ✅ Implemented: offline IQ replay via `tools/decode_candidates.py`; bash bug fix applied (`local rc=` → `rc=`). |
 
@@ -77,7 +77,7 @@ Items marked ⬜ are outstanding.
 | FSK demod chain (liquid-dsp) | `src/main.cpp`, `include/meek/demod_chains.hpp` | ✅ Done |
 | PSK/QAM demod chain (liquid-dsp) | `src/main.cpp`, `include/meek/demod_chains.hpp` | ✅ Done |
 | OOK/AM demod chain (liquid-dsp) | `src/main.cpp`, `include/meek/demod_chains.hpp` | ✅ Done |
-| `PAPR_MAX` enforcement | `src/main.cpp` | ✅ Done |
+| `RF_PAPR_MAX` enforcement (with legacy `PAPR_MAX` fallback) | `src/main.cpp`, `include/meek/config.hpp` | ✅ Done |
 | `MOD_HINT` prior bias in classifier | `src/main.cpp` | ✅ Done |
 | File-replay mode for `process_incoming` | `scripts/process_incoming.sh` | ✅ Done |
 | SNR sweep acceptance assertions | `tests/test_snr_sweep.py` | ✅ Done |

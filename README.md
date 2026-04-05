@@ -312,6 +312,42 @@ reference and writes JSON results to `benchmarks/results/`.
 
 ---
 
+## Offline RF audit (`src/rf_audit.cpp`)
+
+`rf_audit` is a standalone C++20 CLI tool that reads raw CF32 IQ snapshot
+files, classifies the modulation using the same heuristic classifier as the
+daemon, matches the centre frequency against the UK band profile table, and
+emits one JSON object per file on stdout.
+
+Build:
+```bash
+cmake --build build -t rf_audit
+```
+
+Usage:
+```bash
+rf_audit [options] <file1.cf32> [file2.cf32 ...]
+
+Options:
+  --sample-rate FS     Sample rate in Hz (default: 2048000)
+  --center-freq HZ     Centre frequency for band matching (default: 0)
+  --block-size N       Analyse only the first N samples (0 = all)
+  --snr-min DB         SNR gate threshold in dB (default: 0.0)
+  --conf-threshold T   Minimum confidence to flag as candidate (default: 0.0)
+  --pretty             Pretty-print JSON output
+```
+
+Output fields per file: `file`, `n_samples`, `sample_rate_hz`,
+`center_freq_hz`, `mod`, `confidence`, `snr_db`, `avg_power`, `papr_db`,
+`spectral_flatness`, `occupied_bw_hz`, `time_occupancy`, `snr_gate_pass`,
+`bw_gate_pass`, `is_candidate`. The `band` field is added when
+`--center-freq` matches a profile in `kUkBands`.
+
+Exit codes: 0 = all files processed, 1 = one or more files failed,
+2 = usage error.
+
+---
+
 ## Offline IQ analysis (`tools/decode_candidates.py`)
 
 `decode_candidates.py` retrieves candidate signal records from the SQLite
