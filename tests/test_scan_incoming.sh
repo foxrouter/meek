@@ -37,35 +37,14 @@ log() {
 
 ok() {
     if [ "$VERBOSE" = true ]; then
-        echo "OK: $1"
+        echo "[PASS] $1"
     fi
     _PASS=$((_PASS + 1))
 }
 
 fail() {
-    echo "FAIL: $1" >&2
+    echo "[FAIL] $1" >&2
     _FAIL=$((_FAIL + 1))
-}
-
-assert_true() {
-    local description="$1"
-    shift
-    if "$@"; then
-        ok "$description"
-    else
-        fail "$description"
-    fi
-}
-
-assert_eq() {
-    local expected="$1"
-    local actual="$2"
-    local description="$3"
-    if [ "$expected" = "$actual" ]; then
-        ok "$description"
-    else
-        fail "$description (expected: $expected, actual: $actual)"
-    fi
 }
 
 if [ ! -f "$SCAN_INCOMING" ]; then
@@ -110,7 +89,7 @@ run_scan() {
     INCOMING_DIR="$INCOMING" \
     PROCESSED_DIR="$PROCESSED" \
     PROCESS_SCRIPT="$STUB" \
-    bash "$SCAN_INCOMING" 2>&1
+    bash "$SCAN_INCOMING" 2>&1 || return $?
 }
 
 # ---------------------------------------------------------------------------
