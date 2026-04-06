@@ -29,12 +29,6 @@ case "${1:-}" in
         ;;
 esac
 
-log() {
-    if [ "$VERBOSE" = true ]; then
-        echo "[INFO] $*"
-    fi
-}
-
 ok() {
     if [ "$VERBOSE" = true ]; then
         echo "[PASS] $1"
@@ -80,13 +74,24 @@ trap 'rm -rf "$TMP"' EXIT
 INCOMING="$TMP/incoming"
 PROCESSED="$TMP/processed"
 STUB="$TMP/process_stub.sh"
+PROCESS_LOG="$TMP/process_args.log"
 SCAN_OUT="$TMP/scan_out"
 mkdir -p "$INCOMING" "$PROCESSED"
+: > "$PROCESS_LOG"
 
-# Stub process_incoming.sh that always succeeds
-cat > "$STUB" <<'STUB_EOF'
+# Stub process_incoming.sh that records and validates its input path
+cat > "$STUB" <<STUB_EOF
 #!/usr/bin/env bash
-exit 0
+set -euo pipefail
+printf '%s\n' "\${1-}" >> "$PROCESS_LOG"
+if [ -z "\${1-}" ]; then
+    echo "missing input path argument" >&2
+    exit 1
+fi
+if [ ! -f "\$1" ]; then
+    echo "input path does not exist: \$1" >&2
+    exit 1
+fi
 STUB_EOF
 chmod +x "$STUB"
 
@@ -104,9 +109,6 @@ for i in range(32):
 open(sys.argv[1], 'wb').write(data)
 " "$1"
 }
-
-# Pre-populate INCOMING for the first test that needs it
-create_test_iq_file "$INCOMING/test_signal.cf32"
 
 run_scan() {
     INCOMING_DIR="$INCOMING" \
@@ -130,7 +132,7 @@ test_empty_dir() {
 }
 
 test_cf32_file_processed_and_moved() {
-    # Reset state: ensure test_signal.cf32 is in INCOMING
+    : > "$PROCESS_LOG"
     create_test_iq_file "$INCOMING/test_signal.cf32"
     local rc=0
     run_scan > "$SCAN_OUT" || rc=$?
@@ -141,11 +143,13 @@ test_cf32_file_processed_and_moved() {
     else
         fail "cf32 file: expected file in PROCESSED_DIR and absent from INCOMING_DIR"
     fi
+    assert_contains "test_signal.cf32" "$PROCESS_LOG" "cf32 file: stub was invoked with correct filename"
     # Clean up for subsequent tests
     rm -f "$PROCESSED/test_signal.cf32"
 }
 
 test_raw_file_processed_and_moved() {
+    : > "$PROCESS_LOG"
     create_test_iq_file "$INCOMING/test_signal.raw"
     local rc=0
     run_scan > "$SCAN_OUT" || rc=$?
@@ -156,6 +160,7 @@ test_raw_file_processed_and_moved() {
         fail "raw file: expected file in PROCESSED_DIR and absent from INCOMING_DIR"
     fi
     assert_contains "1 processed, 0 failed" "$SCAN_OUT" "raw file: summary reports success"
+    assert_contains "test_signal.raw" "$PROCESS_LOG" "raw file: stub was invoked with correct filename"
     rm -f "$PROCESSED/test_signal.raw"
 }
 
@@ -183,6 +188,7 @@ FAIL_EOF
 }
 
 test_processed_dir_created_if_absent() {
+    : > "$PROCESS_LOG"
     local new_processed="$TMP/new_processed_dir"
     create_test_iq_file "$INCOMING/create_dir.cf32"
     local rc=0
@@ -204,6 +210,7 @@ test_processed_dir_created_if_absent() {
     else
         fail "auto-create PROCESSED_DIR: expected file in created PROCESSED_DIR"
     fi
+    assert_contains "create_dir.cf32" "$PROCESS_LOG" "auto-create PROCESSED_DIR: stub was invoked with correct filename"
     rm -rf "$new_processed"
     rm -f "$INCOMING/create_dir.cf32"
 }
