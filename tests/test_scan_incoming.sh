@@ -52,7 +52,7 @@ if [ ! -f "$SCAN_INCOMING" ]; then
     exit 2
 fi
 
-TMP=$(mktemp -d)
+TMP=$(mktemp -d /tmp/test_scan_incoming.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
 
 INCOMING="$TMP/incoming"
@@ -98,7 +98,7 @@ run_scan() {
 
 test_empty_dir() {
     local empty_dir out rc=0
-    empty_dir="$(mktemp -d)"
+    empty_dir="$(mktemp -d /tmp/test_scan_incoming.XXXXXX)"
     out="$(INCOMING_DIR="$empty_dir" PROCESSED_DIR="$PROCESSED" PROCESS_SCRIPT="$STUB" \
            bash "$SCAN_INCOMING" 2>&1)" || rc=$?
     rm -rf "$empty_dir"
