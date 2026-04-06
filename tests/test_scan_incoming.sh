@@ -47,6 +47,28 @@ fail() {
     _FAIL=$((_FAIL + 1))
 }
 
+assert_exit() {
+    local expected="$1"
+    local actual="$2"
+    local description="$3"
+    if [ "$actual" -eq "$expected" ]; then
+        ok "$description"
+    else
+        fail "$description (expected exit $expected, got $actual)"
+    fi
+}
+
+assert_contains() {
+    local needle="$1"
+    local haystack_file="$2"
+    local description="$3"
+    if grep -Fq -- "$needle" "$haystack_file"; then
+        ok "$description"
+    else
+        fail "$description (missing: $needle in $haystack_file)"
+    fi
+}
+
 if [ ! -f "$SCAN_INCOMING" ]; then
     echo "FATAL: scan_incoming.sh not found at $SCAN_INCOMING" >&2
     exit 2
@@ -58,6 +80,7 @@ trap 'rm -rf "$TMP"' EXIT
 INCOMING="$TMP/incoming"
 PROCESSED="$TMP/processed"
 STUB="$TMP/process_stub.sh"
+SCAN_OUT="$TMP/scan_out"
 mkdir -p "$INCOMING" "$PROCESSED"
 
 # Stub process_incoming.sh that always succeeds
@@ -97,40 +120,22 @@ run_scan() {
 # ---------------------------------------------------------------------------
 
 test_empty_dir() {
-    local empty_dir out rc=0
+    local empty_dir rc=0
     empty_dir="$(mktemp -d /tmp/test_scan_incoming.XXXXXX)"
-    out="$(INCOMING_DIR="$empty_dir" PROCESSED_DIR="$PROCESSED" PROCESS_SCRIPT="$STUB" \
-           bash "$SCAN_INCOMING" 2>&1)" || rc=$?
+    INCOMING_DIR="$empty_dir" PROCESSED_DIR="$PROCESSED" PROCESS_SCRIPT="$STUB" \
+        bash "$SCAN_INCOMING" > "$SCAN_OUT" 2>&1 || rc=$?
     rm -rf "$empty_dir"
-    if [ "$rc" -eq 0 ]; then
-        ok "empty dir: exits 0"
-    else
-        fail "empty dir: expected exit 0, got $rc"
-    fi
-    if echo "$out" | grep -q "0 processed, 0 failed"; then
-        ok "empty dir: reports 0 processed, 0 failed"
-    else
-        fail "empty dir: expected '0 processed, 0 failed' in output"
-        log "output was: $out"
-    fi
+    assert_exit 0 "$rc" "empty dir: exits 0"
+    assert_contains "0 processed, 0 failed" "$SCAN_OUT" "empty dir: reports 0 processed, 0 failed"
 }
 
 test_cf32_file_processed_and_moved() {
     # Reset state: ensure test_signal.cf32 is in INCOMING
     create_test_iq_file "$INCOMING/test_signal.cf32"
-    local out rc=0
-    out="$(run_scan)" || rc=$?
-    if [ "$rc" -eq 0 ]; then
-        ok "cf32 file: exits 0"
-    else
-        fail "cf32 file: expected exit 0, got $rc"
-    fi
-    if echo "$out" | grep -q "1 processed, 0 failed"; then
-        ok "cf32 file: reports 1 processed, 0 failed"
-    else
-        fail "cf32 file: expected '1 processed, 0 failed'"
-        log "output was: $out"
-    fi
+    local rc=0
+    run_scan > "$SCAN_OUT" || rc=$?
+    assert_exit 0 "$rc" "cf32 file: exits 0"
+    assert_contains "1 processed, 0 failed" "$SCAN_OUT" "cf32 file: reports 1 processed, 0 failed"
     if [ ! -f "$INCOMING/test_signal.cf32" ] && [ -f "$PROCESSED/test_signal.cf32" ]; then
         ok "cf32 file: moved to PROCESSED_DIR"
     else
@@ -142,24 +147,15 @@ test_cf32_file_processed_and_moved() {
 
 test_raw_file_processed_and_moved() {
     create_test_iq_file "$INCOMING/test_signal.raw"
-    local out rc=0
-    out="$(run_scan)" || rc=$?
-    if [ "$rc" -eq 0 ]; then
-        ok "raw file: exits 0"
-    else
-        fail "raw file: expected exit 0, got $rc"
-    fi
+    local rc=0
+    run_scan > "$SCAN_OUT" || rc=$?
+    assert_exit 0 "$rc" "raw file: exits 0"
     if [ ! -f "$INCOMING/test_signal.raw" ] && [ -f "$PROCESSED/test_signal.raw" ]; then
         ok "raw file: moved to PROCESSED_DIR"
     else
         fail "raw file: expected file in PROCESSED_DIR and absent from INCOMING_DIR"
     fi
-    if echo "$out" | grep -q "1 processed, 0 failed"; then
-        ok "raw file: summary reports success"
-    else
-        fail "raw file: expected summary to contain '1 processed, 0 failed'"
-        log "output was: $out"
-    fi
+    assert_contains "1 processed, 0 failed" "$SCAN_OUT" "raw file: summary reports success"
     rm -f "$PROCESSED/test_signal.raw"
 }
 
@@ -173,20 +169,11 @@ FAIL_EOF
     chmod +x "$fail_stub"
 
     create_test_iq_file "$INCOMING/fail_signal.cf32"
-    local out rc=0
-    out="$(INCOMING_DIR="$INCOMING" PROCESSED_DIR="$PROCESSED" PROCESS_SCRIPT="$fail_stub" \
-           bash "$SCAN_INCOMING" 2>&1)" || rc=$?
-    if [ "$rc" -eq 0 ]; then
-        ok "failed process: scan exits 0 despite PROCESS_SCRIPT failure"
-    else
-        fail "failed process: expected exit 0, got $rc"
-    fi
-    if echo "$out" | grep -q "0 processed, 1 failed"; then
-        ok "failed process: reports 0 processed, 1 failed"
-    else
-        fail "failed process: expected '0 processed, 1 failed'"
-        log "output was: $out"
-    fi
+    local rc=0
+    INCOMING_DIR="$INCOMING" PROCESSED_DIR="$PROCESSED" PROCESS_SCRIPT="$fail_stub" \
+        bash "$SCAN_INCOMING" > "$SCAN_OUT" 2>&1 || rc=$?
+    assert_exit 0 "$rc" "failed process: scan exits 0 despite PROCESS_SCRIPT failure"
+    assert_contains "0 processed, 1 failed" "$SCAN_OUT" "failed process: reports 0 processed, 1 failed"
     if [ ! -f "$INCOMING/fail_signal.cf32" ] && [ -f "$PROCESSED/fail_signal.cf32" ]; then
         ok "failed process: file still moved to PROCESSED_DIR"
     else
@@ -198,15 +185,10 @@ FAIL_EOF
 test_processed_dir_created_if_absent() {
     local new_processed="$TMP/new_processed_dir"
     create_test_iq_file "$INCOMING/create_dir.cf32"
-    local out rc=0
-    out="$(INCOMING_DIR="$INCOMING" PROCESSED_DIR="$new_processed" PROCESS_SCRIPT="$STUB" \
-           bash "$SCAN_INCOMING" 2>&1)" || rc=$?
-    if [ "$rc" -eq 0 ]; then
-        ok "auto-create PROCESSED_DIR: exits 0"
-    else
-        fail "auto-create PROCESSED_DIR: expected exit 0, got $rc"
-        log "output was: $out"
-    fi
+    local rc=0
+    INCOMING_DIR="$INCOMING" PROCESSED_DIR="$new_processed" PROCESS_SCRIPT="$STUB" \
+        bash "$SCAN_INCOMING" > "$SCAN_OUT" 2>&1 || rc=$?
+    assert_exit 0 "$rc" "auto-create PROCESSED_DIR: exits 0"
     if [ -d "$new_processed" ]; then
         ok "auto-create PROCESSED_DIR: directory created"
     else
@@ -228,19 +210,10 @@ test_processed_dir_created_if_absent() {
 
 test_non_iq_files_ignored() {
     echo "not an IQ file" > "$INCOMING/readme.txt"
-    local out rc=0
-    out="$(run_scan)" || rc=$?
-    if [ "$rc" -eq 0 ]; then
-        ok "non-IQ files: exits 0"
-    else
-        fail "non-IQ files: expected exit 0, got $rc"
-    fi
-    if echo "$out" | grep -q "0 processed, 0 failed"; then
-        ok "non-IQ files: .txt file not processed"
-    else
-        fail "non-IQ files: expected '0 processed, 0 failed'"
-        log "output was: $out"
-    fi
+    local rc=0
+    run_scan > "$SCAN_OUT" || rc=$?
+    assert_exit 0 "$rc" "non-IQ files: exits 0"
+    assert_contains "0 processed, 0 failed" "$SCAN_OUT" "non-IQ files: .txt file not processed"
     if [ -f "$INCOMING/readme.txt" ]; then
         ok "non-IQ files: .txt file not moved"
     else
