@@ -138,6 +138,9 @@ jobs:
       - name: test_check_ssh_permissions.sh
         run: bash tests/test_check_ssh_permissions.sh -v
 
+      - name: test_scan_incoming.sh
+        run: bash tests/test_scan_incoming.sh -v
+
       - name: test_deploy.sh
         run: bash tests/test_deploy.sh -v
 
