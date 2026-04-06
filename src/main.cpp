@@ -97,6 +97,7 @@ static int sd_notify(int /*unset_environment*/, const char* state) noexcept {
 #include <vector>
 
 #include "meek/band_profiles.hpp"
+#include "meek/band_scheduler.hpp"
 #include "meek/classifier.hpp"
 #include "meek/config.hpp"
 #include "meek/db.hpp"
@@ -209,6 +210,14 @@ std::ptrdiff_t SoapySdrSource::read_samples(std::span<std::complex<float>> buf) 
   if (n < 0)
     return -1;
   return static_cast<std::ptrdiff_t>(n);
+}
+
+bool SoapySdrSource::set_center_freq(double freq_hz) noexcept {
+  SoapySDRKwargs args = {};
+  if (SoapySDRDevice_setFrequency(dev_, SOAPY_SDR_RX, 0, freq_hz, &args) != 0)
+    return false;
+  center_freq_hz_ = freq_hz;
+  return true;
 }
 
 #endif  // HAVE_SOAPY
@@ -404,14 +413,39 @@ struct SnapTask {
 
 static void capture_loop(std::stop_token st, ISdrSource& sdr,
                          SpscRingBuffer<SampleBlock, 64>& out_buf, const Config& cfg,
-                         std::atomic<std::uint64_t>& cap_dropped,
+                         BandScheduler& sched, std::atomic<std::uint64_t>& cap_dropped,
                          std::atomic<std::uint64_t>& cap_overflow,
                          std::atomic<std::uint64_t>& cap_progress, std::atomic<bool>& cap_exiting) {
   std::vector<std::complex<float>> buf(cfg.block_len);
   SampleBlock blk;
   blk.samples.reserve(cfg.block_len);
 
+  // When scheduling is active, retune immediately to the first slot so that
+  // blocks captured before the first tick() fires have a consistent frequency,
+  // regardless of the cfg.center_freq used to open the device.
+  if (sched.enabled()) {
+    if (!sdr.set_center_freq(sched.current().center_hz)) {
+      std::cerr << "[SCHED] WARN: initial retune to " << sched.current().center_hz
+                << " Hz failed\n";
+    } else {
+      std::cout << "[SCHED] Band rotation active: " << sched.slot_count() << " slots"
+                << ", initial slot " << sched.current().center_hz << " Hz ("
+                << sched.current().dwell_ms.count() << " ms dwell)\n";
+    }
+  }
+
   while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
+    // Advance to the next band slot when the current dwell period has elapsed.
+    if (sched.enabled()) {
+      if (const auto slot = sched.tick(std::chrono::steady_clock::now())) {
+        if (!sdr.set_center_freq(slot->center_hz)) {
+          std::cerr << "[SCHED] WARN: retune to " << slot->center_hz << " Hz failed\n";
+        } else {
+          std::cout << "[SCHED] Tuned to " << slot->center_hz << " Hz (" << slot->dwell_ms.count()
+                    << " ms dwell)\n";
+        }
+      }
+    }
     const auto n = sdr.read_samples(std::span{buf});
     // Update progress on every iteration; read_samples() is configured to
     // block up to cfg.read_timeout_us µs (clamped to [1, 300 s] at config
@@ -511,6 +545,8 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
   opts.papr_max_db = cfg.papr_max_db;
   opts.sample_rate_hz = cfg.sample_rate;
   opts.mod_hint = cfg.mod_hint;
+  // opts.band is updated per-block from blk.center_freq_hz so that band
+  // rotation via BandScheduler is reflected in every classify_block() call.
   opts.band = band;
 
   std::vector<float> scratch;
@@ -632,6 +668,12 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
     // analysis_len there is exactly one iteration (original behaviour).
     // have_best ensures the first window's result (including decision_trace)
     // is always recorded, even when all windows return confidence == 0.
+
+    // Update opts.band from the block's centre frequency so that each block
+    // is classified against the correct band profile after a BandScheduler
+    // retune.  find_band() is O(N) over kUkBands and cheap enough to call here.
+    opts.band = find_band(blk.center_freq_hz);
+
     ClassificationResult cr;
     std::size_t best_offset = 0;
     std::size_t best_len = 0;
@@ -1048,6 +1090,15 @@ int main(int argc, char** argv) {
   SpscRingBuffer<SampleBlock, 64> cap_to_proc;
   SpscRingBuffer<ClassificationResult, 64> proc_to_out;
 
+  // Band rotation scheduler — reads RF_SCHED_BANDS and RF_SCHED_DWELL_MS from
+  // the environment.  Returns a disabled scheduler when fewer than 2 band slots
+  // are configured; capture_loop then runs in fixed-frequency mode.
+  auto sched = BandScheduler::from_env();
+  if (sched.enabled()) {
+    std::cout << "[SCHED] Band scheduler configured: " << sched.slot_count() << " slots"
+              << ", dwell " << sched.current().dwell_ms.count() << " ms\n";
+  }
+
   // Snapshot worker — SpscRingBuffer<SnapTask, 64>: one producer (proc_loop),
   // one consumer (snap_thread).  Lock-free; no mutex in the hot path.
   // Note: SpscRingBuffer uses one sentinel slot, so usable capacity is 63.
@@ -1107,7 +1158,8 @@ int main(int argc, char** argv) {
 #endif
 
   std::jthread cap_thread([&](std::stop_token st) {
-    capture_loop(st, *sdr, cap_to_proc, cfg, cap_dropped, cap_overflow, cap_progress, cap_exiting);
+    capture_loop(st, *sdr, cap_to_proc, cfg, sched, cap_dropped, cap_overflow, cap_progress,
+                 cap_exiting);
   });
 
   {
