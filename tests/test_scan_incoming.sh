@@ -13,22 +13,60 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCAN_INCOMING="$REPO_ROOT/scripts/scan_incoming.sh"
-PASS=0
-FAIL=0
-VERBOSE=0
+_PASS=0
+_FAIL=0
+VERBOSE=false
 
-# Validate arguments
-for arg in "$@"; do
-    if [ "$arg" != "-v" ]; then
+case "${1:-}" in
+    "")
+        ;;
+    -v)
+        VERBOSE=true
+        ;;
+    *)
         echo "Usage: $0 [-v]" >&2
         exit 1
-    fi
-done
-[ "${1:-}" = "-v" ] && VERBOSE=1
+        ;;
+esac
 
-log()  { [ "$VERBOSE" -eq 1 ] && echo "[INFO] $*" || true; }
-ok()   { [ "$VERBOSE" -eq 1 ] && echo "OK: $1" || true; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
+log() {
+    if [ "$VERBOSE" = true ]; then
+        echo "[INFO] $*"
+    fi
+}
+
+ok() {
+    if [ "$VERBOSE" = true ]; then
+        echo "OK: $1"
+    fi
+    _PASS=$((_PASS + 1))
+}
+
+fail() {
+    echo "FAIL: $1" >&2
+    _FAIL=$((_FAIL + 1))
+}
+
+assert_true() {
+    local description="$1"
+    shift
+    if "$@"; then
+        ok "$description"
+    else
+        fail "$description"
+    fi
+}
+
+assert_eq() {
+    local expected="$1"
+    local actual="$2"
+    local description="$3"
+    if [ "$expected" = "$actual" ]; then
+        ok "$description"
+    else
+        fail "$description (expected: $expected, actual: $actual)"
+    fi
+}
 
 if [ ! -f "$SCAN_INCOMING" ]; then
     echo "FATAL: scan_incoming.sh not found at $SCAN_INCOMING" >&2
@@ -244,7 +282,5 @@ test_processed_dir_created_if_absent
 test_non_iq_files_ignored
 
 echo ""
-echo "Results: $PASS passed, $FAIL failed."
-if [ "$FAIL" -gt 0 ]; then
-    exit 1
-fi
+echo "Results: $_PASS passed, $_FAIL failed."
+[ "$_FAIL" -eq 0 ] && exit 0 || exit 1
