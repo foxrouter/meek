@@ -114,7 +114,6 @@ Python mirror update in `tests/test_band_profiles.py`.
 | Monotonic steady_clock fallback for pre-epoch timestamps | `src/main.cpp` | ✅ Done |
 | kUkBands count updated to 39 in comments and array size | `include/meek/band_profiles.hpp` | ✅ Done |
 | dorny/paths-filter with fetch-depth: 0 and pull-requests: read | `.github/workflows/ci.yml` | ✅ Done |
-| dorny/paths-filter with fetch-depth: 0 and pull-requests: read | `.github/workflows/ci.yml` | ✅ Done |
 | push and pull_request paths allowlists aligned and complete | `.github/workflows/ci.yml` | ✅ Done |
 
 ---
