@@ -428,7 +428,7 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
       std::cerr << "[SCHED] WARN: initial retune to " << sched.current().center_hz
                 << " Hz failed\n";
     } else {
-      std::cout << "[SCHED] Band rotation active: " << sched.slot_count() << " slots"
+      std::cerr << "[SCHED] Band rotation active: " << sched.slot_count() << " slots"
                 << ", initial slot " << sched.current().center_hz << " Hz ("
                 << sched.current().dwell_ms.count() << " ms dwell)\n";
     }
@@ -436,13 +436,19 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
 
   while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
     // Advance to the next band slot when the current dwell period has elapsed.
+    // peek_next()/advance() split ensures the scheduler state only moves on
+    // successful retune; reset_dwell() is called on failure to avoid an
+    // immediate retry on the very next iteration.
     if (sched.enabled()) {
-      if (const auto slot = sched.tick(std::chrono::steady_clock::now())) {
-        if (!sdr.set_center_freq(slot->center_hz)) {
-          std::cerr << "[SCHED] WARN: retune to " << slot->center_hz << " Hz failed\n";
+      if (sched.dwell_elapsed(std::chrono::steady_clock::now())) {
+        const BandSlot& candidate = sched.peek_next();
+        if (!sdr.set_center_freq(candidate.center_hz)) {
+          std::cerr << "[SCHED] WARN: retune to " << candidate.center_hz
+                    << " Hz failed — remaining on " << sched.current().center_hz << " Hz\n";
+          sched.reset_dwell(std::chrono::steady_clock::now());
         } else {
-          std::cout << "[SCHED] Tuned to " << slot->center_hz << " Hz (" << slot->dwell_ms.count()
-                    << " ms dwell)\n";
+          sched.advance(std::chrono::steady_clock::now());
+          std::cerr << "[SCHED] Tuned to " << sched.current().center_hz / 1e6 << " MHz\n";
         }
       }
     }
@@ -534,8 +540,8 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
                       std::atomic<std::uint64_t>& proc_progress,
                       const std::atomic<bool>& cap_exiting, std::atomic<bool>& proc_exiting) {
   const BandProfile* band = find_band(cfg.center_freq);
-  if (band) {
-    std::cout << "[BAND] Matched: " << band->name << " (" << band->description << ")\n";
+  if (band && !cfg.sched_enabled) {
+    std::cerr << "[BAND] Matched " << band->name << " at " << cfg.center_freq / 1e6 << " MHz\n";
   }
 
   ClassifyOptions opts;
@@ -1022,7 +1028,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  const Config cfg = [&]() -> Config {
+  Config cfg = [&]() -> Config {
     try {
       return parse_config(argc, argv);
     } catch (const std::exception& e) {
@@ -1094,8 +1100,9 @@ int main(int argc, char** argv) {
   // the environment.  Returns a disabled scheduler when fewer than 2 band slots
   // are configured; capture_loop then runs in fixed-frequency mode.
   auto sched = BandScheduler::from_env();
+  cfg.sched_enabled = sched.enabled();
   if (sched.enabled()) {
-    std::cout << "[SCHED] Band scheduler configured: " << sched.slot_count() << " slots"
+    std::cerr << "[SCHED] Band scheduler configured: " << sched.slot_count() << " slots"
               << ", dwell " << sched.current().dwell_ms.count() << " ms\n";
   }
 

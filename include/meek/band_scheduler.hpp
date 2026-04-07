@@ -8,8 +8,12 @@
 //   auto sched = BandScheduler::from_env();   // build from env vars
 //   if (sched.enabled()) {
 //     while (running) {
-//       if (auto slot = sched.tick(steady_clock::now())) {
-//         retune_sdr(*slot);
+//       if (sched.dwell_elapsed(steady_clock::now())) {
+//         const BandSlot& next = sched.peek_next();
+//         if (retune_sdr(next))
+//           sched.advance(steady_clock::now());
+//         else
+//           sched.reset_dwell(steady_clock::now());
 //       }
 //       // ... capture block ...
 //     }
@@ -21,7 +25,6 @@
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -46,7 +49,7 @@ struct BandSlot {
 
 class BandScheduler {
  public:
-  /// Default-construct in disabled state.  tick() always returns nullopt.
+  /// Default-construct in disabled state.  dwell_elapsed() always returns false.
   BandScheduler() noexcept = default;
   ~BandScheduler() = default;
 
@@ -86,14 +89,40 @@ class BandScheduler {
     return slots_[current_idx_];
   }
 
-  /// Advance to the next slot if the current dwell period has elapsed.
+  /// Returns true if the current dwell period has elapsed.
   ///
-  /// Returns the newly selected BandSlot when a transition occurs, or
-  /// std::nullopt if the dwell has not yet elapsed or scheduling is disabled.
-  ///
-  /// The caller is responsible for retuning the SDR hardware to
-  /// slot->center_hz when a non-null value is returned.
-  [[nodiscard]] std::optional<BandSlot> tick(std::chrono::steady_clock::time_point now) noexcept;
+  /// On the first call the dwell timer is anchored to `now` (so timing starts
+  /// when capture actually begins, not when from_env() was called) and the
+  /// method returns true to trigger the first slot transition.
+  /// Returns false when scheduling is disabled.
+  [[nodiscard]] bool dwell_elapsed(std::chrono::steady_clock::time_point now) noexcept {
+    if (!enabled_)
+      return false;
+    if (!first_tick_done_) {
+      first_tick_done_ = true;
+      dwell_start_ = now;
+      return true;
+    }
+    return (now - dwell_start_) >= slots_[current_idx_].dwell_ms;
+  }
+
+  /// Returns a reference to the next slot without advancing the index.
+  /// Behaviour is undefined when enabled() is false or slot_count() == 0.
+  [[nodiscard]] const BandSlot& peek_next() const noexcept {
+    return slots_[(current_idx_ + 1) % slots_.size()];
+  }
+
+  /// Commits the slot transition.  Call only after a successful retune.
+  void advance(std::chrono::steady_clock::time_point now) noexcept {
+    current_idx_ = (current_idx_ + 1) % slots_.size();
+    dwell_start_ = now;
+  }
+
+  /// Resets the dwell timer without changing the current slot.
+  /// Call after a failed retune to avoid an immediate retry on the next iteration.
+  void reset_dwell(std::chrono::steady_clock::time_point now) noexcept {
+    dwell_start_ = now;
+  }
 
  private:
   explicit BandScheduler(std::vector<BandSlot> slots) noexcept;
@@ -111,24 +140,6 @@ class BandScheduler {
 
 inline BandScheduler::BandScheduler(std::vector<BandSlot> slots) noexcept
     : slots_(std::move(slots)), current_idx_(0), dwell_start_{}, enabled_(true) {}
-
-inline std::optional<BandSlot> BandScheduler::tick(
-    std::chrono::steady_clock::time_point now) noexcept {
-  if (!enabled_)
-    return std::nullopt;
-  // On the first call, anchor the dwell timer to when capture actually starts
-  // rather than when from_env() was called (which can be noticeably earlier).
-  if (!first_tick_done_) {
-    first_tick_done_ = true;
-    dwell_start_ = now;
-    return std::nullopt;
-  }
-  if (now - dwell_start_ < slots_[current_idx_].dwell_ms)
-    return std::nullopt;
-  current_idx_ = (current_idx_ + 1) % slots_.size();
-  dwell_start_ = now;
-  return slots_[current_idx_];
-}
 
 inline BandScheduler BandScheduler::from_env() {
   using ms = std::chrono::milliseconds;
