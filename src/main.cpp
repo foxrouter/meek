@@ -432,8 +432,7 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
         if (!sdr.set_center_freq(candidate.center_hz)) {
           const auto retune_done = std::chrono::steady_clock::now();
           std::cerr << "[SCHED] WARN: retune to " << candidate.center_hz / 1e6
-                    << " MHz failed — remaining on " << sched.current().center_hz / 1e6
-                    << " MHz\n";
+                    << " MHz failed — remaining on " << sched.current().center_hz / 1e6 << " MHz\n";
           sched.reset_dwell(retune_done);
         } else {
           const auto retune_done = std::chrono::steady_clock::now();
