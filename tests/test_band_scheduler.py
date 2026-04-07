@@ -24,6 +24,56 @@ from typing import List, Optional, Tuple
 
 _WHITESPACE = " \t\r\n\f\v"
 _DEFAULT_DWELL_MS = 10_000
+_MAX_LL = (1 << 63) - 1   # C++ long long max
+_MIN_LL = -(1 << 63)      # C++ long long min
+
+
+def _parse_rf_sched_dwell_ms(dwell_env: Optional[str]) -> int:
+    """Parse RF_SCHED_DWELL_MS with full-consumption validation.
+
+    Mirrors the C++ inline parse in BandScheduler::from_env():
+    - Returns _DEFAULT_DWELL_MS when dwell_env is None or empty.
+    - Skips leading whitespace (std::stoll behaviour).
+    - Rejects values with trailing non-whitespace (e.g. "10000ms") → default.
+    - Rejects non-positive values → default.
+    - Rejects values outside the C++ long long range → default.
+    - Rejects non-integer strings → default.
+    """
+    if not dwell_env:
+        return _DEFAULT_DWELL_MS
+
+    # Mirror std::stoll: skip leading whitespace, parse optional sign + digits.
+    s = dwell_env.lstrip(_WHITESPACE)
+    if not s:
+        return _DEFAULT_DWELL_MS
+
+    pos = 0
+    if s[pos] in '+-':
+        pos += 1
+    digits_start = pos
+    while pos < len(s) and s[pos].isdigit():
+        pos += 1
+
+    # No digits found → mirrors std::invalid_argument
+    if pos == digits_start:
+        return _DEFAULT_DWELL_MS
+
+    # Tail after number must be all whitespace; otherwise trailing non-numeric
+    tail = s[pos:]
+    if tail and tail.strip(_WHITESPACE):
+        return _DEFAULT_DWELL_MS
+
+    parsed = int(s[:pos])
+
+    # Check C++ long long range → mirrors std::out_of_range
+    if parsed < _MIN_LL or parsed > _MAX_LL:
+        return _DEFAULT_DWELL_MS
+
+    # Non-positive → default
+    if parsed <= 0:
+        return _DEFAULT_DWELL_MS
+
+    return parsed
 
 
 def _parse_rf_sched_bands(
@@ -120,6 +170,57 @@ class BandSchedulerSim:
 def _t(ms: int) -> datetime.datetime:
     """Helper: return a datetime offset by *ms* milliseconds from 2000-01-01."""
     return datetime.datetime(2000, 1, 1) + datetime.timedelta(milliseconds=ms)
+
+
+# ---------------------------------------------------------------------------
+# Tests: RF_SCHED_DWELL_MS parsing
+# ---------------------------------------------------------------------------
+
+class TestDwellMsParsing(unittest.TestCase):
+    """Mirror of the RF_SCHED_DWELL_MS inline parse in BandScheduler::from_env()."""
+
+    def test_none_returns_default(self):
+        self.assertEqual(_parse_rf_sched_dwell_ms(None), _DEFAULT_DWELL_MS)
+
+    def test_empty_string_returns_default(self):
+        self.assertEqual(_parse_rf_sched_dwell_ms(""), _DEFAULT_DWELL_MS)
+
+    def test_valid_integer(self):
+        self.assertEqual(_parse_rf_sched_dwell_ms("5000"), 5000)
+
+    def test_leading_whitespace_accepted(self):
+        self.assertEqual(_parse_rf_sched_dwell_ms("  5000"), 5000)
+
+    def test_trailing_whitespace_accepted(self):
+        self.assertEqual(_parse_rf_sched_dwell_ms("5000  "), 5000)
+
+    def test_leading_and_trailing_whitespace_accepted(self):
+        self.assertEqual(_parse_rf_sched_dwell_ms("  5000  "), 5000)
+
+    def test_trailing_junk_returns_default(self):
+        # "10000ms" has trailing non-whitespace → default
+        self.assertEqual(_parse_rf_sched_dwell_ms("10000ms"), _DEFAULT_DWELL_MS)
+
+    def test_trailing_junk_with_space_returns_default(self):
+        # "10000 ms" has trailing non-whitespace after the space → default
+        self.assertEqual(_parse_rf_sched_dwell_ms("10000 ms"), _DEFAULT_DWELL_MS)
+
+    def test_non_positive_zero_returns_default(self):
+        self.assertEqual(_parse_rf_sched_dwell_ms("0"), _DEFAULT_DWELL_MS)
+
+    def test_non_positive_negative_returns_default(self):
+        self.assertEqual(_parse_rf_sched_dwell_ms("-1"), _DEFAULT_DWELL_MS)
+
+    def test_invalid_string_returns_default(self):
+        self.assertEqual(_parse_rf_sched_dwell_ms("abc"), _DEFAULT_DWELL_MS)
+
+    def test_out_of_range_returns_default(self):
+        # Value exceeds C++ long long max (2^63 - 1)
+        huge = str((1 << 63) + 1)
+        self.assertEqual(_parse_rf_sched_dwell_ms(huge), _DEFAULT_DWELL_MS)
+
+    def test_whitespace_only_returns_default(self):
+        self.assertEqual(_parse_rf_sched_dwell_ms("   "), _DEFAULT_DWELL_MS)
 
 
 # ---------------------------------------------------------------------------

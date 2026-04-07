@@ -31,8 +31,6 @@
 #include <utility>
 #include <vector>
 
-#include "meek/config.hpp"
-
 namespace meek {
 
 // ---------------------------------------------------------------------------
