@@ -1096,8 +1096,8 @@ int main(int argc, char** argv) {
   auto sched = BandScheduler::from_env();
   if (sched.enabled()) {
     if (!sdr->set_center_freq(sched.current().center_hz)) {
-      std::cerr << "[SCHED] WARN: initial retune to " << sched.current().center_hz
-                << " Hz failed — scheduling disabled\n";
+      std::cerr << "[SCHED] WARN: initial retune to " << sched.current().center_hz / 1e6
+                << " MHz failed — scheduling disabled\n";
       sched = BandScheduler{};  // fall back to fixed cfg.center_freq
     } else {
       std::cout << "[SCHED] Band scheduler configured: " << sched.slot_count() << " slots"
