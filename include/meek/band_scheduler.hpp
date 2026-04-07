@@ -23,6 +23,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace meek {
@@ -59,10 +60,11 @@ class BandScheduler {
   ///                     are present.
   /// RF_SCHED_DWELL_MS — per-slot dwell duration in milliseconds (default 10000).
   ///                     A single value applies uniformly to all slots.
+  ///                     If unset, unparsable, or non-positive, the default
+  ///                     dwell is retained.
   ///
-  /// Malformed frequency tokens and non-positive dwell values are silently
-  /// skipped.  If fewer than 2 valid slots remain the scheduler is returned
-  /// in the disabled state.
+  /// Malformed frequency tokens are silently skipped.  If fewer than 2 valid
+  /// slots remain the scheduler is returned in the disabled state.
   [[nodiscard]] static BandScheduler from_env();
 
   /// Returns true when band rotation is active (>= 2 slots loaded).

@@ -57,7 +57,7 @@ class ISdrSource {
   /// Retune the SDR to a new centre frequency in Hz.
   /// Returns true on success, false if the operation failed or is not supported.
   /// Default implementation returns false (unsupported / test double).
-  virtual bool set_center_freq(double /*freq_hz*/) noexcept {
+  [[nodiscard]] virtual bool set_center_freq(double /*freq_hz*/) noexcept {
     return false;
   }
 
@@ -101,7 +101,7 @@ class SoapySdrSource final : public ISdrSource {
     return description_;
   }
 
-  bool set_center_freq(double freq_hz) noexcept override;
+  [[nodiscard]] bool set_center_freq(double freq_hz) noexcept override;
 
  private:
   SoapySDRDevice* dev_{nullptr};
