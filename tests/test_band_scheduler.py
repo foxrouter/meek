@@ -15,8 +15,6 @@ Requires: no external dependencies
 
 import datetime
 import math
-import os
-import sys
 import unittest
 from typing import List, Optional, Tuple
 
@@ -116,7 +114,7 @@ class BandSchedulerSim:
 
 
 def _t(ms: int) -> datetime.datetime:
-    """Helper: return a datetime offset by *ms* milliseconds from epoch."""
+    """Helper: return a datetime offset by *ms* milliseconds from 2000-01-01."""
     return datetime.datetime(2000, 1, 1) + datetime.timedelta(milliseconds=ms)
 
 
