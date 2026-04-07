@@ -151,7 +151,7 @@ class TestFromEnvParsing(unittest.TestCase):
         self.assertEqual(len(slots), 2)
 
     def test_malformed_token_skipped(self):
-        # "oops" is not a valid float → skipped; only 1 valid → disabled
+        # "oops" is not a valid float → skipped; 2 valid entries remain
         slots = _parse_rf_sched_bands("433920000,oops,868100000")
         self.assertEqual(len(slots), 2)
         self.assertAlmostEqual(slots[0][0], 433_920_000.0)

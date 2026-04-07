@@ -141,12 +141,14 @@ class BandScheduler {
   void advance(std::chrono::steady_clock::time_point now) noexcept {
     current_idx_ = (current_idx_ + 1) % slots_.size();
     dwell_start_ = now;
+    first_tick_done_ = true;
   }
 
   /// Resets the dwell timer without changing the current slot.
   /// Call after a failed retune to avoid an immediate retry on the next iteration.
   void reset_dwell(std::chrono::steady_clock::time_point now) noexcept {
     dwell_start_ = now;
+    first_tick_done_ = true;
   }
 
  private:
