@@ -22,6 +22,7 @@
 #pragma once
 
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
@@ -197,7 +198,7 @@ inline BandScheduler BandScheduler::from_env() {
         const double hz = std::stod(trimmed, &parsed_chars);
         const bool only_trailing_ws =
             trimmed.find_first_not_of(kWhitespace, parsed_chars) == std::string::npos;
-        if (only_trailing_ws && hz > 0.0)
+        if (only_trailing_ws && std::isfinite(hz) && hz > 0.0)
           slots.push_back({hz, dwell});
       } catch (const std::invalid_argument&) {
       } catch (const std::out_of_range&) {

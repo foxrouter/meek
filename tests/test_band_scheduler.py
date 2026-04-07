@@ -14,6 +14,7 @@ Requires: no external dependencies
 """
 
 import datetime
+import math
 import os
 import sys
 import unittest
@@ -58,7 +59,7 @@ def _parse_rf_sched_bands(
         # explicitly: after parsing, any remaining chars must be whitespace.
         # Since we already stripped, if float() succeeded, the full string was
         # consumed — guard passes.
-        if hz <= 0.0:
+        if not math.isfinite(hz) or hz <= 0.0:
             continue
         slots.append((hz, dwell_ms))
 
@@ -166,6 +167,19 @@ class TestFromEnvParsing(unittest.TestCase):
         slots = _parse_rf_sched_bands("0,433920000,868100000")
         self.assertEqual(len(slots), 2)
         slots_neg = _parse_rf_sched_bands("-1,433920000,868100000")
+        self.assertEqual(len(slots_neg), 2)
+
+    def test_nan_rejected(self):
+        # "nan" parses to float('nan') which is non-finite → must be rejected
+        slots = _parse_rf_sched_bands("nan,433920000,868100000")
+        self.assertEqual(len(slots), 2)
+        self.assertAlmostEqual(slots[0][0], 433_920_000.0)
+
+    def test_inf_rejected(self):
+        # "inf" and "-inf" are non-finite → must be rejected
+        slots = _parse_rf_sched_bands("inf,433920000,868100000")
+        self.assertEqual(len(slots), 2)
+        slots_neg = _parse_rf_sched_bands("-inf,433920000,868100000")
         self.assertEqual(len(slots_neg), 2)
 
     def test_custom_dwell_applied(self):
