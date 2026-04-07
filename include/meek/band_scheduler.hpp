@@ -179,8 +179,8 @@ inline BandScheduler BandScheduler::from_env() {
   }
 
   if (slots.size() < 2) {
-    std::cerr << "[SCHED] WARN: RF_SCHED_BANDS produced fewer than 2 valid slots (" << slots.size()
-              << ") — scheduling disabled\n";
+    std::cerr << "[SCHED] WARN: RF_SCHED_BANDS produced fewer than 2 valid slots ("
+              << slots.size() << ") — scheduling disabled\n";
     return {};
   }
 
