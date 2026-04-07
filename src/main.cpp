@@ -426,7 +426,8 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
   if (sched.enabled()) {
     if (!sdr.set_center_freq(sched.current().center_hz)) {
       std::cerr << "[SCHED] WARN: initial retune to " << sched.current().center_hz
-                << " Hz failed\n";
+                << " Hz failed — scheduling disabled\n";
+      sched = BandScheduler{};  // fall back to fixed cfg.center_freq
     } else {
       std::cout << "[SCHED] Band rotation active: " << sched.slot_count() << " slots"
                 << ", initial slot " << sched.current().center_hz << " Hz ("
