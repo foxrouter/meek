@@ -20,11 +20,14 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "meek/config.hpp"
 
 namespace meek {
 
@@ -93,27 +96,33 @@ class BandScheduler {
   [[nodiscard]] std::optional<BandSlot> tick(std::chrono::steady_clock::time_point now) noexcept;
 
  private:
-  explicit BandScheduler(std::vector<BandSlot> slots,
-                         std::chrono::steady_clock::time_point start) noexcept;
+  explicit BandScheduler(std::vector<BandSlot> slots) noexcept;
 
   std::vector<BandSlot> slots_;
   std::size_t current_idx_{0};
   std::chrono::steady_clock::time_point dwell_start_{};
   bool enabled_{false};
+  bool first_tick_done_{false};
 };
 
 // ---------------------------------------------------------------------------
 // Inline implementation
 // ---------------------------------------------------------------------------
 
-inline BandScheduler::BandScheduler(std::vector<BandSlot> slots,
-                                    std::chrono::steady_clock::time_point start) noexcept
-    : slots_(std::move(slots)), current_idx_(0), dwell_start_(start), enabled_(true) {}
+inline BandScheduler::BandScheduler(std::vector<BandSlot> slots) noexcept
+    : slots_(std::move(slots)), current_idx_(0), dwell_start_{}, enabled_(true) {}
 
 inline std::optional<BandSlot> BandScheduler::tick(
     std::chrono::steady_clock::time_point now) noexcept {
   if (!enabled_)
     return std::nullopt;
+  // On the first call, anchor the dwell timer to when capture actually starts
+  // rather than when from_env() was called (which can be noticeably earlier).
+  if (!first_tick_done_) {
+    first_tick_done_ = true;
+    dwell_start_ = now;
+    return std::nullopt;
+  }
   if (now - dwell_start_ < slots_[current_idx_].dwell_ms)
     return std::nullopt;
   current_idx_ = (current_idx_ + 1) % slots_.size();
@@ -123,16 +132,12 @@ inline std::optional<BandSlot> BandScheduler::tick(
 
 inline BandScheduler BandScheduler::from_env() {
   using ms = std::chrono::milliseconds;
+  constexpr std::string_view kWhitespace = " \t\r\n\f\v";
 
-  ms dwell{10'000};
-  if (const char* env = std::getenv("RF_SCHED_DWELL_MS"); env && *env != '\0') {
-    try {
-      const long long v = std::stoll(env);
-      if (v > 0)
-        dwell = ms{v};
-    } catch (...) {
-    }
-  }
+  // Use the shared env helper so parsing behaviour is consistent with the
+  // rest of the RF_* configuration.
+  const long long dwell_ll = detail::env_ll("RF_SCHED_DWELL_MS", 10'000);
+  const ms dwell{dwell_ll > 0 ? dwell_ll : 10'000};
 
   const char* bands_env = std::getenv("RF_SCHED_BANDS");
   if (!bands_env || *bands_env == '\0')
@@ -145,12 +150,16 @@ inline BandScheduler BandScheduler::from_env() {
     const std::size_t comma = input.find(',', pos);
     const std::size_t end = (comma == std::string::npos) ? input.size() : comma;
     const std::string_view token{input.data() + pos, end - pos};
-    const std::size_t first = token.find_first_not_of(" \t");
+    const std::size_t first = token.find_first_not_of(kWhitespace);
     if (first != std::string_view::npos) {
-      const std::string trimmed{token.substr(first, token.find_last_not_of(" \t") - first + 1)};
+      const std::size_t last = token.find_last_not_of(kWhitespace);
+      const std::string trimmed{token.substr(first, last - first + 1)};
       try {
-        const double hz = std::stod(trimmed);
-        if (hz > 0.0)
+        std::size_t parsed_chars = 0;
+        const double hz = std::stod(trimmed, &parsed_chars);
+        const bool only_trailing_ws =
+            trimmed.find_first_not_of(kWhitespace, parsed_chars) == std::string::npos;
+        if (only_trailing_ws && hz > 0.0)
           slots.push_back({hz, dwell});
       } catch (...) {
       }
@@ -158,10 +167,13 @@ inline BandScheduler BandScheduler::from_env() {
     pos = (comma == std::string::npos) ? input.size() + 1 : comma + 1;
   }
 
-  if (slots.size() < 2)
+  if (slots.size() < 2) {
+    std::cerr << "[SCHED] WARN: RF_SCHED_BANDS produced fewer than 2 valid slots (" << slots.size()
+              << ") — scheduling disabled\n";
     return {};
+  }
 
-  return BandScheduler{std::move(slots), std::chrono::steady_clock::now()};
+  return BandScheduler{std::move(slots)};
 }
 
 }  // namespace meek
