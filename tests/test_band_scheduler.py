@@ -48,6 +48,10 @@ def _parse_rf_sched_bands(
         trimmed = token.strip(_WHITESPACE)
         if not trimmed:
             continue
+        # Reject Python-only numeric forms: std::stod does not accept
+        # underscore digit separators (e.g. "433_920_000"), so we mirror that.
+        if '_' in trimmed:
+            continue
         try:
             hz = float(trimmed)
         except ValueError:
@@ -197,6 +201,15 @@ class TestFromEnvParsing(unittest.TestCase):
         slots = _parse_rf_sched_bands("433920000.5,868100000.0")
         self.assertEqual(len(slots), 2)
         self.assertAlmostEqual(slots[0][0], 433_920_000.5)
+
+    def test_underscore_numeric_rejected(self):
+        # Python float() accepts "433_920_000" but std::stod does not;
+        # our mirror explicitly rejects tokens containing underscores.
+        # "433_920_000" is rejected → only 1 valid token remains, so
+        # scheduling is disabled (requires >=2 valid entries).
+        slots = _parse_rf_sched_bands("433_920_000,868100000")
+        # Fewer than 2 valid tokens → scheduling disabled (empty list)
+        self.assertEqual(len(slots), 0)
 
 
 # ---------------------------------------------------------------------------

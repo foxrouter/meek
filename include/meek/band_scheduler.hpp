@@ -173,10 +173,31 @@ inline BandScheduler BandScheduler::from_env() {
   using ms = std::chrono::milliseconds;
   constexpr std::string_view kWhitespace = " \t\r\n\f\v";
 
-  // Use the shared env helper so parsing behaviour is consistent with the
-  // rest of the RF_* configuration.
-  const long long dwell_ll = detail::env_ll("RF_SCHED_DWELL_MS", 10'000);
-  const ms dwell{dwell_ll > 0 ? dwell_ll : 10'000};
+  // Parse RF_SCHED_DWELL_MS with full-consumption validation so that values
+  // like "10000ms" are rejected rather than silently truncated to 10000.
+  long long dwell_ll = 10'000;
+  if (const char* dwell_env = std::getenv("RF_SCHED_DWELL_MS");
+      dwell_env != nullptr && *dwell_env != '\0') {
+    try {
+      std::size_t parsed_chars = 0;
+      const long long parsed = std::stoll(dwell_env, &parsed_chars);
+      const std::string_view raw{dwell_env};
+      const bool only_trailing_ws =
+          raw.find_first_not_of(kWhitespace, parsed_chars) == std::string_view::npos;
+      if (only_trailing_ws && parsed > 0)
+        dwell_ll = parsed;
+      else if (!only_trailing_ws)
+        std::cerr << "[SCHED] WARN: RF_SCHED_DWELL_MS has trailing non-numeric characters"
+                     " — using default 10000 ms\n";
+    } catch (const std::invalid_argument&) {
+      std::cerr << "[SCHED] WARN: RF_SCHED_DWELL_MS is not a valid integer"
+                   " — using default 10000 ms\n";
+    } catch (const std::out_of_range&) {
+      std::cerr << "[SCHED] WARN: RF_SCHED_DWELL_MS is out of range"
+                   " — using default 10000 ms\n";
+    }
+  }
+  const ms dwell{dwell_ll};
 
   const char* bands_env = std::getenv("RF_SCHED_BANDS");
   if (!bands_env || *bands_env == '\0')
