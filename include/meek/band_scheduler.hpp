@@ -55,8 +55,33 @@ class BandScheduler {
 
   BandScheduler(const BandScheduler&) = delete;
   BandScheduler& operator=(const BandScheduler&) = delete;
-  BandScheduler(BandScheduler&&) noexcept = default;
-  BandScheduler& operator=(BandScheduler&&) noexcept = default;
+
+  BandScheduler(BandScheduler&& other) noexcept
+      : slots_(std::move(other.slots_)),
+        current_idx_(other.current_idx_),
+        dwell_start_(other.dwell_start_),
+        enabled_(other.enabled_),
+        first_tick_done_(other.first_tick_done_) {
+    other.current_idx_ = 0;
+    other.dwell_start_ = std::chrono::steady_clock::time_point{};
+    other.enabled_ = false;
+    other.first_tick_done_ = false;
+  }
+
+  BandScheduler& operator=(BandScheduler&& other) noexcept {
+    if (this != &other) {
+      slots_ = std::move(other.slots_);
+      current_idx_ = other.current_idx_;
+      dwell_start_ = other.dwell_start_;
+      enabled_ = other.enabled_;
+      first_tick_done_ = other.first_tick_done_;
+      other.current_idx_ = 0;
+      other.dwell_start_ = std::chrono::steady_clock::time_point{};
+      other.enabled_ = false;
+      other.first_tick_done_ = false;
+    }
+    return *this;
+  }
 
   /// Build a BandScheduler from environment variables.
   ///
