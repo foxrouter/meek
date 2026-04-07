@@ -174,13 +174,16 @@ class TestFromEnvParsing(unittest.TestCase):
         slots = _parse_rf_sched_bands("nan,433920000,868100000")
         self.assertEqual(len(slots), 2)
         self.assertAlmostEqual(slots[0][0], 433_920_000.0)
+        self.assertTrue(all(math.isfinite(f) for f, _ in slots))
 
     def test_inf_rejected(self):
         # "inf" and "-inf" are non-finite → must be rejected
         slots = _parse_rf_sched_bands("inf,433920000,868100000")
         self.assertEqual(len(slots), 2)
+        self.assertTrue(all(math.isfinite(f) for f, _ in slots))
         slots_neg = _parse_rf_sched_bands("-inf,433920000,868100000")
         self.assertEqual(len(slots_neg), 2)
+        self.assertTrue(all(math.isfinite(f) for f, _ in slots_neg))
 
     def test_custom_dwell_applied(self):
         slots = _parse_rf_sched_bands("433920000,868100000", dwell_ms=5000)
