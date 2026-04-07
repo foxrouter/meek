@@ -428,7 +428,7 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
       std::cerr << "[SCHED] WARN: initial retune to " << sched.current().center_hz
                 << " Hz failed\n";
     } else {
-      std::cerr << "[SCHED] Band rotation active: " << sched.slot_count() << " slots"
+      std::cout << "[SCHED] Band rotation active: " << sched.slot_count() << " slots"
                 << ", initial slot " << sched.current().center_hz << " Hz ("
                 << sched.current().dwell_ms.count() << " ms dwell)\n";
     }
@@ -449,7 +449,7 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
           sched.reset_dwell(now);
         } else {
           sched.advance(now);
-          std::cerr << "[SCHED] Tuned to " << sched.current().center_hz / 1e6 << " MHz\n";
+          std::cout << "[SCHED] Tuned to " << sched.current().center_hz / 1e6 << " MHz\n";
         }
       }
     }
@@ -1103,7 +1103,7 @@ int main(int argc, char** argv) {
   auto sched = BandScheduler::from_env();
   cfg.sched_enabled = sched.enabled();
   if (sched.enabled()) {
-    std::cerr << "[SCHED] Band scheduler configured: " << sched.slot_count() << " slots"
+    std::cout << "[SCHED] Band scheduler configured: " << sched.slot_count() << " slots"
               << ", dwell " << sched.current().dwell_ms.count() << " ms\n";
   }
 
