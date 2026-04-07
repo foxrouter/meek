@@ -542,7 +542,7 @@ static void proc_loop(std::stop_token st, SpscRingBuffer<SampleBlock, 64>& in_bu
                       const std::atomic<bool>& cap_exiting, std::atomic<bool>& proc_exiting) {
   const BandProfile* band = find_band(cfg.center_freq);
   if (band && !cfg.sched_enabled) {
-    std::cerr << "[BAND] Matched " << band->name << " at " << cfg.center_freq / 1e6 << " MHz\n";
+    std::cout << "[BAND] Matched " << band->name << " at " << cfg.center_freq / 1e6 << " MHz\n";
   }
 
   ClassifyOptions opts;
