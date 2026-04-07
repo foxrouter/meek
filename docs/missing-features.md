@@ -123,11 +123,11 @@ Python mirror update in `tests/test_band_profiles.py`.
 | Item | File(s) | Status |
 |---|---|---|
 | `BandSlot` struct (center_hz, dwell_ms) | `include/meek/band_scheduler.hpp` | ✅ Done |
-| `BandScheduler` class (from_env, tick, enabled, current, slot_count) | `include/meek/band_scheduler.hpp` | ✅ Done |
+| `BandScheduler` class (`from_env`, `dwell_elapsed`, `peek_next`, `advance`, `reset_dwell`, `enabled`, `current`, `slot_count`) | `include/meek/band_scheduler.hpp` | ✅ Done |
 | Non-copyable, move-constructible, default-constructible (disabled) | `include/meek/band_scheduler.hpp` | ✅ Done |
 | `ISdrSource::set_center_freq(double)` virtual method (default: false) | `include/meek/isdr_source.hpp` | ✅ Done |
 | `SoapySdrSource::set_center_freq` calling `SoapySDRDevice_setFrequency` | `src/main.cpp` | ✅ Done |
-| `capture_loop` BandScheduler integration (tick + retune on dwell expiry) | `src/main.cpp` | ✅ Done |
+| `capture_loop` BandScheduler integration (`dwell_elapsed()` + `peek_next()` + `advance()` / `reset_dwell()` on dwell expiry) | `src/main.cpp` | ✅ Done |
 | `proc_loop` per-block `find_band(blk.center_freq_hz)` update | `src/main.cpp` | ✅ Done |
 | `BandScheduler::from_env()` in `main()` passed to capture thread | `src/main.cpp` | ✅ Done |
 | `RF_SCHED_BANDS` / `RF_SCHED_DWELL_MS` env vars documented | `config/thresholds.env.example` | ✅ Done |

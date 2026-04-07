@@ -421,8 +421,8 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
   blk.samples.reserve(cfg.block_len);
 
   // When scheduling is active, retune immediately to the first slot so that
-  // blocks captured before the first tick() fires have a consistent frequency,
-  // regardless of the cfg.center_freq used to open the device.
+  // blocks captured before the scheduler first advances have a consistent
+  // frequency, regardless of the cfg.center_freq used to open the device.
   if (sched.enabled()) {
     if (!sdr.set_center_freq(sched.current().center_hz)) {
       std::cerr << "[SCHED] WARN: initial retune to " << sched.current().center_hz
@@ -440,14 +440,15 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
     // successful retune; reset_dwell() is called on failure to avoid an
     // immediate retry on the very next iteration.
     if (sched.enabled()) {
-      if (sched.dwell_elapsed(std::chrono::steady_clock::now())) {
+      const auto now = std::chrono::steady_clock::now();
+      if (sched.dwell_elapsed(now)) {
         const BandSlot& candidate = sched.peek_next();
         if (!sdr.set_center_freq(candidate.center_hz)) {
           std::cerr << "[SCHED] WARN: retune to " << candidate.center_hz
                     << " Hz failed — remaining on " << sched.current().center_hz << " Hz\n";
-          sched.reset_dwell(std::chrono::steady_clock::now());
+          sched.reset_dwell(now);
         } else {
-          sched.advance(std::chrono::steady_clock::now());
+          sched.advance(now);
           std::cerr << "[SCHED] Tuned to " << sched.current().center_hz / 1e6 << " MHz\n";
         }
       }

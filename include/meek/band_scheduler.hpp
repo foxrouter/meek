@@ -93,15 +93,15 @@ class BandScheduler {
   ///
   /// On the first call the dwell timer is anchored to `now` (so timing starts
   /// when capture actually begins, not when from_env() was called) and the
-  /// method returns true to trigger the first slot transition.
-  /// Returns false when scheduling is disabled.
+  /// method returns false — giving slot 0 its full dwell before the first
+  /// transition.  Returns false when scheduling is disabled.
   [[nodiscard]] bool dwell_elapsed(std::chrono::steady_clock::time_point now) noexcept {
     if (!enabled_)
       return false;
     if (!first_tick_done_) {
       first_tick_done_ = true;
       dwell_start_ = now;
-      return true;
+      return false;
     }
     return (now - dwell_start_) >= slots_[current_idx_].dwell_ms;
   }
