@@ -81,6 +81,7 @@ jobs:
             tests/test_db_wal.py \
             tests/test_classifier_correctness.py \
             tests/test_band_profiles.py \
+            tests/test_band_scheduler.py \
             tests/test_demod_timing.py \
             tests/test_rf_audit.py \
             tests/test_meek_report.py \
@@ -101,6 +102,9 @@ jobs:
 
       - name: test_band_profiles
         run: python3 tests/test_band_profiles.py -v
+
+      - name: test_band_scheduler
+        run: python3 tests/test_band_scheduler.py -v
 
       - name: test_db_wal
         run: python3 tests/test_db_wal.py -v

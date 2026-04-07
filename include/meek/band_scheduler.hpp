@@ -197,7 +197,8 @@ inline BandScheduler BandScheduler::from_env() {
             trimmed.find_first_not_of(kWhitespace, parsed_chars) == std::string::npos;
         if (only_trailing_ws && hz > 0.0)
           slots.push_back({hz, dwell});
-      } catch (...) {
+      } catch (const std::invalid_argument&) {
+      } catch (const std::out_of_range&) {
       }
     }
     pos = (comma == std::string::npos) ? input.size() + 1 : comma + 1;

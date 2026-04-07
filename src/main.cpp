@@ -420,21 +420,6 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
   SampleBlock blk;
   blk.samples.reserve(cfg.block_len);
 
-  // When scheduling is active, retune immediately to the first slot so that
-  // blocks captured before the scheduler first advances have a consistent
-  // frequency, regardless of the cfg.center_freq used to open the device.
-  if (sched.enabled()) {
-    if (!sdr.set_center_freq(sched.current().center_hz)) {
-      std::cerr << "[SCHED] WARN: initial retune to " << sched.current().center_hz
-                << " Hz failed — scheduling disabled\n";
-      sched = BandScheduler{};  // fall back to fixed cfg.center_freq
-    } else {
-      std::cout << "[SCHED] Band rotation active: " << sched.slot_count() << " slots"
-                << ", initial slot " << sched.current().center_hz << " Hz ("
-                << sched.current().dwell_ms.count() << " ms dwell)\n";
-    }
-  }
-
   while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
     // Advance to the next band slot when the current dwell period has elapsed.
     // peek_next()/advance() split ensures the scheduler state only moves on
@@ -1103,12 +1088,24 @@ int main(int argc, char** argv) {
   // Band rotation scheduler — reads RF_SCHED_BANDS and RF_SCHED_DWELL_MS from
   // the environment.  Returns a disabled scheduler when fewer than 2 band slots
   // are configured; capture_loop then runs in fixed-frequency mode.
+  //
+  // The initial SDR retune is attempted here in main() (before threads start)
+  // so that cfg.sched_enabled accurately reflects whether the hardware actually
+  // supports retuning.  If the retune fails the scheduler is disabled
+  // immediately and proc_loop/output_loop are never told scheduling is active.
   auto sched = BandScheduler::from_env();
-  cfg.sched_enabled = sched.enabled();
   if (sched.enabled()) {
-    std::cout << "[SCHED] Band scheduler configured: " << sched.slot_count() << " slots"
-              << ", dwell " << sched.current().dwell_ms.count() << " ms\n";
+    if (!sdr->set_center_freq(sched.current().center_hz)) {
+      std::cerr << "[SCHED] WARN: initial retune to " << sched.current().center_hz
+                << " Hz failed — scheduling disabled\n";
+      sched = BandScheduler{};  // fall back to fixed cfg.center_freq
+    } else {
+      std::cout << "[SCHED] Band scheduler configured: " << sched.slot_count() << " slots"
+                << ", initial slot " << sched.current().center_hz / 1e6 << " MHz ("
+                << sched.current().dwell_ms.count() << " ms dwell)\n";
+    }
   }
+  cfg.sched_enabled = sched.enabled();
 
   // Snapshot worker — SpscRingBuffer<SnapTask, 64>: one producer (proc_loop),
   // one consumer (snap_thread).  Lock-free; no mutex in the hot path.
