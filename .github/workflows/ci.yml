@@ -85,6 +85,7 @@ jobs:
             tests/test_demod_timing.py \
             tests/test_rf_audit.py \
             tests/test_meek_report.py \
+            tests/test_meek_report_queries.py \
             tests/crc_helpers.py \
             benchmarks/bench_iq_metrics.py
 
@@ -124,6 +125,9 @@ jobs:
       - name: test_meek_report
         run: python3 tests/test_meek_report.py -v
 
+      - name: test_meek_report_queries
+        run: python3 tests/test_meek_report_queries.py -v
+
       - name: test_snr_sweep
         run: python3 tests/test_snr_sweep.py -v
 
@@ -147,6 +151,9 @@ jobs:
 
       - name: test_deploy.sh
         run: bash tests/test_deploy.sh -v
+
+      - name: test_heartbeat_and_metrics.sh
+        run: bash tests/test_heartbeat_and_metrics.sh -v
 
   # ─────────────────────────────────────────────────────────────────────────
   # 2. Build iq_metrics (C++, no hardware deps) + validate vs Python
