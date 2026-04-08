@@ -483,9 +483,8 @@ Prints a `[scan_incoming] complete: X processed, Y failed` summary line.
 
 ### `scripts/heartbeat_and_metrics.sh`
 
-Standalone heartbeat and Prometheus textfile writer.  Can run as a
-separate systemd service (`systemd/rf-adapt-intel-monitor.service`) or
-manually.  Writes:
+Standalone heartbeat and Prometheus textfile writer.  Run it manually or
+from your own scheduler/service wrapper.  Writes:
 
 - `RF_HEARTBEAT_FILE` — `ok <timestamp>` every 30 seconds.
 - `RF_METRICS_FILE` — Prometheus text exposition every 30 seconds.
