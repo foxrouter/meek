@@ -88,7 +88,9 @@ def _make_db(rows=None):
 
 def _now_ts():
     """Return a timestamp string for the current UTC time, always within any days window."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(timezone.utc).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
 
 
 def _days_ago_ts(n):
