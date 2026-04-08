@@ -44,9 +44,12 @@ and troubleshooting.
 - [Prerequisites](#prerequisites)
 - [Build](#build)
 - [Quickstart](#quickstart)
+- [Multi-band rotation](#multi-band-rotation-band-scheduler)
 - [Optional decoder setup](#optional-decoder-setup-opssetupsh)
 - [Offline IQ metrics](#offline-iq-metrics-toolsiq_metricscpp)
+- [Offline RF audit](#offline-rf-audit-srcrf_auditcpp)
 - [Offline IQ analysis](#offline-iq-analysis-toolsdecode_candidatespy)
+- [HTML signal report](#html-signal-report-toolsmeek_reportpy)
 - [Canary procedure](#canary-procedure-opscanarysh)
 - [IQ file transfer](#iq-file-transfer-scriptstransfer_iqsh)
 - [Test harnesses](#test-harnesses)
@@ -55,13 +58,16 @@ and troubleshooting.
 
 ## Layout
 
+> **Repository guide:** see [docs/codebase.md](docs/codebase.md) for
+> a detailed overview of the main directories, source files, headers, and scripts.
+
 ```
 benchmarks/               Python-vs-C++ benchmark scripts and results
 config/                   runtime configuration example
-docs/                     design plan and gap tracking
+docs/                     design plan, codebase guide, and gap tracking
 ops/                      deploy, verify, setup, and canary helpers
 scripts/                  IQ ingest, metrics, heartbeat, and transfer helpers
-src/                      C++ worker source
+src/                      C++ worker source (main.cpp daemon + rf_audit.cpp CLI tool)
 systemd/                  systemd unit and drop-in files
 tests/                    Python and shell test harnesses
 tools/                    offline decode/audit utilities
@@ -71,8 +77,22 @@ Key files:
 
 | Path | Purpose |
 |---|---|
-| `src/main.cpp` | Core capture + classification + DB persistence |
+| `src/main.cpp` | Core capture + classification + DB persistence daemon |
+| `src/rf_audit.cpp` | Standalone C++ RF audit CLI (no hardware required) |
+| `include/meek/classifier.hpp` | Feature extraction and modulation classifier (`classify_block`) |
+| `include/meek/demod_chains.hpp` | liquid-dsp FSK / PSK-QAM / OOK-AM demodulation chains (`HAVE_LIQUID`) |
+| `include/meek/db.hpp` | SQLite3 RAII wrapper (WAL mode, prepared statements) |
+| `include/meek/metrics.hpp` | Prometheus metrics (`ProcMetrics`, textfile writer, optional HTTP server) |
+| `include/meek/band_profiles.hpp` | 39-entry UK band profile table (`kUkBands`) |
+| `include/meek/band_scheduler.hpp` | Multi-band rotation scheduler (`BandScheduler`, `RF_SCHED_BANDS`) |
+| `include/meek/isdr_source.hpp` | SDR hardware abstraction (`ISdrSource` / `SoapySdrSource`) |
+| `include/meek/ring_buffer.hpp` | Lock-free SPSC ring buffer (`SpscRingBuffer<T, 64>`) |
+| `include/meek/sample_types.hpp` | Core pipeline data types (`SampleBlock`, `ClassificationResult`, `ModClass`) |
+| `include/meek/config.hpp` | Runtime configuration from environment variables |
 | `tools/iq_metrics.cpp` | Standalone C++ IQ metrics tool (avg_power, snr_db, spectral_flatness, est_bw_hz) |
+| `tools/decode_candidates.py` | Offline modulation decode + JSON audit report |
+| `tools/meek_report.py` | Self-contained HTML signal intelligence report from the SQLite DB |
+| `tools/autotune_thresholds.py` | Threshold optimisation from IQ snapshots |
 | `docs/INSTALL.md` | **Step-by-step installation guide** (Bookworm & Noble) |
 | `docs/rf-adapt-intel-plan.md` | Full design plan and execution status |
 | `docs/missing-features.md` | Gaps and pending implementation items |
@@ -89,7 +109,6 @@ Key files:
 | `scripts/heartbeat_and_metrics.sh` | Standalone heartbeat + Prometheus metrics writer |
 | `scripts/transfer_iq.sh` | rsync IQ snapshot files from edge (Ray) to server (Brian) |
 | `scripts/deploy_and_restart.sh` | Build, install binary, and restart service |
-| `tools/decode_candidates.py` | Offline modulation decode + JSON audit report |
 | `tests/gen_test_signals.py` | Synthetic RRC-shaped IQ vector generator |
 | `tests/test_iq_metrics.py` | Validates C++ `iq_metrics` output against the Python reference |
 | `benchmarks/bench_iq_metrics.py` | Python-vs-C++ throughput benchmark for IQ metrics |
@@ -123,7 +142,7 @@ flowchart LR
     end
 
     subgraph Snapshot
-        sq[/"snap_queue\n(deque, max 64)"/]
+        sq[/"snap_queue\nSpscRingBuffer<SnapTask, 64>\n(63 usable slots)"/]
         snap["snap_thread\n(std::jthread)"]
         sq -->|".cf32 IQ files"| snap
     end
@@ -134,9 +153,10 @@ flowchart LR
 Key design decisions:
 - **Lock-free ring buffers** (`SpscRingBuffer<T, 64>`) decouple capture, processing, and output at runtime.
 - **SQLite writes** happen exclusively on the output thread, preventing contention with the capture thread.
-- **Snapshot worker** (`snap_thread`, `std::jthread`) handles IQ snapshot I/O from a bounded task queue (capped at 64 entries) without blocking the processing thread.
+- **Snapshot worker** (`snap_thread`, `std::jthread`) handles IQ snapshot I/O from a `SpscRingBuffer<SnapTask, 64>` (up to 63 usable slots) without blocking the processing thread.
 - **Cooperative shutdown** via the `g_shutdown` atomic flag and `std::stop_token` lets all threads drain cleanly on `SIGINT`/`SIGTERM`.
-- **38 band profiles** (`kUkBands`) provide per-band SNR, bandwidth, and prior-boost parameters for the classifier.
+- **39 band profiles** (`kUkBands`) provide per-band SNR, bandwidth, and prior-boost parameters for the classifier.
+- **Multi-band rotation** (`BandScheduler`) retunes the SDR across a user-defined list of frequencies on a configurable dwell schedule, with no mutex required (single-threaded ownership inside `capture_loop`).
 
 ## Prerequisites
 
@@ -212,6 +232,34 @@ cmake --build build -t iq_metrics
 4. Run `ops/verify.sh` to confirm hardening.
 5. Ingest a sample IQ: `bash scripts/process_incoming.sh /path/to/file.raw`
 6. Metrics/heartbeat: `bash scripts/heartbeat_and_metrics.sh` (optional background service)
+
+## Multi-band rotation (Band Scheduler)
+
+`BandScheduler` rotates the SDR centre frequency through a configurable list
+of bands on a per-slot dwell schedule.  It is owned exclusively by
+`capture_loop` (no mutex required) and calls
+`ISdrSource::set_center_freq()` when a dwell period expires.
+
+Set two environment variables to enable rotation:
+
+```bash
+# /etc/rf_worker/thresholds.env
+
+# Comma-separated centre frequencies in Hz (at least 2 required)
+RF_SCHED_BANDS=433920000,868100000,144800000
+
+# Dwell time per slot in milliseconds (same for all slots; default 10 000 ms)
+RF_SCHED_DWELL_MS=5000
+```
+
+When `RF_SCHED_BANDS` contains fewer than two valid frequency values,
+scheduling is disabled with `[SCHED] WARN` messages and the daemon
+continues operating on its configured single centre frequency as normal.
+
+Per-band classification quality is maintained because `proc_loop` calls
+`find_band(blk.center_freq_hz)` on every block to look up the matching
+`BandProfile` SNR gate, bandwidth hint, and prior-boost — regardless of
+whether multi-band rotation is enabled.
 
 ## Optional decoder setup (`ops/setup.sh`)
 
@@ -405,6 +453,26 @@ REPLAY_DB=/var/lib/rf-adapt-intel/rf_adapt_intel.db \
   bash scripts/process_incoming.sh /path/to/433_signal.raw
 ```
 
+## HTML signal report (`tools/meek_report.py`)
+
+`meek_report.py` generates an HTML signal intelligence report from the
+SQLite database.  No external web framework is required — the output is a
+single `.html` file with detection summaries, per-band breakdowns,
+confidence histograms, and decision-trace samples.  By default, the report
+references CDN-hosted Chart.js and Google Fonts assets, so fully offline
+rendering may require vendoring or embedding those assets.
+
+```bash
+# Standard install; writes ~/meek_report.html
+python3 tools/meek_report.py --db /var/lib/rf-adapt-intel/rf_adapt_intel.db
+
+# Custom database, date range, and output path
+python3 tools/meek_report.py \
+    --db /var/lib/rf-adapt-intel/rf_adapt_intel.db \
+    --days 7 \
+    --out /tmp/report.html
+```
+
 ## Canary procedure (`ops/canary.sh`)
 
 `ops/canary.sh` manages the canary deployment lifecycle — enabling passive
@@ -593,6 +661,7 @@ RF_SNAPSHOT_RETENTION_DAYS=7   # keep 7 days of snapshots; 0 = keep forever (def
 - **clang-tidy** (v14) is run in CI on `tools/iq_metrics.cpp` with `clang-analyzer-*`, `bugprone-*`, `modernize-*`, `performance-*`, and `readability-*` checks.
 - **cpplint** runs as a pre-commit hook; install hooks with `pre-commit install`.
 - See `.cpplint-rationale.md` for the reasoning behind enabled/disabled checks.
-- The CI pipeline (`.github/workflows/ci.yml`) runs five jobs: Python lint + tests, C++ build + format + static analysis + test + benchmark, ASAN/UBSAN sanitizer build, Python dependency vulnerability scan (pip-audit), and Docker image build.
+- The CI pipeline (`.github/workflows/ci.yml`) runs six primary jobs: Python lint + tests, C++ build + format + static analysis + test + benchmark, ASAN/UBSAN sanitizer build, Python dependency vulnerability scan (pip-audit), Docker image build, and a liquid-dsp conditional build; it also includes the `changes-liquid` and `changes-docker` change-detection helper jobs.
+- See `docs/codebase.md` for an overview of the main directories and source files.
 - See `docs/missing-features.md` for a list of pending implementation items.
 - See `docs/audit.md` for the production-readiness audit and migration decision log.
