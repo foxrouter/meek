@@ -455,10 +455,12 @@ REPLAY_DB=/var/lib/rf-adapt-intel/rf_adapt_intel.db \
 
 ## HTML signal report (`tools/meek_report.py`)
 
-`meek_report.py` generates a self-contained HTML signal intelligence report
-from the SQLite database.  No external web framework is required — the output
-is a single `.html` file with detection summaries, per-band breakdowns,
-confidence histograms, and decision-trace samples.
+`meek_report.py` generates an HTML signal intelligence report from the
+SQLite database.  No external web framework is required — the output is a
+single `.html` file with detection summaries, per-band breakdowns,
+confidence histograms, and decision-trace samples.  By default, the report
+references CDN-hosted Chart.js and Google Fonts assets, so fully offline
+rendering may require vendoring or embedding those assets if supported.
 
 ```bash
 # Standard install; writes ~/meek_report.html

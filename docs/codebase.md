@@ -607,17 +607,17 @@ from both `/etc/rf_worker/thresholds.env` and
 
 Key hardening properties:
 
-| Property | Value |
-|---|---|
-| `ProtectSystem` | `full` |
-| `ProtectHome` | `yes` |
-| `NoNewPrivileges` | `yes` |
-| `PrivateTmp` | `yes` |
-| `MemoryDenyWriteExecute` | `yes` |
-| `SystemCallFilter` | `@system-service @chown @file-system` |
-| `ReadWritePaths` | `/var/lib/rf-adapt-intel` |
-| `LimitNOFILE` | `4096` |
-| `TasksMax` | `2048` |
+| Property | Effective value | Defined in |
+|---|---|---|
+| `ProtectSystem` | `full` | `process-worker.service.d/hardening.conf` |
+| `ProtectHome` | `yes` | `process-worker.service.d/hardening.conf` |
+| `NoNewPrivileges` | `yes` | `process-worker.service.d/hardening.conf` |
+| `PrivateTmp` | `yes` | `process-worker.service.d/hardening.conf` |
+| `MemoryDenyWriteExecute` | not enabled (commented out — breaks SoapySDR `dlopen()`) | `process-worker.service.d/hardening.conf` |
+| `SystemCallFilter` | `@system-service @chown @file-system ~@obsolete ~@privileged ~@raw-io ~@reboot ~@swap ~@clock` | `process-worker.service.d/hardening.conf` |
+| `ReadWritePaths` | `/var/lib/rf-adapt-intel /var/log/rf-adapt-intel /etc/rf_worker` | `process-worker.service.d/hardening.conf` |
+| `LimitNOFILE` | `4096` | `process-worker.service.d/processor.conf` |
+| `TasksMax` | `2048` | `process-worker.service.d/processor.conf` |
 
 ---
 
