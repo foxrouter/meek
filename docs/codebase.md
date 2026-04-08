@@ -51,9 +51,10 @@ capture_loop  →  SpscRingBuffer<SampleBlock, 64>
               →  output_loop
 ```
 
-A fifth thread (`snap_thread`, `std::jthread`) drains a `std::deque<SnapTask>`
-and writes CF32 IQ snapshot files to `RF_SNAPSHOT_DIR` without blocking
-the processing thread.
+A fifth thread (`snap_thread`, `std::jthread`) drains a
+`SpscRingBuffer<SnapTask, 64>` fed by `proc_loop` and writes CF32 IQ
+snapshot files to `RF_SNAPSHOT_DIR` without blocking the processing
+thread.
 
 Key static functions:
 
@@ -669,7 +670,8 @@ logrotate configuration for `RF_WORKER_LOG` and the Prometheus textfile.
 
 ### Python tests (`unittest`)
 
-All Python tests use only the standard library plus `numpy`.
+All Python tests use the standard library plus `numpy`, with optional
+`scipy` support used by some tests/utilities.
 
 | File | What it tests |
 |---|---|

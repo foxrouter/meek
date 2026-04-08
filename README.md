@@ -153,7 +153,7 @@ flowchart LR
 Key design decisions:
 - **Lock-free ring buffers** (`SpscRingBuffer<T, 64>`) decouple capture, processing, and output at runtime.
 - **SQLite writes** happen exclusively on the output thread, preventing contention with the capture thread.
-- **Snapshot worker** (`snap_thread`, `std::jthread`) handles IQ snapshot I/O from a bounded task queue (capped at 64 entries) without blocking the processing thread.
+- **Snapshot worker** (`snap_thread`, `std::jthread`) handles IQ snapshot I/O from a `SpscRingBuffer<SnapTask, 64>` (up to 63 usable slots) without blocking the processing thread.
 - **Cooperative shutdown** via the `g_shutdown` atomic flag and `std::stop_token` lets all threads drain cleanly on `SIGINT`/`SIGTERM`.
 - **39 band profiles** (`kUkBands`) provide per-band SNR, bandwidth, and prior-boost parameters for the classifier.
 - **Multi-band rotation** (`BandScheduler`) retunes the SDR across a user-defined list of frequencies on a configurable dwell schedule, with no mutex required (single-threaded ownership inside `capture_loop`).
@@ -253,8 +253,8 @@ RF_SCHED_DWELL_MS=5000
 ```
 
 When `RF_SCHED_BANDS` contains fewer than two valid frequency values,
-scheduling is silently disabled and the daemon operates on the single
-`RF_CENTER_FREQ` as normal.
+scheduling is disabled with `[SCHED] WARN` messages and the daemon
+continues operating on its configured single center frequency as normal.
 
 Per-band classification quality is maintained because `proc_loop` calls
 `find_band(blk.center_freq_hz)` on every block to look up the matching
@@ -659,7 +659,7 @@ RF_SNAPSHOT_RETENTION_DAYS=7   # keep 7 days of snapshots; 0 = keep forever (def
 - **clang-tidy** (v14) is run in CI on `tools/iq_metrics.cpp` with `clang-analyzer-*`, `bugprone-*`, `modernize-*`, `performance-*`, and `readability-*` checks.
 - **cpplint** runs as a pre-commit hook; install hooks with `pre-commit install`.
 - See `.cpplint-rationale.md` for the reasoning behind enabled/disabled checks.
-- The CI pipeline (`.github/workflows/ci.yml`) runs six jobs: Python lint + tests, C++ build + format + static analysis + test + benchmark, ASAN/UBSAN sanitizer build, Python dependency vulnerability scan (pip-audit), Docker image build, and a liquid-dsp conditional build.
+- The CI pipeline (`.github/workflows/ci.yml`) runs six primary jobs: Python lint + tests, C++ build + format + static analysis + test + benchmark, ASAN/UBSAN sanitizer build, Python dependency vulnerability scan (pip-audit), Docker image build, and a liquid-dsp conditional build; it also includes the `changes-liquid` and `changes-docker` change-detection helper jobs.
 - See `docs/codebase.md` for a full per-directory and per-file reference.
 - See `docs/missing-features.md` for a list of pending implementation items.
 - See `docs/audit.md` for the production-readiness audit and migration decision log.
