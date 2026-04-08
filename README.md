@@ -58,10 +58,13 @@ and troubleshooting.
 
 ## Layout
 
+> **Full per-file documentation:** see [docs/codebase.md](docs/codebase.md) for
+> a detailed guide to every directory, source file, header, and script.
+
 ```
 benchmarks/               Python-vs-C++ benchmark scripts and results
 config/                   runtime configuration example
-docs/                     design plan and gap tracking
+docs/                     design plan, codebase guide, and gap tracking
 ops/                      deploy, verify, setup, and canary helpers
 scripts/                  IQ ingest, metrics, heartbeat, and transfer helpers
 src/                      C++ worker source (main.cpp daemon + rf_audit.cpp CLI tool)
@@ -229,6 +232,34 @@ cmake --build build -t iq_metrics
 4. Run `ops/verify.sh` to confirm hardening.
 5. Ingest a sample IQ: `bash scripts/process_incoming.sh /path/to/file.raw`
 6. Metrics/heartbeat: `bash scripts/heartbeat_and_metrics.sh` (optional background service)
+
+## Multi-band rotation (Band Scheduler)
+
+`BandScheduler` rotates the SDR centre frequency through a configurable list
+of bands on a per-slot dwell schedule.  It is owned exclusively by
+`capture_loop` (no mutex required) and calls
+`ISdrSource::set_center_freq()` when a dwell period expires.
+
+Set two environment variables to enable rotation:
+
+```bash
+# /etc/rf_worker/thresholds.env
+
+# Comma-separated centre frequencies in Hz (at least 2 required)
+RF_SCHED_BANDS=433920000,868100000,144800000
+
+# Dwell time per slot in milliseconds (same for all slots; default 10 000 ms)
+RF_SCHED_DWELL_MS=5000
+```
+
+When `RF_SCHED_BANDS` contains fewer than two valid frequency values,
+scheduling is silently disabled and the daemon operates on the single
+`RF_CENTER_FREQ` as normal.
+
+Per-band classification quality is maintained because `proc_loop` calls
+`find_band(blk.center_freq_hz)` on every block to look up the matching
+`BandProfile` SNR gate, bandwidth hint, and prior-boost — regardless of
+whether multi-band rotation is enabled.
 
 ## Optional decoder setup (`ops/setup.sh`)
 
@@ -422,6 +453,24 @@ REPLAY_DB=/var/lib/rf-adapt-intel/rf_adapt_intel.db \
   bash scripts/process_incoming.sh /path/to/433_signal.raw
 ```
 
+## HTML signal report (`tools/meek_report.py`)
+
+`meek_report.py` generates a self-contained HTML signal intelligence report
+from the SQLite database.  No external web framework is required — the output
+is a single `.html` file with detection summaries, per-band breakdowns,
+confidence histograms, and decision-trace samples.
+
+```bash
+# Generate with default database path; opens ~/meek_report.html
+python3 tools/meek_report.py
+
+# Custom database, date range, and output path
+python3 tools/meek_report.py \
+    --db /var/lib/rf-adapt-intel/rf_adapt_intel.db \
+    --days 7 \
+    --out /tmp/report.html
+```
+
 ## Canary procedure (`ops/canary.sh`)
 
 `ops/canary.sh` manages the canary deployment lifecycle — enabling passive
@@ -610,6 +659,7 @@ RF_SNAPSHOT_RETENTION_DAYS=7   # keep 7 days of snapshots; 0 = keep forever (def
 - **clang-tidy** (v14) is run in CI on `tools/iq_metrics.cpp` with `clang-analyzer-*`, `bugprone-*`, `modernize-*`, `performance-*`, and `readability-*` checks.
 - **cpplint** runs as a pre-commit hook; install hooks with `pre-commit install`.
 - See `.cpplint-rationale.md` for the reasoning behind enabled/disabled checks.
-- The CI pipeline (`.github/workflows/ci.yml`) runs five jobs: Python lint + tests, C++ build + format + static analysis + test + benchmark, ASAN/UBSAN sanitizer build, Python dependency vulnerability scan (pip-audit), and Docker image build.
+- The CI pipeline (`.github/workflows/ci.yml`) runs six jobs: Python lint + tests, C++ build + format + static analysis + test + benchmark, ASAN/UBSAN sanitizer build, Python dependency vulnerability scan (pip-audit), Docker image build, and a liquid-dsp conditional build.
+- See `docs/codebase.md` for a full per-directory and per-file reference.
 - See `docs/missing-features.md` for a list of pending implementation items.
 - See `docs/audit.md` for the production-readiness audit and migration decision log.
