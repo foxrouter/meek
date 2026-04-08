@@ -107,7 +107,7 @@ run_once() {
     PATH="${_STUB_DIR}:${PATH}" \
     RF_METRICS_FILE="${_TMP}/metrics.prom" \
     RF_HEARTBEAT_FILE="${_TMP}/heartbeat" \
-    RF_WORKER_LOG="${RF_WORKER_LOG:-}" \
+    RF_WORKER_LOG="${RF_WORKER_LOG:-${_TMP}/worker.log}" \
     "$@" \
     bash "${SCRIPT}" once 2>&1
 }
@@ -252,11 +252,12 @@ test_custom_output_paths_honoured() {
   setup_env
   local alt_metrics="${_TMP}/alt/my_metrics.prom"
   local alt_heartbeat="${_TMP}/alt/my_heartbeat"
+  local alt_worker_log="${_TMP}/alt/worker.log"
   env \
     PATH="${_STUB_DIR}:${PATH}" \
     RF_METRICS_FILE="${alt_metrics}" \
     RF_HEARTBEAT_FILE="${alt_heartbeat}" \
-    RF_WORKER_LOG="" \
+    RF_WORKER_LOG="${alt_worker_log}" \
     bash "${SCRIPT}" once > /dev/null
   local metrics_ok=false heartbeat_ok=false
   [[ -f "${alt_metrics}" ]]   && metrics_ok=true
