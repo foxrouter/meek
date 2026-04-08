@@ -245,9 +245,8 @@ Top-level entry point used by both the daemon (`proc_loop`) and the
 ```cpp
 ClassificationResult classify_block(
     std::span<const std::complex<float>> samples,
-    const Config& cfg,
-    const BandProfile* band = nullptr,
-    std::vector<float>& scratch = /* thread-local */);
+    const ClassifyOptions& opts,
+    std::vector<float>& scratch);
 ```
 
 Feature helpers (all `[[nodiscard]] inline`):
@@ -257,17 +256,16 @@ Feature helpers (all `[[nodiscard]] inline`):
 | `compute_avg_power` | Mean instantaneous power E[|z|²] |
 | `compute_snr_db` | SNR: median power as noise floor, top-25% mean as signal |
 | `compute_papr_db` | Peak-to-Average Power Ratio |
-| `compute_spectral_flatness` | Spectral flatness (Wiener entropy) |
-| `compute_occupied_bw_hz` | Occupied bandwidth at −10 dB |
-| `compute_time_occupancy` | Fraction of samples above power threshold |
-| `compute_avg_abs_phase` | Mean |∠z| (phase spread indicator) |
-| `compute_transition_ratio` | Fraction of samples crossing zero (FSK indicator) |
+| `compute_spectral_flatness` | Spectral flatness (Wiener entropy); occupied-BW heuristics are derived from this inside classification rather than via a standalone helper |
+| `compute_phase_stats` | Phase- and transition-related statistics used by the classifier |
 
 Gating order inside `classify_block`:
 
-1. **Power gate** — rejects blocks below `RF_MIN_POWER`.
-2. **SNR gate** — rejects blocks below `RF_SNR_MIN_DB` (or band override).
-3. **BW gate** — rejects if occupied BW deviates >25 % from `expected_bw_hz`.
+1. **SNR gate** — rejects blocks below `RF_SNR_MIN_DB`; band-specific `snr_min_db`
+   raises the gate but never lowers it (effective gate = `max(global, band)`).
+2. **BW gate** — rejects if occupied BW deviates >25 % from `expected_bw_hz`.
+3. **Power range gate** — rejects blocks where `avg_power < min_power` or
+   `avg_power > 1e3`.
 4. **PAPR gate** — rejects if PAPR exceeds `RF_PAPR_MAX` (when > 0).
 5. **Classifier** — scores each `ModClass`, applies `prior_boost` from the
    matched `BandProfile` and any `MOD_HINT` additive prior (+0.10).
@@ -386,8 +384,7 @@ Self-contained HTML signal intelligence report.  Queries the SQLite
 database and renders an HTML file with detection summaries, per-band
 breakdowns, confidence histograms, and decision-trace samples.  No
 external web framework required — the output is a single `.html` file.
-Set `--db` explicitly for standard installs, or use `RF_DB_PATH` to
-override the database path via the environment.
+Set `--db` explicitly for standard installs.
 
 ```bash
 python3 tools/meek_report.py --db /var/lib/rf-adapt-intel/rf_adapt_intel.db
@@ -401,12 +398,18 @@ python3 tools/meek_report.py --db /path/to/rf_adapt_intel.db --days 7 --out ~/re
 Automated threshold optimisation.  Analyses CF32 IQ snapshots (or
 generates synthetic test vectors when no snapshots are available),
 sweeps `RF_CONF_THRESHOLD`, `RF_SNR_MIN_DB`, and `RF_PAPR_MAX` over a
-grid, and writes updated values to `config/thresholds.env`.
+grid, and can emit updated key/value pairs via `--out`.  To update the
+active thresholds file in place, pass `--write`; use `--conf` to select
+the config file path (for example `/etc/rf_worker/thresholds.env`).
 
 ```bash
 python3 tools/autotune_thresholds.py \
     --snapshot-dir /var/lib/rf-adapt-intel/snapshots \
     --out config/thresholds.env
+
+python3 tools/autotune_thresholds.py \
+    --snapshot-dir /var/lib/rf-adapt-intel/snapshots \
+    --write --conf /etc/rf_worker/thresholds.env
 ```
 
 ---
