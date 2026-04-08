@@ -148,8 +148,6 @@ descriptions and defaults:
 
 ---
 
-### `sample_types.hpp` → `ring_buffer.hpp`
-
 ### `ring_buffer.hpp`
 
 `SpscRingBuffer<T, Capacity>` — lock-free single-producer / single-consumer
@@ -329,7 +327,8 @@ struct ProcMetrics {
 void write_prometheus_textfile(const ProcMetrics&, const std::string& path);
 
 // HAVE_HTTPLIB only:
-std::unique_ptr<httplib::Server> start_prometheus_http(const ProcMetrics&, uint16_t port);
+std::pair<std::unique_ptr<httplib::Server>, std::thread>
+start_prometheus_http(const ProcMetrics&, uint16_t port);
 ```
 
 The textfile is written by `output_loop` every 5 seconds to
@@ -347,7 +346,8 @@ Standalone C++20 IQ metrics tool.  No SoapySDR or SQLite required
 (`-DBUILD_HARDWARE_TARGETS=OFF`).
 
 Computes four metrics per CF32 file: `avg_power`, `snr_db`,
-`spectral_flatness`, `est_bw_hz`.  Output is a JSON array on stdout.
+`spectral_flatness`, `est_bw_hz`.  Output is newline-delimited JSON
+(NDJSON) on stdout, with one JSON object per input file.
 
 ```bash
 ./build/iq_metrics [--sample-rate FS] [--block-size N] file1.cf32 [file2.cf32 ...]
