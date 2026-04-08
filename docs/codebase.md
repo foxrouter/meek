@@ -382,13 +382,15 @@ python3 tools/decode_candidates.py \
 
 ### `tools/meek_report.py`
 
-Self-contained HTML signal intelligence report.  Queries
-`rf_adapt_intel.db` and renders an HTML file with detection summaries,
-per-band breakdowns, confidence histograms, and decision-trace samples.
-No external web framework required — the output is a single `.html` file.
+Self-contained HTML signal intelligence report.  Queries the SQLite
+database and renders an HTML file with detection summaries, per-band
+breakdowns, confidence histograms, and decision-trace samples.  No
+external web framework required — the output is a single `.html` file.
+Set `--db` explicitly for standard installs, or use `RF_DB_PATH` to
+override the database path via the environment.
 
 ```bash
-python3 tools/meek_report.py
+python3 tools/meek_report.py --db /var/lib/rf-adapt-intel/rf_adapt_intel.db
 python3 tools/meek_report.py --db /path/to/rf_adapt_intel.db --days 7 --out ~/report.html
 ```
 

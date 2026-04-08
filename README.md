@@ -142,7 +142,7 @@ flowchart LR
     end
 
     subgraph Snapshot
-        sq[/"snap_queue\nSpscRingBuffer&lt;SnapTask,64&gt;\n(63 usable slots)"/]
+        sq[/"snap_queue\nSpscRingBuffer<SnapTask, 64>\n(63 usable slots)"/]
         snap["snap_thread\n(std::jthread)"]
         sq -->|".cf32 IQ files"| snap
     end
@@ -461,8 +461,8 @@ is a single `.html` file with detection summaries, per-band breakdowns,
 confidence histograms, and decision-trace samples.
 
 ```bash
-# Generate with default database path; writes ~/meek_report.html
-python3 tools/meek_report.py
+# Standard install; writes ~/meek_report.html
+python3 tools/meek_report.py --db /var/lib/rf-adapt-intel/rf_adapt_intel.db
 
 # Custom database, date range, and output path
 python3 tools/meek_report.py \
