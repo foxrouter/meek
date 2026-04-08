@@ -613,7 +613,7 @@ Key hardening properties:
 | `ProtectHome` | `yes` | `process-worker.service.d/hardening.conf` |
 | `NoNewPrivileges` | `yes` | `process-worker.service.d/hardening.conf` |
 | `PrivateTmp` | `yes` | `process-worker.service.d/hardening.conf` |
-| `MemoryDenyWriteExecute` | not enabled (commented out — breaks SoapySDR `dlopen()`) | `process-worker.service.d/hardening.conf` |
+| `MemoryDenyWriteExecute` | not enabled (commented out; breaks SoapySDR `dlopen()`) | `process-worker.service.d/hardening.conf` |
 | `SystemCallFilter` | `@system-service @chown @file-system ~@obsolete ~@privileged ~@raw-io ~@reboot ~@swap ~@clock` | `process-worker.service.d/hardening.conf` |
 | `ReadWritePaths` | `/var/lib/rf-adapt-intel /var/log/rf-adapt-intel /etc/rf_worker` | `process-worker.service.d/hardening.conf` |
 | `LimitNOFILE` | `4096` | `process-worker.service.d/processor.conf` |

@@ -460,7 +460,7 @@ SQLite database.  No external web framework is required — the output is a
 single `.html` file with detection summaries, per-band breakdowns,
 confidence histograms, and decision-trace samples.  By default, the report
 references CDN-hosted Chart.js and Google Fonts assets, so fully offline
-rendering may require vendoring or embedding those assets if supported.
+rendering may require vendoring or embedding those assets.
 
 ```bash
 # Standard install; writes ~/meek_report.html
