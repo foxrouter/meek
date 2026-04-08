@@ -214,7 +214,10 @@ test_no_worker_log_totals_zero() {
 
 test_worker_log_counts_frames() {
   setup_env
-  # Write three synthetic JSON log lines — two candidates, one rejection.
+  # Write three synthetic JSON log lines: all three have confidence > 0 so all
+  # three count as candidates; one has snr_gate_pass=false so it counts as a
+  # rejection.  The script defines candidates as confidence > 0, independent of
+  # gate pass, so candidates=3 and rejected=1.
   local log="${_TMP}/worker.log"
   printf '{"mod":"GMSK","confidence":0.80,"snr_gate_pass":true,"bw_gate_pass":true}\n' >> "${log}"
   printf '{"mod":"FSK","confidence":0.60,"snr_gate_pass":false,"bw_gate_pass":true}\n' >> "${log}"

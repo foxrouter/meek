@@ -500,13 +500,15 @@ class TestEstimateBandwidthHz(unittest.TestCase):
         self.assertAlmostEqual(bw2 / bw1, 2.0, places=5)
 
     def test_noise_only_returns_small_fraction_of_fs(self):
-        # Pure noise has high spectral flatness → est_bw_frac = 1 - flatness → small
+        # Pure noise has high spectral flatness → est_bw_frac = 1 - flatness → small.
         # In practice noise flatness is ~0.5-0.6 so bw_frac is ~0.4-0.5 of fs;
-        # just verify it is strictly positive and finite.
+        # require it to stay below 0.6 * fs while remaining positive and finite.
+        fs = 2_048_000.0
         noise = (np.random.randn(4096) + 1j * np.random.randn(4096)).astype(np.complex64)
-        bw = at.estimate_bandwidth_hz(noise, sample_rate=2_048_000.0)
+        bw = at.estimate_bandwidth_hz(noise, sample_rate=fs)
         self.assertGreater(bw, 0.0)
         self.assertTrue(math.isfinite(bw))
+        self.assertLess(bw, 0.6 * fs)
 
     def test_uses_default_sample_rate(self):
         s = _awgn(_fsk2(), snr_db=15.0)
