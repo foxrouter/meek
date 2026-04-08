@@ -26,11 +26,11 @@ design rationale, and [docs/INSTALL.md](INSTALL.md) for deployment steps.
 
 | File | Purpose |
 |---|---|
-| `CMakeLists.txt` | CMake build (≥ 3.25). Defines three executables (`rf_adapt_intel`, `rf_audit`, `iq_metrics`), FetchContent downloads for nlohmann/json and cpp-httplib, optional liquid-dsp detection, ASAN/UBSAN opt-in, `.deb` packaging via CPack, and CTest integration. |
+| `CMakeLists.txt` | CMake build (≥ 3.25). Defines four executables when hardware targets are enabled (`rf_adapt_intel`, `soapy_read_test`, `rf_audit`, `iq_metrics`), FetchContent downloads for nlohmann/json and cpp-httplib, optional liquid-dsp detection, ASAN/UBSAN opt-in, `.deb` packaging via CPack, and CTest integration. |
 | `install.sh` | One-shot automated installer. Detects Raspberry Pi OS Bookworm or Ubuntu Noble, installs system packages, builds all targets, deploys the systemd service, and creates `/etc/rf_worker/`. Supports `--all-decoders`, `--dry-run`, `--help`. |
 | `Dockerfile` | Reproducible build image for `iq_metrics` and all Python tests. Hardware targets (SoapySDR) are in a commented-out `hardware` stage. |
-| `requirements.txt` | Python runtime dependencies (`numpy`, `pycodestyle`, `pip-audit`, etc.). |
-| `.pre-commit-config.yaml` | Pre-commit hooks: clang-format, cpplint, trailing-whitespace, end-of-file fixup. |
+| `requirements.txt` | Python runtime dependencies (`numpy`, `scipy`). |
+| `.pre-commit-config.yaml` | Pre-commit hooks: clang-format, cpplint, and gitleaks. |
 | `.clang-format` | clang-format v14 style configuration applied to all C++ sources. |
 | `.cpplint-rationale.md` | Explains every suppressed cpplint filter with a justification. |
 | `.git-blame-ignore-revs` | Bulk-format commits excluded from `git blame`. |
@@ -62,7 +62,7 @@ Key static functions:
 | `capture_loop` | ~414 | Calls `ISdrSource::read_samples`, packs `SampleBlock`, pushes to ring buffer. Integrates `BandScheduler` for multi-band rotation. |
 | `proc_loop` | ~524 | Pops `SampleBlock`, calls `classify_block()`, optionally calls `demod_fsk` / `demod_psk_qam` / `demod_ook_am` (`HAVE_LIQUID`), pushes `ClassificationResult`. |
 | `output_loop` | ~784 | Pops `ClassificationResult`, writes to SQLite via `Database`, updates `ProcMetrics`, writes Prometheus textfile every 5 s, writes heartbeat every 30 s, prunes old snapshots once per 24 h (`RF_SNAPSHOT_RETENTION_DAYS`). |
-| `main` | ~1 013 | Parses `Config::from_env()`, opens the SDR, initialises the DB, launches all threads, waits for `g_shutdown`, drains and joins cleanly. |
+| `main` | ~1 013 | Calls `parse_config(argc, argv)`, opens the SDR, initialises the DB, launches all threads, waits for `g_shutdown`, drains and joins cleanly. |
 
 **Compile-time feature guards:**
 
@@ -120,7 +120,7 @@ Runtime configuration read **once** at startup from environment variables.
 
 ```cpp
 struct Config { /* all fields with defaults */ };
-Config Config::from_env();   // populates every field from env
+[[nodiscard]] Config parse_config(int argc, char** argv);   // reads all RF_* env vars; argv[1] may override RF_DB_PATH
 ```
 
 Helper parsers (in `namespace meek::detail`):

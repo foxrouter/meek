@@ -47,7 +47,7 @@ and troubleshooting.
 - [Multi-band rotation](#multi-band-rotation-band-scheduler)
 - [Optional decoder setup](#optional-decoder-setup-opssetupsh)
 - [Offline IQ metrics](#offline-iq-metrics-toolsiq_metricscpp)
-- [Offline RF audit](#offline-rf-audit-srcraft_auditcpp)
+- [Offline RF audit](#offline-rf-audit-srcrf_auditcpp)
 - [Offline IQ analysis](#offline-iq-analysis-toolsdecode_candidatespy)
 - [HTML signal report](#html-signal-report-toolsmeek_reportpy)
 - [Canary procedure](#canary-procedure-opscanarysh)
@@ -461,7 +461,7 @@ is a single `.html` file with detection summaries, per-band breakdowns,
 confidence histograms, and decision-trace samples.
 
 ```bash
-# Generate with default database path; opens ~/meek_report.html
+# Generate with default database path; writes ~/meek_report.html
 python3 tools/meek_report.py
 
 # Custom database, date range, and output path
