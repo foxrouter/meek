@@ -86,23 +86,24 @@ def _make_db(rows=None):
     return con
 
 
+# Capture a single reference time so all helpers in this module stay coherent
+# even if the test run crosses a day/week boundary near midnight UTC.
+BASE_NOW = datetime.now(timezone.utc)
+
+
 def _now_ts():
-    """Return a timestamp string for the current UTC time, always within any days window."""
-    return datetime.now(timezone.utc).strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    """Return a timestamp string for BASE_NOW."""
+    return BASE_NOW.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _days_ago_ts(n):
-    """Return a timestamp string for N days ago in UTC."""
-    dt = datetime.now(timezone.utc) - timedelta(days=n)
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    """Return a timestamp string for N days before BASE_NOW."""
+    return (BASE_NOW - timedelta(days=n)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _days_ago_date(n):
-    """Return a date string for N days ago in UTC."""
-    dt = datetime.now(timezone.utc) - timedelta(days=n)
-    return dt.strftime("%Y-%m-%d")
+    """Return a date string for N days before BASE_NOW."""
+    return (BASE_NOW - timedelta(days=n)).strftime("%Y-%m-%d")
 
 
 # ---------------------------------------------------------------------------
@@ -241,9 +242,9 @@ class TestDailySeries(unittest.TestCase):
 
     def test_multiple_days(self):
         rows = [
-            ("band=ISM-433", 0.7, _days_ago_ts(4) + ""),
-            ("band=ISM-433", 0.8, _days_ago_ts(3) + ""),
-            ("band=ISM-433", 0.9, _days_ago_ts(2) + ""),
+            ("band=ISM-433", 0.7, _days_ago_ts(4)),
+            ("band=ISM-433", 0.8, _days_ago_ts(3)),
+            ("band=ISM-433", 0.9, _days_ago_ts(2)),
         ]
         con = _make_db(rows)
         result = mr.daily_series(con, "ISM-433", days=365)

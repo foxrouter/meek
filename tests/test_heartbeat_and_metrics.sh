@@ -75,6 +75,7 @@ assert_exit() {
 # ---------------------------------------------------------------------------
 _TMP=""
 _STUB_DIR=""
+trap 'rm -rf "${_TMP:-}" "${_STUB_DIR:-}"' EXIT
 
 setup_env() {
   _TMP="$(mktemp -d /tmp/rf-heartbeat-test.XXXXXX)"
