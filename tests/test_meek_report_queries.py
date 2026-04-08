@@ -571,7 +571,7 @@ class TestAisWeekly(unittest.TestCase):
         self.assertIn("count", result[0])
 
     def test_limited_to_12_weeks(self):
-        # Insert 20 signals spread across 20 distinct weeks (5 months apart each)
+        # Insert 20 signals spread across 20 distinct weeks (1 week apart each)
         rows = [
             (f"band=AIS-A snr=15dB", 0.85, _days_ago_ts(7 * i))
             for i in range(20)
