@@ -26,7 +26,7 @@ design rationale, and [docs/INSTALL.md](INSTALL.md) for deployment steps.
 
 | File | Purpose |
 |---|---|
-| `CMakeLists.txt` | CMake build (≥ 3.25). Defines four executables when hardware targets are enabled (`rf_adapt_intel`, `soapy_read_test`, `rf_audit`, `iq_metrics`), FetchContent downloads for nlohmann/json and cpp-httplib, optional liquid-dsp detection, ASAN/UBSAN opt-in, `.deb` packaging via CPack, and CTest integration. |
+| `CMakeLists.txt` | CMake build (≥ 3.25). Always defines `rf_audit` and `iq_metrics`, and additionally defines hardware-target executables `rf_adapt_intel` and `soapy_read_test` when `BUILD_HARDWARE_TARGETS` is enabled; also configures FetchContent downloads for nlohmann/json and cpp-httplib, optional liquid-dsp detection, ASAN/UBSAN opt-in, `.deb` packaging via CPack, and CTest integration. |
 | `install.sh` | One-shot automated installer. Detects Raspberry Pi OS Bookworm or Ubuntu Noble, installs system packages, builds all targets, deploys the systemd service, and creates `/etc/rf_worker/`. Supports `--all-decoders`, `--dry-run`, `--help`. |
 | `Dockerfile` | Reproducible build image for `iq_metrics` and all Python tests. Hardware targets (SoapySDR) are in a commented-out `hardware` stage. |
 | `requirements.txt` | Python runtime dependencies (`numpy`, `scipy`). |
@@ -121,7 +121,7 @@ Runtime configuration read **once** at startup from environment variables.
 
 ```cpp
 struct Config { /* all fields with defaults */ };
-[[nodiscard]] Config parse_config(int argc, char** argv);   // reads all RF_* env vars; argv[1] may override RF_DB_PATH
+[[nodiscard]] Config parse_config(int argc, char** argv);   // reads all RF_* env vars; positional CLI args may override center_freq_Hz, sample_rate_Sps, and gain
 ```
 
 Helper parsers (in `namespace meek::detail`):
@@ -184,7 +184,7 @@ Compile-time UK frequency band table.
 
 ```cpp
 inline constexpr std::array<BandProfile, 39> kUkBands = {{ ... }};
-std::optional<const BandProfile*> find_band(double center_hz) noexcept;
+const BandProfile* find_band(double center_hz) noexcept;  // nullptr when no match
 ```
 
 Each `BandProfile` carries: `name`, `description`, `center_hz`,
@@ -200,10 +200,10 @@ Notable profiles (representative sample):
 |---|---|---|
 | ADS-B | 1090 MHz | `UNKNOWN` (decode externally) |
 | VDL2 | 136.9 MHz | `PSK_QAM_LIKE` |
-| ISM-433 | 433.92 MHz | `FSK_LIKE` |
+| ISM-433 | 433.92 MHz | `OOK_AM_LIKE` |
 | TPMS-433 | 433.92 MHz | `FSK_LIKE` |
-| DAB | 174–240 MHz | `PSK_QAM_LIKE` |
-| NOAA-WX | 162.5 MHz | `FSK_LIKE` |
+| DAB | 218–222 MHz | `PSK_QAM_LIKE` |
+| NOAA-APT | 137.5 MHz | `FSK_LIKE` |
 
 ---
 
@@ -225,8 +225,8 @@ class BandScheduler {
 ```
 
 Owned by `capture_loop` — entirely single-threaded; no mutex required.
-Scheduling is disabled silently when fewer than two valid frequency slots
-are parsed from `RF_SCHED_BANDS`.
+Scheduling is disabled with a warning when fewer than two valid frequency
+slots are parsed from `RF_SCHED_BANDS`.
 
 Environment variables:
 
