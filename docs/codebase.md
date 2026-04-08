@@ -122,7 +122,7 @@ Runtime configuration read **once** at startup from environment variables.
 
 ```cpp
 struct Config { /* all fields with defaults */ };
-[[nodiscard]] Config parse_config(int argc, char** argv);   // reads all RF_* env vars; positional CLI args may override center_freq_Hz, sample_rate_Sps, and gain
+[[nodiscard]] Config parse_config(int argc, char** argv);   // reads core RF_* env vars for Config; positional CLI args may override center_freq_Hz, sample_rate_Sps, and gain
 ```
 
 Helper parsers (in `namespace meek::detail`):
@@ -137,15 +137,20 @@ Helper parsers (in `namespace meek::detail`):
 > only fall back to the default on an exception.  Use exact numeric strings in
 > config files.
 
-Full list of recognised environment variables — see
+Recognised environment variables — see
 [`config/thresholds.env.example`](../config/thresholds.env.example) for
-descriptions and defaults:
+descriptions and defaults. The variables below are grouped by the component
+that consumes them:
 
-`RF_BLOCK_LEN`, `RF_ANALYSIS_LEN`, `RF_READ_TIMEOUT_US`, `RF_MIN_POWER`,
-`RF_SNR_MIN_DB`, `RF_EXPECTED_BW_HZ`, `RF_PAPR_MAX`, `RF_CONF_THRESHOLD`,
-`RF_CONSOLE_CONF`, `RF_SNAPSHOT_CONF`, `RF_SCHED_BANDS`, `RF_SCHED_DWELL_MS`,
-`RF_DB_PATH`, `RF_SNAPSHOT_DIR`, `RF_SNAPSHOT_RETENTION_DAYS`,
-`RF_WORKER_LOG`, `RF_METRICS_FILE`, `RF_HEARTBEAT_FILE`, `RF_PROMETHEUS_PORT`.
+- Read by `parse_config()` / `include/meek/config.hpp`:
+  `RF_BLOCK_LEN`, `RF_ANALYSIS_LEN`, `RF_READ_TIMEOUT_US`, `RF_MIN_POWER`,
+  `RF_SNR_MIN_DB`, `RF_EXPECTED_BW_HZ`, `RF_PAPR_MAX`, `RF_CONF_THRESHOLD`,
+  `RF_CONSOLE_CONF`, `RF_SNAPSHOT_CONF`, `RF_DB_PATH`, `RF_SNAPSHOT_DIR`,
+  `RF_SNAPSHOT_RETENTION_DAYS`, `RF_WORKER_LOG`, `RF_METRICS_FILE`,
+  `RF_HEARTBEAT_FILE`, `RF_PROMETHEUS_PORT`.
+
+- Read by `BandScheduler::from_env()` in `band_scheduler.hpp`:
+  `RF_SCHED_BANDS`, `RF_SCHED_DWELL_MS`.
 
 ---
 
