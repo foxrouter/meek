@@ -322,11 +322,15 @@ struct ProcMetrics {
   // ... additional counters / gauges
 };
 
-void write_prometheus_textfile(const ProcMetrics&, const std::string& path);
+struct MetricsSnapshot;
+
+void write_prometheus_textfile(const std::string& path,
+                               const ProcMetrics&);
 
 // HAVE_HTTPLIB only:
 std::pair<std::unique_ptr<httplib::Server>, std::thread>
-start_prometheus_http(const ProcMetrics&, uint16_t port);
+start_prometheus_http(uint16_t port,
+                      std::shared_ptr<MetricsSnapshot>);
 ```
 
 The textfile is written by `output_loop` every 5 seconds to

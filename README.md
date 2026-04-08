@@ -254,7 +254,7 @@ RF_SCHED_DWELL_MS=5000
 
 When `RF_SCHED_BANDS` contains fewer than two valid frequency values,
 scheduling is disabled with `[SCHED] WARN` messages and the daemon
-continues operating on its configured single center frequency as normal.
+continues operating on its configured single centre frequency as normal.
 
 Per-band classification quality is maintained because `proc_loop` calls
 `find_band(blk.center_freq_hz)` on every block to look up the matching
