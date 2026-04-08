@@ -449,10 +449,10 @@ Band-aware offline IQ file processor.
 
 - Detects the frequency band from the filename (e.g. `433_signal.raw` →
   ISM-433 band).
-- Exports `BAND`, `RSYM`, `FDEV`, `MOD_HINT`, `SNR_MIN`, `PAPR_MAX` into
-  the environment.
-- Invokes `tools/decode_candidates.py` for offline replay when
-  `REPLAY_DB` is set.
+- Exports `BAND`, `RSYM`, `FDEV`, `MOD_HINT`, `RF_SNR_MIN_DB`, and
+  `RF_EXPECTED_BW_HZ` into the environment.
+- Invokes `tools/decode_candidates.py` for offline replay, using
+  `REPLAY_DB` only to choose the `--db` argument.
 - Writes JSON logs with `decision_trace`, `confidence`, and feature stats
   to `RF_WORKER_LOG`.
 
@@ -567,10 +567,15 @@ After installation, decoder binary paths are appended to
 
 ### `ops/verify.sh`
 
-Hardening verification.  Checks that all `systemd show` properties match
-expected values (`ProtectSystem=full`, `ProtectHome=yes`,
-`ReadWritePaths`, `LimitNOFILE`, `TasksMax`) and that the service is
-running.
+Hardening verification.  Checks that `systemd show` properties match
+expected values, including `ProtectSystem=full`, `ProtectHome=yes`,
+`PrivateTmp=yes`, `NoNewPrivileges=yes`, `MemoryDenyWriteExecute=yes`,
+`ReadWritePaths`, `LimitNOFILE`, and `TasksMax`, and also verifies that
+the service is running.  Note: the current deployed
+`process-worker.service.d/hardening.conf` has `MemoryDenyWriteExecute`
+commented out (it breaks SoapySDR `dlopen()`), so `ops/verify.sh` will
+report that check as a failure until the verifier or unit hardening is
+aligned.
 
 ---
 
