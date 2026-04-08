@@ -44,9 +44,12 @@ and troubleshooting.
 - [Prerequisites](#prerequisites)
 - [Build](#build)
 - [Quickstart](#quickstart)
+- [Multi-band rotation](#multi-band-rotation-band-scheduler)
 - [Optional decoder setup](#optional-decoder-setup-opssetupsh)
 - [Offline IQ metrics](#offline-iq-metrics-toolsiq_metricscpp)
+- [Offline RF audit](#offline-rf-audit-srcraft_auditcpp)
 - [Offline IQ analysis](#offline-iq-analysis-toolsdecode_candidatespy)
+- [HTML signal report](#html-signal-report-toolsmeek_reportpy)
 - [Canary procedure](#canary-procedure-opscanarysh)
 - [IQ file transfer](#iq-file-transfer-scriptstransfer_iqsh)
 - [Test harnesses](#test-harnesses)
@@ -61,7 +64,7 @@ config/                   runtime configuration example
 docs/                     design plan and gap tracking
 ops/                      deploy, verify, setup, and canary helpers
 scripts/                  IQ ingest, metrics, heartbeat, and transfer helpers
-src/                      C++ worker source
+src/                      C++ worker source (main.cpp daemon + rf_audit.cpp CLI tool)
 systemd/                  systemd unit and drop-in files
 tests/                    Python and shell test harnesses
 tools/                    offline decode/audit utilities
@@ -71,8 +74,22 @@ Key files:
 
 | Path | Purpose |
 |---|---|
-| `src/main.cpp` | Core capture + classification + DB persistence |
+| `src/main.cpp` | Core capture + classification + DB persistence daemon |
+| `src/rf_audit.cpp` | Standalone C++ RF audit CLI (no hardware required) |
+| `include/meek/classifier.hpp` | Feature extraction and modulation classifier (`classify_block`) |
+| `include/meek/demod_chains.hpp` | liquid-dsp FSK / PSK-QAM / OOK-AM demodulation chains (`HAVE_LIQUID`) |
+| `include/meek/db.hpp` | SQLite3 RAII wrapper (WAL mode, prepared statements) |
+| `include/meek/metrics.hpp` | Prometheus metrics (`ProcMetrics`, textfile writer, optional HTTP server) |
+| `include/meek/band_profiles.hpp` | 39-entry UK band profile table (`kUkBands`) |
+| `include/meek/band_scheduler.hpp` | Multi-band rotation scheduler (`BandScheduler`, `RF_SCHED_BANDS`) |
+| `include/meek/isdr_source.hpp` | SDR hardware abstraction (`ISdrSource` / `SoapySdrSource`) |
+| `include/meek/ring_buffer.hpp` | Lock-free SPSC ring buffer (`SpscRingBuffer<T, 64>`) |
+| `include/meek/sample_types.hpp` | Core pipeline data types (`SampleBlock`, `ClassificationResult`, `ModClass`) |
+| `include/meek/config.hpp` | Runtime configuration from environment variables |
 | `tools/iq_metrics.cpp` | Standalone C++ IQ metrics tool (avg_power, snr_db, spectral_flatness, est_bw_hz) |
+| `tools/decode_candidates.py` | Offline modulation decode + JSON audit report |
+| `tools/meek_report.py` | Self-contained HTML signal intelligence report from the SQLite DB |
+| `tools/autotune_thresholds.py` | Threshold optimisation from IQ snapshots |
 | `docs/INSTALL.md` | **Step-by-step installation guide** (Bookworm & Noble) |
 | `docs/rf-adapt-intel-plan.md` | Full design plan and execution status |
 | `docs/missing-features.md` | Gaps and pending implementation items |
@@ -89,7 +106,6 @@ Key files:
 | `scripts/heartbeat_and_metrics.sh` | Standalone heartbeat + Prometheus metrics writer |
 | `scripts/transfer_iq.sh` | rsync IQ snapshot files from edge (Ray) to server (Brian) |
 | `scripts/deploy_and_restart.sh` | Build, install binary, and restart service |
-| `tools/decode_candidates.py` | Offline modulation decode + JSON audit report |
 | `tests/gen_test_signals.py` | Synthetic RRC-shaped IQ vector generator |
 | `tests/test_iq_metrics.py` | Validates C++ `iq_metrics` output against the Python reference |
 | `benchmarks/bench_iq_metrics.py` | Python-vs-C++ throughput benchmark for IQ metrics |
@@ -136,7 +152,8 @@ Key design decisions:
 - **SQLite writes** happen exclusively on the output thread, preventing contention with the capture thread.
 - **Snapshot worker** (`snap_thread`, `std::jthread`) handles IQ snapshot I/O from a bounded task queue (capped at 64 entries) without blocking the processing thread.
 - **Cooperative shutdown** via the `g_shutdown` atomic flag and `std::stop_token` lets all threads drain cleanly on `SIGINT`/`SIGTERM`.
-- **38 band profiles** (`kUkBands`) provide per-band SNR, bandwidth, and prior-boost parameters for the classifier.
+- **39 band profiles** (`kUkBands`) provide per-band SNR, bandwidth, and prior-boost parameters for the classifier.
+- **Multi-band rotation** (`BandScheduler`) retunes the SDR across a user-defined list of frequencies on a configurable dwell schedule, with no mutex required (single-threaded ownership inside `capture_loop`).
 
 ## Prerequisites
 
