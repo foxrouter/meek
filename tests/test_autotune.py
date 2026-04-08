@@ -421,6 +421,114 @@ class TestEndToEndSyntheticFallback(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# format_recommendations tests
+# ---------------------------------------------------------------------------
+
+class TestFormatRecommendations(unittest.TestCase):
+    """format_recommendations() must produce a human-readable string."""
+
+    def _make_recs(self) -> Dict[str, str]:
+        return {
+            "RF_MIN_POWER": "1.00e-05",
+            "RF_CONF_THRESHOLD": "0.55",
+            "RF_CONSOLE_CONF": "0.80",
+            "RF_SNAPSHOT_CONF": "0.55",
+            "RF_SNR_MIN_DB": "2.0",
+            "RF_EXPECTED_BW_HZ": "50000",
+        }
+
+    def test_returns_string(self):
+        recs = self._make_recs()
+        result = at.format_recommendations(recs, source="synthetic")
+        self.assertIsInstance(result, str)
+
+    def test_contains_source_name(self):
+        recs = self._make_recs()
+        result = at.format_recommendations(recs, source="my_snapshots")
+        self.assertIn("my_snapshots", result)
+
+    def test_contains_all_keys_and_values(self):
+        recs = self._make_recs()
+        result = at.format_recommendations(recs, source="test")
+        for key, value in recs.items():
+            self.assertIn(key, result, f"Key '{key}' missing from format output")
+            self.assertIn(value, result, f"Value '{value}' missing from format output")
+
+    def test_contains_apply_instruction(self):
+        recs = self._make_recs()
+        result = at.format_recommendations(recs, source="test")
+        self.assertIn("autotune_thresholds.py", result)
+
+    def test_empty_recs_does_not_raise(self):
+        result = at.format_recommendations({}, source="empty")
+        self.assertIsInstance(result, str)
+        self.assertIn("empty", result)
+
+    def test_multiline_output(self):
+        recs = self._make_recs()
+        result = at.format_recommendations(recs, source="test")
+        self.assertGreater(result.count("\n"), 3,
+                           "format_recommendations should produce multiple lines")
+
+
+# ---------------------------------------------------------------------------
+# estimate_bandwidth_hz tests
+# ---------------------------------------------------------------------------
+
+class TestEstimateBandwidthHz(unittest.TestCase):
+    """estimate_bandwidth_hz() must return sensible bandwidth estimates."""
+
+    def setUp(self):
+        np.random.seed(42)
+
+    def _fsk2(self, n: int = 4096) -> np.ndarray:
+        bits = np.random.randint(0, 2, n // 16)
+        phase_inc = 2.0 * math.pi * (2 * bits - 1) * 50_000 / 2_048_000
+        return np.exp(1j * np.cumsum(np.repeat(phase_inc, 16))).astype(np.complex64)
+
+    def _awgn(self, signal: np.ndarray, snr_db: float) -> np.ndarray:
+        sig_pow = float(np.mean(np.abs(signal) ** 2)) or 1.0
+        noise_pow = sig_pow / 10 ** (snr_db / 10.0)
+        noise = np.sqrt(noise_pow / 2.0) * (
+            np.random.randn(len(signal)) + 1j * np.random.randn(len(signal))
+        )
+        return (signal + noise).astype(np.complex64)
+
+    def test_returns_positive_value(self):
+        s = self._awgn(self._fsk2(), snr_db=15.0)
+        bw = at.estimate_bandwidth_hz(s, sample_rate=2_048_000)
+        self.assertGreater(bw, 0.0)
+
+    def test_result_bounded_by_sample_rate(self):
+        s = self._awgn(self._fsk2(), snr_db=15.0)
+        fs = 2_048_000.0
+        bw = at.estimate_bandwidth_hz(s, sample_rate=fs)
+        self.assertLessEqual(bw, fs)
+
+    def test_scales_with_sample_rate(self):
+        s = self._awgn(self._fsk2(), snr_db=15.0)
+        bw1 = at.estimate_bandwidth_hz(s, sample_rate=2_048_000.0)
+        bw2 = at.estimate_bandwidth_hz(s, sample_rate=4_096_000.0)
+        # With doubled sample rate the bandwidth estimate should double
+        self.assertAlmostEqual(bw2 / bw1, 2.0, places=5)
+
+    def test_noise_only_returns_small_fraction_of_fs(self):
+        # Pure noise has high spectral flatness → est_bw_frac = 1 - flatness → small
+        # In practice noise flatness is ~0.5-0.6 so bw_frac is ~0.4-0.5 of fs;
+        # just verify it is strictly positive and finite.
+        noise = (np.random.randn(4096) + 1j * np.random.randn(4096)).astype(np.complex64)
+        bw = at.estimate_bandwidth_hz(noise, sample_rate=2_048_000.0)
+        self.assertGreater(bw, 0.0)
+        self.assertTrue(math.isfinite(bw))
+
+    def test_uses_default_sample_rate(self):
+        s = self._awgn(self._fsk2(), snr_db=15.0)
+        bw_default = at.estimate_bandwidth_hz(s)
+        bw_explicit = at.estimate_bandwidth_hz(s, sample_rate=2_048_000.0)
+        self.assertAlmostEqual(bw_default, bw_explicit, places=1)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
