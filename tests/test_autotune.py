@@ -481,32 +481,19 @@ class TestEstimateBandwidthHz(unittest.TestCase):
     def setUp(self):
         np.random.seed(42)
 
-    def _fsk2(self, n: int = 4096) -> np.ndarray:
-        bits = np.random.randint(0, 2, n // 16)
-        phase_inc = 2.0 * math.pi * (2 * bits - 1) * 50_000 / 2_048_000
-        return np.exp(1j * np.cumsum(np.repeat(phase_inc, 16))).astype(np.complex64)
-
-    def _awgn(self, signal: np.ndarray, snr_db: float) -> np.ndarray:
-        sig_pow = float(np.mean(np.abs(signal) ** 2)) or 1.0
-        noise_pow = sig_pow / 10 ** (snr_db / 10.0)
-        noise = np.sqrt(noise_pow / 2.0) * (
-            np.random.randn(len(signal)) + 1j * np.random.randn(len(signal))
-        )
-        return (signal + noise).astype(np.complex64)
-
     def test_returns_positive_value(self):
-        s = self._awgn(self._fsk2(), snr_db=15.0)
+        s = _awgn(_fsk2(), snr_db=15.0)
         bw = at.estimate_bandwidth_hz(s, sample_rate=2_048_000)
         self.assertGreater(bw, 0.0)
 
     def test_result_bounded_by_sample_rate(self):
-        s = self._awgn(self._fsk2(), snr_db=15.0)
+        s = _awgn(_fsk2(), snr_db=15.0)
         fs = 2_048_000.0
         bw = at.estimate_bandwidth_hz(s, sample_rate=fs)
         self.assertLessEqual(bw, fs)
 
     def test_scales_with_sample_rate(self):
-        s = self._awgn(self._fsk2(), snr_db=15.0)
+        s = _awgn(_fsk2(), snr_db=15.0)
         bw1 = at.estimate_bandwidth_hz(s, sample_rate=2_048_000.0)
         bw2 = at.estimate_bandwidth_hz(s, sample_rate=4_096_000.0)
         # With doubled sample rate the bandwidth estimate should double
@@ -522,7 +509,7 @@ class TestEstimateBandwidthHz(unittest.TestCase):
         self.assertTrue(math.isfinite(bw))
 
     def test_uses_default_sample_rate(self):
-        s = self._awgn(self._fsk2(), snr_db=15.0)
+        s = _awgn(_fsk2(), snr_db=15.0)
         bw_default = at.estimate_bandwidth_hz(s)
         bw_explicit = at.estimate_bandwidth_hz(s, sample_rate=2_048_000.0)
         self.assertAlmostEqual(bw_default, bw_explicit, places=1)

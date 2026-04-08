@@ -198,6 +198,7 @@ class TestLeagueTable(unittest.TestCase):
         ism = next(r for r in result if r["band"] == "ISM-433")
         self.assertEqual(ism["count"], 3)
         self.assertAlmostEqual(ism["avg_conf"], 0.70, places=2)
+
     def test_required_keys_present(self):
         con = _make_db()
         result = mr.league_table(con, days=30)
