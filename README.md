@@ -58,8 +58,8 @@ and troubleshooting.
 
 ## Layout
 
-> **Full per-file documentation:** see [docs/codebase.md](docs/codebase.md) for
-> a detailed guide to every directory, source file, header, and script.
+> **Repository guide:** see [docs/codebase.md](docs/codebase.md) for
+> a detailed overview of the main directories, source files, headers, and scripts.
 
 ```
 benchmarks/               Python-vs-C++ benchmark scripts and results
@@ -660,6 +660,6 @@ RF_SNAPSHOT_RETENTION_DAYS=7   # keep 7 days of snapshots; 0 = keep forever (def
 - **cpplint** runs as a pre-commit hook; install hooks with `pre-commit install`.
 - See `.cpplint-rationale.md` for the reasoning behind enabled/disabled checks.
 - The CI pipeline (`.github/workflows/ci.yml`) runs six primary jobs: Python lint + tests, C++ build + format + static analysis + test + benchmark, ASAN/UBSAN sanitizer build, Python dependency vulnerability scan (pip-audit), Docker image build, and a liquid-dsp conditional build; it also includes the `changes-liquid` and `changes-docker` change-detection helper jobs.
-- See `docs/codebase.md` for a full per-directory and per-file reference.
+- See `docs/codebase.md` for an overview of the main directories and source files.
 - See `docs/missing-features.md` for a list of pending implementation items.
 - See `docs/audit.md` for the production-readiness audit and migration decision log.

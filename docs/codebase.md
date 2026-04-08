@@ -1,6 +1,7 @@
 # Codebase Guide — `rf_adapt_intel` (`meek`)
 
-A directory-by-directory reference to every file in this repository.
+A directory-by-directory guide to the main files and directories in this
+repository.
 Read alongside [docs/rf-adapt-intel-plan.md](rf-adapt-intel-plan.md) for
 design rationale, and [docs/INSTALL.md](INSTALL.md) for deployment steps.
 
