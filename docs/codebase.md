@@ -262,7 +262,7 @@ Feature helpers (all `[[nodiscard]] inline`):
 | `compute_avg_power` | Mean instantaneous power E[|z|²] |
 | `compute_snr_db` | SNR: median power as noise floor, top-25% mean as signal |
 | `compute_papr_db` | Peak-to-Average Power Ratio |
-| `compute_spectral_flatness` | Spectral flatness (Wiener entropy); occupied-BW heuristics are derived from this inside classification rather than via a standalone helper |
+| `compute_spectral_flatness` | Flatness of the time-domain instantaneous power envelope (`\|z\|²`), computed as geometric mean / arithmetic mean; occupied-BW heuristics are derived from this inside classification rather than via a standalone helper |
 | `compute_phase_stats` | Phase- and transition-related statistics used by the classifier |
 
 Gating order inside `classify_block`:
