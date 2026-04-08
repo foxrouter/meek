@@ -211,12 +211,12 @@ Notable profiles (representative sample):
 Multi-band rotation scheduler.
 
 ```cpp
-struct BandSlot { double center_hz; std::chrono::milliseconds dwell; };
+struct BandSlot { double center_hz; std::chrono::milliseconds dwell_ms; };
 
 class BandScheduler {
   static BandScheduler from_env();   // reads RF_SCHED_BANDS, RF_SCHED_DWELL_MS
   bool enabled() const noexcept;     // true only when >= 2 valid slots
-  bool dwell_elapsed(time_point) const noexcept;
+  bool dwell_elapsed(time_point) noexcept;  // non-const: anchors timer on first call
   const BandSlot& peek_next() const noexcept;
   void advance(time_point) noexcept;
   void reset_dwell(time_point) noexcept;
