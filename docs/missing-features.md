@@ -115,3 +115,19 @@ Python mirror update in `tests/test_band_profiles.py`.
 | kUkBands count updated to 39 in comments and array size | `include/meek/band_profiles.hpp` | ✅ Done |
 | dorny/paths-filter with fetch-depth: 0 and pull-requests: read | `.github/workflows/ci.yml` | ✅ Done |
 | push and pull_request paths allowlists aligned and complete | `.github/workflows/ci.yml` | ✅ Done |
+
+---
+
+## 6. BandScheduler — multi-band rotation
+
+| Item | File(s) | Status |
+|---|---|---|
+| `BandSlot` struct (center_hz, dwell_ms) | `include/meek/band_scheduler.hpp` | ✅ Done |
+| `BandScheduler` class (`from_env`, `dwell_elapsed`, `peek_next`, `advance`, `reset_dwell`, `enabled`, `current`, `slot_count`) | `include/meek/band_scheduler.hpp` | ✅ Done |
+| Non-copyable, move-constructible, default-constructible (disabled) | `include/meek/band_scheduler.hpp` | ✅ Done |
+| `ISdrSource::set_center_freq(double)` virtual method (default: false) | `include/meek/isdr_source.hpp` | ✅ Done |
+| `SoapySdrSource::set_center_freq` calling `SoapySDRDevice_setFrequency` | `src/main.cpp` | ✅ Done |
+| `capture_loop` BandScheduler integration (`dwell_elapsed()` + `peek_next()` + `advance()` / `reset_dwell()` on dwell expiry) | `src/main.cpp` | ✅ Done |
+| `proc_loop` per-block `find_band(blk.center_freq_hz)` update | `src/main.cpp` | ✅ Done |
+| `BandScheduler::from_env()` in `main()` passed to capture thread | `src/main.cpp` | ✅ Done |
+| `RF_SCHED_BANDS` / `RF_SCHED_DWELL_MS` env vars documented | `config/thresholds.env.example` | ✅ Done |

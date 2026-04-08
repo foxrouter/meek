@@ -68,6 +68,11 @@ struct Config {
 
   // Prometheus HTTP server (0 = disabled; only serve textfile)
   std::uint16_t prometheus_port{0};
+
+  // Set to true by main() when BandScheduler is enabled; used by proc_loop to
+  // suppress the startup per-cfg.center_freq "[BAND] Matched" log (which would
+  // be misleading when capture_loop is rotating through multiple bands).
+  bool sched_enabled{false};
 };
 
 // ---------------------------------------------------------------------------
