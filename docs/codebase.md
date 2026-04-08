@@ -689,7 +689,6 @@ All Python tests use the standard library plus `numpy`, with optional
 | `test_meek_report.py` | `tools/meek_report.py` HTML generation. |
 | `test_meek_report_queries.py` | SQL queries used by `meek_report.py`. |
 | `test_rf_audit.py` | `rf_audit` CLI JSON output fields and exit codes. |
-| `test_heartbeat_and_metrics.sh` | `scripts/heartbeat_and_metrics.sh` output format. |
 | `bench_throughput.py` | Processing throughput (frames/minute) acceptance gate: ≥ 100 on Brian, ≥ 20 on Ray. |
 
 ---
@@ -704,6 +703,7 @@ All Python tests use the standard library plus `numpy`, with optional
 | `test_canary.sh` | `ops/canary.sh` `--status` / `--dry-run`. |
 | `test_scan_incoming.sh` | `scripts/scan_incoming.sh` file processing and move behaviour. |
 | `test_check_ssh_permissions.sh` | `scripts/check_ssh_permissions.sh` permission checks. |
+| `test_heartbeat_and_metrics.sh` | `scripts/heartbeat_and_metrics.sh` output format. |
 
 Shell tests share a minimal harness: `VERBOSE` flag, `ok`/`fail` helpers,
 `assert_contains`/`assert_exit` helpers.  Temp dirs use

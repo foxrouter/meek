@@ -142,7 +142,7 @@ flowchart LR
     end
 
     subgraph Snapshot
-        sq[/"snap_queue\n(deque, max 64)"/]
+        sq[/"snap_queue\nSpscRingBuffer&lt;SnapTask,64&gt;\n(63 usable slots)"/]
         snap["snap_thread\n(std::jthread)"]
         sq -->|".cf32 IQ files"| snap
     end
