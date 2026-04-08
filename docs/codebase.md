@@ -385,10 +385,12 @@ python3 tools/decode_candidates.py \
 
 ### `tools/meek_report.py`
 
-Self-contained HTML signal intelligence report.  Queries the SQLite
-database and renders an HTML file with detection summaries, per-band
+HTML signal intelligence report generator.  Queries the SQLite database
+and renders a single `.html` file with detection summaries, per-band
 breakdowns, confidence histograms, and decision-trace samples.  No
-external web framework required — the output is a single `.html` file.
+external web framework is required, but the default template loads
+Chart.js and Google Fonts from CDN-hosted URLs, so the report will not
+render fully offline unless those assets are vendored locally.
 Set `--db` explicitly for standard installs.
 
 ```bash
