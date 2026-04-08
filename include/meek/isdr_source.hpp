@@ -54,6 +54,13 @@ class ISdrSource {
   /// Human-readable description of the source (e.g. "RTL-SDR USB#0").
   [[nodiscard]] virtual std::string description() const = 0;
 
+  /// Retune the SDR to a new centre frequency in Hz.
+  /// Returns true on success, false if the operation failed or is not supported.
+  /// Default implementation returns false (unsupported / test double).
+  [[nodiscard]] virtual bool set_center_freq(double /*freq_hz*/) noexcept {
+    return false;
+  }
+
  protected:
   ISdrSource() = default;
 };
@@ -93,6 +100,8 @@ class SoapySdrSource final : public ISdrSource {
   [[nodiscard]] std::string description() const override {
     return description_;
   }
+
+  [[nodiscard]] bool set_center_freq(double freq_hz) noexcept override;
 
  private:
   SoapySDRDevice* dev_{nullptr};
