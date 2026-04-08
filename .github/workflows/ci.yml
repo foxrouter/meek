@@ -152,6 +152,9 @@ jobs:
       - name: test_deploy.sh
         run: bash tests/test_deploy.sh -v
 
+      - name: test_heartbeat_and_metrics.sh
+        run: bash tests/test_heartbeat_and_metrics.sh -v
+
   # ─────────────────────────────────────────────────────────────────────────
   # 2. Build iq_metrics (C++, no hardware deps) + validate vs Python
   # ─────────────────────────────────────────────────────────────────────────
