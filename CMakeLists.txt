@@ -269,8 +269,9 @@ target_compile_options(iq_metrics PRIVATE -Wall -Wextra -Wno-unused-parameter)
 # Enable with:  cmake -DIQ_METRICS_NATIVE=ON ...
 option(IQ_METRICS_NATIVE "Build iq_metrics with -march=native (host-CPU-specific, non-portable)" OFF)
 if(IQ_METRICS_NATIVE)
-  target_compile_options(iq_metrics PRIVATE -march=native)
-  message(STATUS "iq_metrics: -march=native enabled (IQ_METRICS_NATIVE=ON)")
+  target_compile_options(iq_metrics PRIVATE
+    $<$<CONFIG:Release,RelWithDebInfo>:-march=native>)
+  message(STATUS "iq_metrics: -march=native enabled for Release/RelWithDebInfo (IQ_METRICS_NATIVE=ON)")
 endif()
 
 install(TARGETS iq_metrics

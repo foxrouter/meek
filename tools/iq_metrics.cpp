@@ -31,6 +31,7 @@
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -144,8 +145,6 @@ static IqMetrics compute_metrics(const std::vector<std::complex<float>>& samples
 // (C++11 §26.4/4) and trivially copyable so a binary read into it is safe.
 static_assert(sizeof(std::complex<float>) == 2 * sizeof(float),
               "std::complex<float> must be exactly two floats for direct CF32 binary read");
-static_assert(alignof(std::complex<float>) == alignof(float),
-              "std::complex<float> alignment must match float for direct CF32 binary read");
 static_assert(std::is_trivially_copyable_v<std::complex<float>>,
               "std::complex<float> must be trivially copyable for direct CF32 binary read");
 

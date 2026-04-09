@@ -416,12 +416,14 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
                          BandScheduler& sched, std::atomic<std::uint64_t>& cap_dropped,
                          std::atomic<std::uint64_t>& cap_overflow,
                          std::atomic<std::uint64_t>& cap_progress, std::atomic<bool>& cap_exiting) {
-  // Dedicated capture buffer — owns the allocation for the full block_len.
-  // Keeping it separate from blk.samples avoids per-iteration reallocation:
-  // blk is std::move'd into the SPSC ring which leaves blk.samples with
-  // capacity==0, so a resize() on the next iteration would always reallocate.
-  // Reading into buf first and then assigning into blk.samples preserves this
-  // single allocation across all iterations.
+  // Dedicated capture buffer for SDR reads. This guarantees one reusable
+  // allocation for the incoming block_len samples on the capture side.
+  // Note that moving blk into the SPSC ring does not guarantee any particular
+  // post-move capacity for blk.samples; assigning/copying buf into blk.samples
+  // may still allocate if blk.samples no longer has enough capacity after a
+  // successful push. Keeping buf separate avoids reallocating the SDR read
+  // buffer each iteration, but it does not guarantee allocation-free refills of
+  // blk.samples.
   std::vector<std::complex<float>> buf(cfg.block_len);
   SampleBlock blk;
   blk.samples.reserve(cfg.block_len);
