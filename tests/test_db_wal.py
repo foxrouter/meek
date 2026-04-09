@@ -722,8 +722,6 @@ class TestDemodLockMsSentinel(unittest.TestCase):
         self.assertGreater(1, self._SENTINEL_DEFAULT)
 
 
-
-
 # ---------------------------------------------------------------------------
 # DB-01: center_freq_hz column and index regression tests
 # ---------------------------------------------------------------------------

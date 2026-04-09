@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -128,6 +129,10 @@ inline bool try_env_d(const char* name, double& out) noexcept {
         std::cerr << "[CFG] WARN: " << name << "='" << v << "' is not a valid number — ignored\n";
         return false;
       }
+    }
+    if (!std::isfinite(parsed)) {
+      std::cerr << "[CFG] WARN: " << name << "='" << v << "' is not a finite number — ignored\n";
+      return false;
     }
     out = parsed;
     return true;
