@@ -10,6 +10,7 @@
 
 #include <sqlite3.h>
 
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -380,7 +381,13 @@ inline std::int64_t Database::insert_signal(const std::string& source, const std
   sqlite3_bind_text(stmt, 1, source.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(stmt, 2, notes.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_int64(stmt, 3, timestamp_ns);
-  sqlite3_bind_double(stmt, 4, center_freq_hz);
+  // Bind NULL for center_freq_hz when the value is the 0.0 "unknown" sentinel
+  // or is otherwise non-positive/non-finite, so the partial index
+  // (WHERE center_freq_hz IS NOT NULL) correctly excludes unknown entries.
+  if (std::isfinite(center_freq_hz) && center_freq_hz > 0.0)
+    sqlite3_bind_double(stmt, 4, center_freq_hz);
+  else
+    sqlite3_bind_null(stmt, 4);
   if (sqlite3_step(stmt) != SQLITE_DONE)
     return -1;
   return sqlite3_last_insert_rowid(db_);
