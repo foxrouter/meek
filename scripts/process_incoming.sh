@@ -110,8 +110,11 @@ export RF_SNR_MIN_DB="${SNR_MIN}"
 export RF_EXPECTED_BW_HZ="${BW_HZ}"
 export RF_WORKER_LOG="${WORKER_LOG}"
 export BAND="${BAND}"
-export RF_RSYM="${RSYM}"
-export RF_FDEV="${FDEV}"
+# Prefer any RF_RSYM/RF_FDEV already set in the environment (e.g. loaded from
+# thresholds.env above) over the band-table defaults; use ${var:-default} so a
+# site-level override is never silently clobbered by the band table.
+export RF_RSYM="${RF_RSYM:-${RSYM}}"
+export RF_FDEV="${RF_FDEV:-${FDEV}}"
 [[ -n "${MOD_HINT}" ]] && export MOD_HINT="${MOD_HINT}"
 
 # ---------------------------------------------------------------------------
