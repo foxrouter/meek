@@ -46,7 +46,7 @@ class Database {
 
   /// Insert a signal observation and return its row-id, or -1 on error.
   [[nodiscard]] std::int64_t insert_signal(const std::string& source, const std::string& notes,
-                                           std::int64_t timestamp_ns);
+                                           std::int64_t timestamp_ns, double center_freq_hz);
 
   /// Upsert the modulation classifier method and return its row-id, or -1.
   [[nodiscard]] std::int64_t upsert_method(const std::string& name, const std::string& params_json);
@@ -156,7 +156,8 @@ inline bool Database::apply_schema() {
       timestamp    TEXT NOT NULL DEFAULT (datetime('now')),
       source       TEXT,
       notes        TEXT,
-      timestamp_ns INTEGER
+      timestamp_ns     INTEGER,
+      center_freq_hz   REAL
     );
     CREATE TABLE IF NOT EXISTS methods (
       id     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -298,6 +299,37 @@ inline bool Database::apply_schema() {
     }
   }
 
+  // Migration: add center_freq_hz column to signals if it does not exist yet.
+  // Enables queries filtered by capture frequency; existing rows get NULL.
+  {
+    char* mig_err = nullptr;
+    const int mig_rc = sqlite3_exec(db_, "ALTER TABLE signals ADD COLUMN center_freq_hz REAL;",
+                                    nullptr, nullptr, &mig_err);
+    if (mig_rc != SQLITE_OK) {
+      const std::string msg = mig_err ? mig_err : sqlite3_errmsg(db_);
+      sqlite3_free(mig_err);
+      if (msg.find("duplicate column") == std::string::npos) {
+        std::cerr << "[DB] migrate signals.center_freq_hz: " << msg << "\n";
+      }
+    }
+  }
+
+  // Index on center_freq_hz — created after the migration that adds the column.
+  {
+    char* idx_err = nullptr;
+    const int idx_rc =
+        sqlite3_exec(db_,
+                     "CREATE INDEX IF NOT EXISTS idx_signals_center_freq_hz "
+                     "ON signals(center_freq_hz) WHERE center_freq_hz IS NOT NULL;",
+                     nullptr, nullptr, &idx_err);
+    if (idx_rc != SQLITE_OK) {
+      std::cerr << "[DB] idx_signals_center_freq_hz: " << (idx_err ? idx_err : sqlite3_errmsg(db_))
+                << "\n";
+      sqlite3_free(idx_err);
+      // Non-fatal: missing index only degrades frequency-range query performance.
+    }
+  }
+
   return true;
 }
 
@@ -305,7 +337,7 @@ inline bool Database::prepare_statements() {
   sqlite3_stmt* s = nullptr;
 
   static constexpr const char* kInsertSignal =
-      "INSERT INTO signals(source, notes, timestamp_ns) VALUES(?, ?, ?)";
+      "INSERT INTO signals(source, notes, timestamp_ns, center_freq_hz) VALUES(?, ?, ?, ?)";
   if (sqlite3_prepare_v2(db_, kInsertSignal, -1, &s, nullptr) != SQLITE_OK) {
     std::cerr << "[DB] prepare insert_signal: " << sqlite3_errmsg(db_) << "\n";
     return false;
@@ -340,7 +372,7 @@ inline bool Database::prepare_statements() {
 }
 
 inline std::int64_t Database::insert_signal(const std::string& source, const std::string& notes,
-                                            std::int64_t timestamp_ns) {
+                                            std::int64_t timestamp_ns, double center_freq_hz) {
   // timestamp_ns: epoch nanoseconds when available; otherwise a monotonic
   // steady_clock-based fallback for pre-epoch/nonrepresentable wall-clock
   // timestamps. 0 means only "unset/unknown". INT64_MAX = year 2262.
@@ -349,6 +381,7 @@ inline std::int64_t Database::insert_signal(const std::string& source, const std
   sqlite3_bind_text(stmt, 1, source.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(stmt, 2, notes.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_int64(stmt, 3, timestamp_ns);
+  sqlite3_bind_double(stmt, 4, center_freq_hz);
   if (sqlite3_step(stmt) != SQLITE_DONE)
     return -1;
   return sqlite3_last_insert_rowid(db_);

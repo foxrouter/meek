@@ -110,8 +110,8 @@ export RF_SNR_MIN_DB="${SNR_MIN}"
 export RF_EXPECTED_BW_HZ="${BW_HZ}"
 export RF_WORKER_LOG="${WORKER_LOG}"
 export BAND="${BAND}"
-export RSYM="${RSYM}"
-export FDEV="${FDEV}"
+export RF_RSYM="${RSYM}"
+export RF_FDEV="${FDEV}"
 [[ -n "${MOD_HINT}" ]] && export MOD_HINT="${MOD_HINT}"
 
 # ---------------------------------------------------------------------------

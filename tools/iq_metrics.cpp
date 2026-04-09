@@ -154,14 +154,15 @@ static std::vector<std::complex<float>> read_cf32(const std::string& path) {
   }
   f.seekg(0);
   const size_t n = static_cast<size_t>(bytes) / 8;
-  std::vector<float> raw(n * 2);
-  if (!f.read(reinterpret_cast<char*>(raw.data()),
-              static_cast<std::streamsize>(raw.size() * sizeof(float)))) {
+  std::vector<std::complex<float>> out(n);
+  // std::complex<float> has the same layout as float[2] (C++11 §26.4/4),
+  // so we can read the interleaved CF32 stream directly into the output
+  // vector without an intermediate raw-float buffer.
+  if (!f.read(reinterpret_cast<char*>(out.data()),
+              static_cast<std::streamsize>(n * 2 * sizeof(float)))) {
     std::cerr << "iq_metrics: read error on '" << path << "'\n";
     return {};
   }
-  std::vector<std::complex<float>> out(n);
-  for (size_t i = 0; i < n; ++i) out[i] = {raw[2 * i], raw[2 * i + 1]};
   return out;
 }
 

@@ -214,14 +214,14 @@ inline std::string env_str(const char* name, const char* def) {
 
   // Demodulation
 #ifdef HAVE_LIQUID
-  cfg.rsym = detail::env_d("RSYM", 128'000.0);
-  cfg.fdev = detail::env_d("FDEV", 50'000.0);
+  cfg.rsym = detail::env_d("RF_RSYM", 128'000.0);
+  cfg.fdev = detail::env_d("RF_FDEV", 50'000.0);
 #else
   {
-    const char* rsym_env = std::getenv("RSYM");
-    const char* fdev_env = std::getenv("FDEV");
+    const char* rsym_env = std::getenv("RF_RSYM");
+    const char* fdev_env = std::getenv("RF_FDEV");
     if ((rsym_env && *rsym_env != '\0') || (fdev_env && *fdev_env != '\0'))
-      std::cerr << "[CFG] WARN: RSYM/FDEV set but liquid-dsp not compiled in — ignored\n";
+      std::cerr << "[CFG] WARN: RF_RSYM/RF_FDEV set but liquid-dsp not compiled in — ignored\n";
   }
 #endif  // HAVE_LIQUID
 

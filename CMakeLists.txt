@@ -262,7 +262,8 @@ install(TARGETS rf_audit
 add_executable(iq_metrics tools/iq_metrics.cpp)
 target_include_directories(iq_metrics PRIVATE ${MEEK_INCLUDE_DIR})
 target_link_libraries(iq_metrics PRIVATE nlohmann_json::nlohmann_json)
-target_compile_options(iq_metrics PRIVATE -Wall -Wextra -Wno-unused-parameter)
+target_compile_options(iq_metrics PRIVATE -Wall -Wextra -Wno-unused-parameter
+  $<$<CONFIG:Release,RelWithDebInfo>:-march=native>)
 
 install(TARGETS iq_metrics
   RUNTIME DESTINATION bin

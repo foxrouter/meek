@@ -416,9 +416,7 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
                          BandScheduler& sched, std::atomic<std::uint64_t>& cap_dropped,
                          std::atomic<std::uint64_t>& cap_overflow,
                          std::atomic<std::uint64_t>& cap_progress, std::atomic<bool>& cap_exiting) {
-  std::vector<std::complex<float>> buf(cfg.block_len);
   SampleBlock blk;
-  blk.samples.reserve(cfg.block_len);
 
   while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
     // Advance to the next band slot when the current dwell period has elapsed.
@@ -441,7 +439,8 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
         }
       }
     }
-    const auto n = sdr.read_samples(std::span{buf});
+    blk.samples.resize(cfg.block_len);
+    const auto n = sdr.read_samples(std::span{blk.samples});
     // Update progress on every iteration; read_samples() is configured to
     // block up to cfg.read_timeout_us µs (clamped to [1, 300 s] at config
     // parse time), but SoapyRemote can hang beyond that — which is exactly
@@ -467,7 +466,7 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
       continue;
     }
 
-    blk.samples.assign(buf.begin(), buf.begin() + n);
+    blk.samples.resize(static_cast<std::size_t>(n));
     const auto raw_ts_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                std::chrono::system_clock::now().time_since_epoch())
                                .count();
@@ -905,7 +904,8 @@ static void output_loop(std::stop_token st, SpscRingBuffer<ClassificationResult,
 
       if (method_id >= 0) {
         const std::int64_t sig_id =
-            db.insert_signal("rf_adapt_intel", cr.decision_trace, cr.timestamp_ns);
+            db.insert_signal("rf_adapt_intel", cr.decision_trace, cr.timestamp_ns,
+                             cr.center_freq_hz);
         if (sig_id >= 0) {
           if (db.insert_example(sig_id, method_id, cr.confidence, cr.decision_trace,
                                 std::string(mod_class_name(cr.mod_class))) < 0) {
