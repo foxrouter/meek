@@ -212,16 +212,27 @@ inline std::string env_str(const char* name, const char* def) {
     cfg.snapshot_conf = cfg.conf_threshold;
   }
 
-  // Demodulation
+  // Demodulation — RF_RSYM/RF_FDEV are canonical; fall back to legacy RSYM/FDEV
+  // for deployments that have not yet migrated their config files.
 #ifdef HAVE_LIQUID
-  cfg.rsym = detail::env_d("RF_RSYM", 128'000.0);
-  cfg.fdev = detail::env_d("RF_FDEV", 50'000.0);
+  {
+    const char* rsym_canonical = std::getenv("RF_RSYM");
+    cfg.rsym = (rsym_canonical != nullptr && *rsym_canonical != '\0')
+                   ? detail::env_d("RF_RSYM", 128'000.0)
+                   : detail::env_d("RSYM", 128'000.0);
+    const char* fdev_canonical = std::getenv("RF_FDEV");
+    cfg.fdev = (fdev_canonical != nullptr && *fdev_canonical != '\0')
+                   ? detail::env_d("RF_FDEV", 50'000.0)
+                   : detail::env_d("FDEV", 50'000.0);
+  }
 #else
   {
     const char* rsym_env = std::getenv("RF_RSYM");
+    if (!rsym_env || *rsym_env == '\0') rsym_env = std::getenv("RSYM");
     const char* fdev_env = std::getenv("RF_FDEV");
+    if (!fdev_env || *fdev_env == '\0') fdev_env = std::getenv("FDEV");
     if ((rsym_env && *rsym_env != '\0') || (fdev_env && *fdev_env != '\0'))
-      std::cerr << "[CFG] WARN: RF_RSYM/RF_FDEV set but liquid-dsp not compiled in — ignored\n";
+      std::cerr << "[CFG] WARN: RF_RSYM/RF_FDEV (or legacy RSYM/FDEV) set but liquid-dsp not compiled in — ignored\n";
   }
 #endif  // HAVE_LIQUID
 
