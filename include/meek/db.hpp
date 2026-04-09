@@ -317,11 +317,10 @@ inline bool Database::apply_schema() {
   // Index on center_freq_hz — created after the migration that adds the column.
   {
     char* idx_err = nullptr;
-    const int idx_rc =
-        sqlite3_exec(db_,
-                     "CREATE INDEX IF NOT EXISTS idx_signals_center_freq_hz "
-                     "ON signals(center_freq_hz) WHERE center_freq_hz IS NOT NULL;",
-                     nullptr, nullptr, &idx_err);
+    const int idx_rc = sqlite3_exec(db_,
+                                    "CREATE INDEX IF NOT EXISTS idx_signals_center_freq_hz "
+                                    "ON signals(center_freq_hz) WHERE center_freq_hz IS NOT NULL;",
+                                    nullptr, nullptr, &idx_err);
     if (idx_rc != SQLITE_OK) {
       std::cerr << "[DB] idx_signals_center_freq_hz: " << (idx_err ? idx_err : sqlite3_errmsg(db_))
                 << "\n";
