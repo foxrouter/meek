@@ -228,11 +228,14 @@ inline std::string env_str(const char* name, const char* def) {
 #else
   {
     const char* rsym_env = std::getenv("RF_RSYM");
-    if (!rsym_env || *rsym_env == '\0') rsym_env = std::getenv("RSYM");
+    if (!rsym_env || *rsym_env == '\0')
+      rsym_env = std::getenv("RSYM");
     const char* fdev_env = std::getenv("RF_FDEV");
-    if (!fdev_env || *fdev_env == '\0') fdev_env = std::getenv("FDEV");
+    if (!fdev_env || *fdev_env == '\0')
+      fdev_env = std::getenv("FDEV");
     if ((rsym_env && *rsym_env != '\0') || (fdev_env && *fdev_env != '\0'))
-      std::cerr << "[CFG] WARN: RF_RSYM/RF_FDEV (or legacy RSYM/FDEV) set but liquid-dsp not compiled in — ignored\n";
+      std::cerr << "[CFG] WARN: RF_RSYM/RF_FDEV (or legacy RSYM/FDEV) set but liquid-dsp not "
+                   "compiled in — ignored\n";
   }
 #endif  // HAVE_LIQUID
 
