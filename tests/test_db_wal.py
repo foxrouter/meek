@@ -864,8 +864,16 @@ class TestCenterFreqHz(unittest.TestCase):
         )
 
     def test_null_center_freq_hz_excluded_from_index(self):
-        """Rows with NULL center_freq_hz must not appear in an index scan
-        (the index is declared WHERE center_freq_hz IS NOT NULL)."""
+        """Rows with NULL center_freq_hz must not appear in an index scan;
+        the partial index is declared WHERE center_freq_hz IS NOT NULL.
+
+        Two assertions:
+        1. An equality query uses idx_signals_center_freq_hz (index is effective
+           for non-NULL lookups).
+        2. A WHERE center_freq_hz IS NULL query does NOT use that index (the
+           partial index excludes NULL rows, so the query must full-scan or use
+           another path), and the NULL row is still returned.
+        """
         conn = sqlite3.connect(self._db_path)
         self._apply_schema_with_center_freq(conn)
         # Insert one row with NULL and one with a value
@@ -878,17 +886,47 @@ class TestCenterFreqHz(unittest.TestCase):
             ("rf_adapt_intel", "with_freq", 868_000_000.0),
         )
         conn.commit()
-        # Query the index via EXPLAIN QUERY PLAN
-        plan = conn.execute(
+
+        # Assertion 1: equality query uses the partial index
+        plan_eq = conn.execute(
             "EXPLAIN QUERY PLAN "
             "SELECT id FROM signals WHERE center_freq_hz = 868000000.0;"
         ).fetchall()
-        conn.close()
-        plan_text = " ".join(str(row) for row in plan)
+        plan_eq_text = " ".join(str(row) for row in plan_eq)
         self.assertIn(
             "idx_signals_center_freq_hz",
-            plan_text,
-            f"Expected idx_signals_center_freq_hz in query plan, got: {plan_text}",
+            plan_eq_text,
+            f"Expected idx_signals_center_freq_hz in equality query plan, "
+            f"got: {plan_eq_text}",
+        )
+
+        # Assertion 2: IS NULL query does NOT use the partial index — it must
+        # resort to a table scan or a different index because the partial index
+        # excludes NULL rows.
+        plan_null = conn.execute(
+            "EXPLAIN QUERY PLAN "
+            "SELECT id FROM signals WHERE center_freq_hz IS NULL;"
+        ).fetchall()
+        plan_null_text = " ".join(str(row) for row in plan_null)
+        self.assertNotIn(
+            "idx_signals_center_freq_hz",
+            plan_null_text,
+            f"Partial index idx_signals_center_freq_hz must not be used for "
+            f"IS NULL queries; got plan: {plan_null_text}",
+        )
+
+        # Assertion 3: the NULL row is still returned by the IS NULL query
+        null_rows = conn.execute(
+            "SELECT notes FROM signals WHERE center_freq_hz IS NULL;"
+        ).fetchall()
+        conn.close()
+        self.assertEqual(
+            len(null_rows), 1,
+            f"Expected exactly one row with NULL center_freq_hz, got {len(null_rows)}",
+        )
+        self.assertEqual(
+            null_rows[0][0], "no_freq",
+            f"Expected notes='no_freq' for the NULL row, got {null_rows[0][0]!r}",
         )
 
 

@@ -118,7 +118,18 @@ inline bool try_env_d(const char* name, double& out) noexcept {
   if (!v || *v == '\0')
     return false;
   try {
-    double parsed = std::stod(v);
+    std::size_t idx = 0;
+    double parsed = std::stod(v, &idx);
+    // Reject trailing non-whitespace (e.g. "128000junk") — same policy as parse_arg().
+    // Cast to unsigned char: on platforms where char is signed, passing a negative value
+    // to std::isspace is undefined behaviour.
+    for (; v[idx] != '\0'; ++idx) {
+      if (!std::isspace(static_cast<unsigned char>(v[idx]))) {
+        std::cerr << "[CFG] WARN: " << name << "='" << v
+                  << "' is not a valid number — ignored\n";
+        return false;
+      }
+    }
     out = parsed;
     return true;
   } catch (...) {
