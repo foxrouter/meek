@@ -122,8 +122,7 @@ inline bool try_env_d(const char* name, double& out) noexcept {
     out = parsed;
     return true;
   } catch (...) {
-    std::cerr << "[CFG] WARN: " << name << "='" << v
-              << "' is not a valid number — ignored\n";
+    std::cerr << "[CFG] WARN: " << name << "='" << v << "' is not a valid number — ignored\n";
     return false;
   }
 }
@@ -239,11 +238,9 @@ inline bool try_env_d(const char* name, double& out) noexcept {
   // shadow a valid legacy value.
 #ifdef HAVE_LIQUID
   {
-    if (!detail::try_env_d("RF_RSYM", cfg.rsym) &&
-        !detail::try_env_d("RSYM", cfg.rsym))
+    if (!detail::try_env_d("RF_RSYM", cfg.rsym) && !detail::try_env_d("RSYM", cfg.rsym))
       cfg.rsym = 128'000.0;
-    if (!detail::try_env_d("RF_FDEV", cfg.fdev) &&
-        !detail::try_env_d("FDEV", cfg.fdev))
+    if (!detail::try_env_d("RF_FDEV", cfg.fdev) && !detail::try_env_d("FDEV", cfg.fdev))
       cfg.fdev = 50'000.0;
   }
 #else
