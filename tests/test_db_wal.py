@@ -867,12 +867,13 @@ class TestCenterFreqHz(unittest.TestCase):
         """Rows with NULL center_freq_hz must not appear in an index scan;
         the partial index is declared WHERE center_freq_hz IS NOT NULL.
 
-        Two assertions:
+        Three assertions:
         1. An equality query uses idx_signals_center_freq_hz (index is effective
            for non-NULL lookups).
         2. A WHERE center_freq_hz IS NULL query does NOT use that index (the
            partial index excludes NULL rows, so the query must full-scan or use
-           another path), and the NULL row is still returned.
+           another path).
+        3. The NULL row is still returned by the IS NULL query.
         """
         conn = sqlite3.connect(self._db_path)
         self._apply_schema_with_center_freq(conn)
