@@ -139,6 +139,16 @@ static IqMetrics compute_metrics(const std::vector<std::complex<float>>& samples
 // File I/O
 // ---------------------------------------------------------------------------
 
+// Compile-time layout guarantees required by the direct-read path in read_cf32.
+// std::complex<float> must be layout-compatible with two contiguous floats
+// (C++11 §26.4/4) and trivially copyable so a binary read into it is safe.
+static_assert(sizeof(std::complex<float>) == 2 * sizeof(float),
+              "std::complex<float> must be exactly two floats for direct CF32 binary read");
+static_assert(alignof(std::complex<float>) == alignof(float),
+              "std::complex<float> alignment must match float for direct CF32 binary read");
+static_assert(std::is_trivially_copyable_v<std::complex<float>>,
+              "std::complex<float> must be trivially copyable for direct CF32 binary read");
+
 /// Read an entire CF32 (interleaved float32) file into a complex<float> vector.
 /// Returns empty vector on error.
 static std::vector<std::complex<float>> read_cf32(const std::string& path) {
@@ -156,10 +166,11 @@ static std::vector<std::complex<float>> read_cf32(const std::string& path) {
   const size_t n = static_cast<size_t>(bytes) / 8;
   std::vector<std::complex<float>> out(n);
   // std::complex<float> has the same layout as float[2] (C++11 §26.4/4),
-  // so we can read the interleaved CF32 stream directly into the output
-  // vector without an intermediate raw-float buffer.
+  // verified by the static_asserts above.  Read the interleaved CF32 stream
+  // directly into the output vector without an intermediate raw-float buffer.
+  // Read size is derived from the actual vector element to avoid any mismatch.
   if (!f.read(reinterpret_cast<char*>(out.data()),
-              static_cast<std::streamsize>(n * 2 * sizeof(float)))) {
+              static_cast<std::streamsize>(out.size() * sizeof(out[0])))) {
     std::cerr << "iq_metrics: read error on '" << path << "'\n";
     return {};
   }

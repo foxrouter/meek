@@ -416,7 +416,15 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
                          BandScheduler& sched, std::atomic<std::uint64_t>& cap_dropped,
                          std::atomic<std::uint64_t>& cap_overflow,
                          std::atomic<std::uint64_t>& cap_progress, std::atomic<bool>& cap_exiting) {
+  // Dedicated capture buffer — owns the allocation for the full block_len.
+  // Keeping it separate from blk.samples avoids per-iteration reallocation:
+  // blk is std::move'd into the SPSC ring which leaves blk.samples with
+  // capacity==0, so a resize() on the next iteration would always reallocate.
+  // Reading into buf first and then assigning into blk.samples preserves this
+  // single allocation across all iterations.
+  std::vector<std::complex<float>> buf(cfg.block_len);
   SampleBlock blk;
+  blk.samples.reserve(cfg.block_len);
 
   while (!st.stop_requested() && !g_shutdown.load(std::memory_order_relaxed)) {
     // Advance to the next band slot when the current dwell period has elapsed.
@@ -439,8 +447,7 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
         }
       }
     }
-    blk.samples.resize(cfg.block_len);
-    const auto n = sdr.read_samples(std::span{blk.samples});
+    const auto n = sdr.read_samples(std::span{buf});
     // Update progress on every iteration; read_samples() is configured to
     // block up to cfg.read_timeout_us µs (clamped to [1, 300 s] at config
     // parse time), but SoapyRemote can hang beyond that — which is exactly
@@ -466,7 +473,7 @@ static void capture_loop(std::stop_token st, ISdrSource& sdr,
       continue;
     }
 
-    blk.samples.resize(static_cast<std::size_t>(n));
+    blk.samples.assign(buf.begin(), buf.begin() + n);
     const auto raw_ts_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                std::chrono::system_clock::now().time_since_epoch())
                                .count();
