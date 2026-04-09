@@ -108,6 +108,26 @@ inline std::string env_str(const char* name, const char* def) {
   return v ? std::string(v) : std::string(def);
 }
 
+/// Try to parse *name* as a double.  Returns the parsed value via *out* and
+/// true on success; returns false (and leaves *out* unchanged) if the variable
+/// is unset, empty, or does not parse as a valid number.  Used for canonical/
+/// legacy fallback chains where a present-but-invalid canonical must not
+/// silently shadow a valid legacy value.
+inline bool try_env_d(const char* name, double& out) noexcept {
+  const char* v = std::getenv(name);
+  if (!v || *v == '\0')
+    return false;
+  try {
+    double parsed = std::stod(v);
+    out = parsed;
+    return true;
+  } catch (...) {
+    std::cerr << "[CFG] WARN: " << name << "='" << v
+              << "' is not a valid number — ignored\n";
+    return false;
+  }
+}
+
 }  // namespace detail
 
 /// Parse configuration from environment variables.  Command-line arguments
@@ -213,17 +233,18 @@ inline std::string env_str(const char* name, const char* def) {
   }
 
   // Demodulation — RF_RSYM/RF_FDEV are canonical; fall back to legacy RSYM/FDEV
-  // for deployments that have not yet migrated their config files.
+  // for deployments that have not yet migrated their config files.  If the
+  // canonical variable is present but non-numeric, emit a warning and fall
+  // through to the legacy name so a misconfigured canonical does not silently
+  // shadow a valid legacy value.
 #ifdef HAVE_LIQUID
   {
-    const char* rsym_canonical = std::getenv("RF_RSYM");
-    cfg.rsym = (rsym_canonical != nullptr && *rsym_canonical != '\0')
-                   ? detail::env_d("RF_RSYM", 128'000.0)
-                   : detail::env_d("RSYM", 128'000.0);
-    const char* fdev_canonical = std::getenv("RF_FDEV");
-    cfg.fdev = (fdev_canonical != nullptr && *fdev_canonical != '\0')
-                   ? detail::env_d("RF_FDEV", 50'000.0)
-                   : detail::env_d("FDEV", 50'000.0);
+    if (!detail::try_env_d("RF_RSYM", cfg.rsym) &&
+        !detail::try_env_d("RSYM", cfg.rsym))
+      cfg.rsym = 128'000.0;
+    if (!detail::try_env_d("RF_FDEV", cfg.fdev) &&
+        !detail::try_env_d("FDEV", cfg.fdev))
+      cfg.fdev = 50'000.0;
   }
 #else
   {
