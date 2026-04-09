@@ -125,8 +125,7 @@ inline bool try_env_d(const char* name, double& out) noexcept {
     // to std::isspace is undefined behaviour.
     for (; v[idx] != '\0'; ++idx) {
       if (!std::isspace(static_cast<unsigned char>(v[idx]))) {
-        std::cerr << "[CFG] WARN: " << name << "='" << v
-                  << "' is not a valid number — ignored\n";
+        std::cerr << "[CFG] WARN: " << name << "='" << v << "' is not a valid number — ignored\n";
         return false;
       }
     }
