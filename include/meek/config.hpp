@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -106,6 +107,39 @@ inline double env_d(const char* name, double def) noexcept {
 inline std::string env_str(const char* name, const char* def) {
   const char* v = std::getenv(name);
   return v ? std::string(v) : std::string(def);
+}
+
+/// Try to parse *name* as a double.  Returns the parsed value via *out* and
+/// true on success; returns false (and leaves *out* unchanged) if the variable
+/// is unset, empty, or does not parse as a valid number.  Used for canonical/
+/// legacy fallback chains where a present-but-invalid canonical must not
+/// silently shadow a valid legacy value.
+inline bool try_env_d(const char* name, double& out) noexcept {
+  const char* v = std::getenv(name);
+  if (!v || *v == '\0')
+    return false;
+  try {
+    std::size_t idx = 0;
+    double parsed = std::stod(v, &idx);
+    // Reject trailing non-whitespace (e.g. "128000junk") — same policy as parse_arg().
+    // Cast to unsigned char: on platforms where char is signed, passing a negative value
+    // to std::isspace is undefined behaviour.
+    for (; v[idx] != '\0'; ++idx) {
+      if (!std::isspace(static_cast<unsigned char>(v[idx]))) {
+        std::cerr << "[CFG] WARN: " << name << "='" << v << "' is not a valid number — ignored\n";
+        return false;
+      }
+    }
+    if (!std::isfinite(parsed)) {
+      std::cerr << "[CFG] WARN: " << name << "='" << v << "' is not a finite number — ignored\n";
+      return false;
+    }
+    out = parsed;
+    return true;
+  } catch (...) {
+    std::cerr << "[CFG] WARN: " << name << "='" << v << "' is not a valid number — ignored\n";
+    return false;
+  }
 }
 
 }  // namespace detail
@@ -212,16 +246,29 @@ inline std::string env_str(const char* name, const char* def) {
     cfg.snapshot_conf = cfg.conf_threshold;
   }
 
-  // Demodulation
+  // Demodulation — RF_RSYM/RF_FDEV are canonical; fall back to legacy RSYM/FDEV
+  // for deployments that have not yet migrated their config files.  If the
+  // canonical variable is present but non-numeric, emit a warning and fall
+  // through to the legacy name so a misconfigured canonical does not silently
+  // shadow a valid legacy value.
 #ifdef HAVE_LIQUID
-  cfg.rsym = detail::env_d("RSYM", 128'000.0);
-  cfg.fdev = detail::env_d("FDEV", 50'000.0);
+  {
+    if (!detail::try_env_d("RF_RSYM", cfg.rsym) && !detail::try_env_d("RSYM", cfg.rsym))
+      cfg.rsym = 128'000.0;
+    if (!detail::try_env_d("RF_FDEV", cfg.fdev) && !detail::try_env_d("FDEV", cfg.fdev))
+      cfg.fdev = 50'000.0;
+  }
 #else
   {
-    const char* rsym_env = std::getenv("RSYM");
-    const char* fdev_env = std::getenv("FDEV");
+    const char* rsym_env = std::getenv("RF_RSYM");
+    if (!rsym_env || *rsym_env == '\0')
+      rsym_env = std::getenv("RSYM");
+    const char* fdev_env = std::getenv("RF_FDEV");
+    if (!fdev_env || *fdev_env == '\0')
+      fdev_env = std::getenv("FDEV");
     if ((rsym_env && *rsym_env != '\0') || (fdev_env && *fdev_env != '\0'))
-      std::cerr << "[CFG] WARN: RSYM/FDEV set but liquid-dsp not compiled in — ignored\n";
+      std::cerr << "[CFG] WARN: RF_RSYM/RF_FDEV (or legacy RSYM/FDEV) set but liquid-dsp not "
+                   "compiled in — ignored\n";
   }
 #endif  // HAVE_LIQUID
 

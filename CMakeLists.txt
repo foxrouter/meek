@@ -264,6 +264,16 @@ target_include_directories(iq_metrics PRIVATE ${MEEK_INCLUDE_DIR})
 target_link_libraries(iq_metrics PRIVATE nlohmann_json::nlohmann_json)
 target_compile_options(iq_metrics PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
+# Optional: enable host-CPU auto-vectorisation (AVX2/NEON) for iq_metrics.
+# OFF by default so release artifacts remain portable across CPU generations.
+# Enable with:  cmake -DIQ_METRICS_NATIVE=ON ...
+option(IQ_METRICS_NATIVE "Build iq_metrics with -march=native (host-CPU-specific, non-portable)" OFF)
+if(IQ_METRICS_NATIVE)
+  target_compile_options(iq_metrics PRIVATE
+    $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-march=native>)
+  message(STATUS "iq_metrics: -march=native enabled for Release/RelWithDebInfo (IQ_METRICS_NATIVE=ON)")
+endif()
+
 install(TARGETS iq_metrics
   RUNTIME DESTINATION bin
   PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE

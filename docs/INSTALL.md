@@ -355,8 +355,8 @@ Key settings to review:
 | `RF_WORKER_LOG` | `/var/lib/rf-adapt-intel/worker.log` | JSON log file |
 | `RF_PROMETHEUS_PORT` | `0` | Port for the optional Prometheus HTTP `/metrics` endpoint. `0` = disabled (textfile only). Requires build with `HAVE_HTTPLIB`. |
 | `PAPR_MAX` | `0` | Maximum PAPR gate in dB. `0` = disabled. Set via `Environment=PAPR_MAX=<value>` in the systemd drop-in (`process-worker.service.d/override.conf`) or export the variable before starting the worker manually. |
-| `RSYM` | `128000` | Symbol rate (symbols/sec, baud). Used by the liquid-dsp demodulation chains. Only active when built with `HAVE_LIQUID`. |
-| `FDEV` | `50000` | FSK frequency deviation (Hz). Used by the FSK demod chain. Only active when built with `HAVE_LIQUID`. |
+| `RF_RSYM` | `128000` | Symbol rate (symbols/sec, baud). Used by the liquid-dsp demodulation chains. Only active when built with `HAVE_LIQUID`. |
+| `RF_FDEV` | `50000` | FSK frequency deviation (Hz). Used by the FSK demod chain. Only active when built with `HAVE_LIQUID`. |
 | `MOD_HINT` | *(unset)* | Classifier prior hint. Valid values: `fsk`, `gmsk`, `psk`, `qam`, `ook`, `am`, `cw`. Adds +0.10 to the named class score. |
 
 > **Note — configuration load order:** `Environment=` lines in

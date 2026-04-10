@@ -722,5 +722,214 @@ class TestDemodLockMsSentinel(unittest.TestCase):
         self.assertGreater(1, self._SENTINEL_DEFAULT)
 
 
+# ---------------------------------------------------------------------------
+# DB-01: center_freq_hz column and index regression tests
+# ---------------------------------------------------------------------------
+
+class TestCenterFreqHz(unittest.TestCase):
+    """DB-01: signals.center_freq_hz must be present in the schema and the
+    idx_signals_center_freq_hz partial index must exist after schema apply/
+    migration, mirroring the DATA-01 tests for timestamp_ns.
+
+    Driven from the actual DDL in include/meek/db.hpp so that any schema
+    change that drops the column or index causes CI to fail immediately."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._db_path = str(Path(self._tmp) / "center_freq_test.db")
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _apply_schema_with_center_freq(self, conn: sqlite3.Connection) -> None:
+        """Apply the real db.hpp schema + indexes, then run the center_freq_hz
+        migration and create its post-migration index — replicating the startup
+        sequence of Database::apply_schema()."""
+        conn.executescript(_extract_schema_sql())
+        conn.executescript(_extract_indexes_ddl())
+        # center_freq_hz migration — duplicate-column error is expected on fresh
+        # DBs where kSchema already includes the column.
+        try:
+            conn.execute("ALTER TABLE signals ADD COLUMN center_freq_hz REAL")
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            self.assertIn("duplicate column name", msg,
+                          f"Unexpected OperationalError from ALTER TABLE: {exc}")
+            self.assertIn("center_freq_hz", msg,
+                          f"Unexpected OperationalError from ALTER TABLE: {exc}")
+        conn.executescript(
+            "CREATE INDEX IF NOT EXISTS idx_signals_center_freq_hz "
+            "ON signals(center_freq_hz) WHERE center_freq_hz IS NOT NULL;"
+        )
+        conn.commit()
+
+    def test_center_freq_hz_column_in_real_schema(self):
+        """db.hpp kSchema must define center_freq_hz on the signals table."""
+        ddl = _extract_schema_sql()
+        self.assertIn(
+            "center_freq_hz",
+            ddl,
+            "signals.center_freq_hz column absent from db.hpp kSchema — "
+            "DB-01 regression: column was removed from the C++ schema",
+        )
+
+    def test_center_freq_hz_index_in_real_schema(self):
+        """db.hpp must contain idx_signals_center_freq_hz somewhere in its body."""
+        content = _db_hpp_content()
+        self.assertIn(
+            "idx_signals_center_freq_hz",
+            content,
+            "idx_signals_center_freq_hz absent from db.hpp — "
+            "DB-01 regression: index was removed from the C++ schema",
+        )
+
+    def test_center_freq_hz_roundtrip(self):
+        """center_freq_hz written to the DB must be retrieved unchanged."""
+        conn = sqlite3.connect(self._db_path)
+        self._apply_schema_with_center_freq(conn)
+        freq_hz = 433_920_000.0
+        conn.execute(
+            "INSERT INTO signals(source, notes, center_freq_hz) VALUES(?,?,?)",
+            ("rf_adapt_intel", "test_trace", freq_hz),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT center_freq_hz FROM signals ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        self.assertIsNotNone(row)
+        self.assertAlmostEqual(
+            row[0], freq_hz, places=1,
+            msg=f"center_freq_hz round-trip failed: stored {freq_hz}, retrieved {row[0]}",
+        )
+
+    def test_center_freq_hz_index_exists_after_schema_apply(self):
+        """idx_signals_center_freq_hz must be present after applying the real
+        db.hpp DDL — DB-01 schema regression check."""
+        conn = sqlite3.connect(self._db_path)
+        self._apply_schema_with_center_freq(conn)
+        row = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='index' AND name='idx_signals_center_freq_hz'"
+        ).fetchone()
+        conn.close()
+        self.assertIsNotNone(
+            row,
+            "idx_signals_center_freq_hz index missing after applying real "
+            "db.hpp DDL — DB-01 schema regression",
+        )
+
+    def test_center_freq_hz_migration_on_legacy_db(self):
+        """Upgrading a legacy DB (without center_freq_hz) must add the column
+        and create the post-migration index."""
+        conn = sqlite3.connect(self._db_path)
+        # Legacy schema: no center_freq_hz column
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS signals (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                source    TEXT,
+                notes     TEXT
+            );
+        """)
+        conn.commit()
+        # Run migration
+        try:
+            conn.execute("ALTER TABLE signals ADD COLUMN center_freq_hz REAL")
+        except sqlite3.OperationalError as exc:
+            self.fail(f"Migration failed on legacy DB: {exc}")
+        conn.executescript(
+            "CREATE INDEX IF NOT EXISTS idx_signals_center_freq_hz "
+            "ON signals(center_freq_hz) WHERE center_freq_hz IS NOT NULL;"
+        )
+        conn.commit()
+        # Assert column present
+        info = conn.execute("PRAGMA table_info(signals)").fetchall()
+        col_names = [row[1] for row in info]
+        self.assertIn(
+            "center_freq_hz", col_names,
+            "center_freq_hz column missing after migration on legacy DB",
+        )
+        # Assert index present
+        row = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='index' AND name='idx_signals_center_freq_hz'"
+        ).fetchone()
+        conn.close()
+        self.assertIsNotNone(
+            row,
+            "idx_signals_center_freq_hz index missing after migration on legacy DB",
+        )
+
+    def test_null_center_freq_hz_excluded_from_index(self):
+        """Rows with NULL center_freq_hz must not appear in an index scan;
+        the partial index is declared WHERE center_freq_hz IS NOT NULL.
+
+        Three assertions:
+        1. The partial index exists in sqlite_master with the expected
+           WHERE center_freq_hz IS NOT NULL predicate (deterministic; avoids
+           relying on EXPLAIN QUERY PLAN output which can vary across SQLite
+           versions or choose a full scan on small tables).
+        2. An equality query returns only the non-NULL row (correctness
+           check that the index is functional for non-NULL lookups).
+        3. The NULL row is still returned by the IS NULL query.
+        """
+        conn = sqlite3.connect(self._db_path)
+        self._apply_schema_with_center_freq(conn)
+        # Insert one row with NULL and one with a value
+        conn.execute(
+            "INSERT INTO signals(source, notes, center_freq_hz) VALUES(?,?,?)",
+            ("rf_adapt_intel", "no_freq", None),
+        )
+        conn.execute(
+            "INSERT INTO signals(source, notes, center_freq_hz) VALUES(?,?,?)",
+            ("rf_adapt_intel", "with_freq", 868_000_000.0),
+        )
+        conn.commit()
+
+        # Assertion 1: the partial index exists and carries the IS NOT NULL
+        # predicate — inspect sqlite_master rather than EXPLAIN QUERY PLAN so
+        # the check is stable across SQLite versions and table sizes.
+        index_row = conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'index' AND name = 'idx_signals_center_freq_hz';"
+        ).fetchone()
+        self.assertIsNotNone(
+            index_row,
+            "Expected partial index idx_signals_center_freq_hz to exist",
+        )
+        index_sql = index_row[0] or ""
+        self.assertRegex(
+            index_sql,
+            r"(?is)where\s+center_freq_hz\s+is\s+not\s+null",
+            f"Expected idx_signals_center_freq_hz to be partial with "
+            f"WHERE center_freq_hz IS NOT NULL; got: {index_sql!r}",
+        )
+
+        # Assertion 2: equality query returns only the non-NULL row.
+        eq_rows = conn.execute(
+            "SELECT notes FROM signals WHERE center_freq_hz = 868000000.0;"
+        ).fetchall()
+        self.assertEqual(
+            eq_rows,
+            [("with_freq",)],
+            f"Expected only the non-NULL row for equality query, got {eq_rows!r}",
+        )
+
+        # Assertion 3: the NULL row is still returned by the IS NULL query.
+        null_rows = conn.execute(
+            "SELECT notes FROM signals WHERE center_freq_hz IS NULL;"
+        ).fetchall()
+        conn.close()
+        self.assertEqual(
+            len(null_rows), 1,
+            f"Expected exactly one row with NULL center_freq_hz, got {len(null_rows)}",
+        )
+        self.assertEqual(
+            null_rows[0][0], "no_freq",
+            f"Expected notes='no_freq' for the NULL row, got {null_rows[0][0]!r}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

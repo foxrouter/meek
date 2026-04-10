@@ -583,7 +583,7 @@ inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& c
     // For envelope (OOK/AM) demod, demod_lock_ms uses -1 to mean "N/A" whenever
     // this demod path runs, regardless of CRC outcome.
     cr.demod_soft_bits.clear();
-    cr.demod_lock_ms = 0;
+    cr.demod_lock_ms = -1;
     cr.demod_cfo_hz = 0.0f;
     cr.demod_phase_error = 0.0f;
     cr.demod_status = DemodStatus::LOCK_FAIL;
@@ -671,7 +671,7 @@ inline void demod_ook_am(std::span<const std::complex<float>> s, const Config& c
   } catch (...) {
     // Ensure demod-related fields are consistent on exception paths.
     cr.demod_status = DemodStatus::LOCK_FAIL;
-    cr.demod_lock_ms = 0;
+    cr.demod_lock_ms = -1;
     cr.demod_soft_bits.clear();
     cr.demod_cfo_hz = 0.0f;
     cr.demod_phase_error = 0.0f;

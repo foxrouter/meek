@@ -31,6 +31,7 @@
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -139,6 +140,14 @@ static IqMetrics compute_metrics(const std::vector<std::complex<float>>& samples
 // File I/O
 // ---------------------------------------------------------------------------
 
+// Compile-time layout guarantees required by the direct-read path in read_cf32.
+// std::complex<float> must be layout-compatible with two contiguous floats
+// (C++11 §26.4/4) and trivially copyable so a binary read into it is safe.
+static_assert(sizeof(std::complex<float>) == 2 * sizeof(float),
+              "std::complex<float> must be exactly two floats for direct CF32 binary read");
+static_assert(std::is_trivially_copyable_v<std::complex<float>>,
+              "std::complex<float> must be trivially copyable for direct CF32 binary read");
+
 /// Read an entire CF32 (interleaved float32) file into a complex<float> vector.
 /// Returns empty vector on error.
 static std::vector<std::complex<float>> read_cf32(const std::string& path) {
@@ -154,14 +163,16 @@ static std::vector<std::complex<float>> read_cf32(const std::string& path) {
   }
   f.seekg(0);
   const size_t n = static_cast<size_t>(bytes) / 8;
-  std::vector<float> raw(n * 2);
-  if (!f.read(reinterpret_cast<char*>(raw.data()),
-              static_cast<std::streamsize>(raw.size() * sizeof(float)))) {
+  std::vector<std::complex<float>> out(n);
+  // std::complex<float> has the same layout as float[2] (C++11 §26.4/4),
+  // verified by the static_asserts above.  Read the interleaved CF32 stream
+  // directly into the output vector without an intermediate raw-float buffer.
+  // Read size is derived from the actual vector element to avoid any mismatch.
+  if (!f.read(reinterpret_cast<char*>(out.data()),
+              static_cast<std::streamsize>(out.size() * sizeof(out[0])))) {
     std::cerr << "iq_metrics: read error on '" << path << "'\n";
     return {};
   }
-  std::vector<std::complex<float>> out(n);
-  for (size_t i = 0; i < n; ++i) out[i] = {raw[2 * i], raw[2 * i + 1]};
   return out;
 }
 
